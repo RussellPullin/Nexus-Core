@@ -6,6 +6,13 @@ import { findShifterOrganizationByName, getSupabaseServiceRoleClient } from './s
 
 const PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
 
+const PROFILE_SELECT = 'id, email, org_id, role, shifter_enabled';
+
+/** Escape `%`, `_`, `\` so `ilike` treats the string as a literal (case-insensitive equality). */
+function escapeIlikeLiteral(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
 export function mapProfileRoleToSqliteRole(profileRole) {
   const r = String(profileRole || '').trim();
   if (r === 'Admin' || r === 'Manager') return 'admin';
@@ -17,7 +24,7 @@ export async function fetchSupabaseProfile(userId) {
   if (!admin) return null;
   const { data, error } = await admin
     .from('profiles')
-    .select('id, email, org_id, role, shifter_enabled')
+    .select(PROFILE_SELECT)
     .eq('id', userId)
     .maybeSingle();
   if (error) {
@@ -34,8 +41,8 @@ export async function fetchSupabaseProfileByEmail(email) {
   if (!norm) return null;
   const { data, error } = await admin
     .from('profiles')
-    .select('id, email, org_id, role, shifter_enabled')
-    .eq('email', norm)
+    .select(PROFILE_SELECT)
+    .ilike('email', escapeIlikeLiteral(norm))
     .maybeSingle();
   if (error) {
     console.warn('[nexusSupabaseAuth] profile fetch by email', error.message);
@@ -98,8 +105,6 @@ export function upsertSqliteUserFromSupabase({ sub, email, profile }) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
-const PROFILE_SELECT = 'id, email, org_id, role, shifter_enabled';
-
 /**
  * After Supabase password/session: sync profile + SQLite and return session fields.
  * Looks up by auth user id first; if missing, by email (handles legacy rows where profiles.id ≠ auth.users.id).
@@ -107,12 +112,19 @@ const PROFILE_SELECT = 'id, email, org_id, role, shifter_enabled';
 export async function completeSupabaseSignIn(accessToken) {
   const payload = await verifySupabaseAccessToken(accessToken);
   const sub = payload.sub;
-  const email = String(payload.email || '').trim().toLowerCase();
+  let email = String(payload.email || '').trim().toLowerCase();
   const admin = getSupabaseServiceRoleClient();
   if (!admin) {
     const err = new Error('Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
     err.code = 'SUPABASE_NOT_CONFIGURED';
     throw err;
+  }
+
+  if (!email && sub) {
+    const { data: authRow, error: authErr } = await admin.auth.admin.getUserById(sub);
+    if (!authErr && authRow?.user?.email) {
+      email = String(authRow.user.email).trim().toLowerCase();
+    }
   }
 
   const { data: byId, error: errById } = await admin
@@ -132,7 +144,7 @@ export async function completeSupabaseSignIn(accessToken) {
     const { data: byEmail, error: errByEmail } = await admin
       .from('profiles')
       .select(PROFILE_SELECT)
-      .eq('email', email)
+      .ilike('email', escapeIlikeLiteral(email))
       .maybeSingle();
     if (errByEmail) {
       console.error('[nexusSupabaseAuth] profile by email', email, errByEmail.message);
@@ -155,6 +167,7 @@ export async function completeSupabaseSignIn(accessToken) {
   }
 
   if (!profile) {
+    console.warn('[nexusSupabaseAuth] NO_PROFILE sub=', sub, 'email_used=', email || '(empty)');
     const err = new Error(
       [
         'No matching row in public.profiles for this login.',
