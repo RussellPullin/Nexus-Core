@@ -1,0 +1,30 @@
+{
+  "name": "schedule-shift-app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "npx concurrently \"npm run server\" \"npm run client\"",
+    "start:ollama": "bash start-ollama.sh",
+    "start:all": "npm run start:ollama && npm start",
+    "start:prod": "node server/src/index.js",
+    "deploy:build": "npm install && cd client && npm install && cd .. && npm run build",
+    "deploy:start": "NODE_ENV=production node server/src/index.js",
+    "deploy:gen-secret": "node scripts/generate-session-secret.mjs",
+    "dev": "npx concurrently \"npm run server\" \"npm run client\"",
+    "client": "cd client && npm run dev",
+    "server": "PORT=3080 DOTENV_CONFIG_PATH=./.env node --watch -r ./server/node_modules/dotenv/config server/src/index.js",
+    "build": "cd client && npm run build",
+    "postinstall": "cd server && npm install",
+    "clear-ndis": "node server/scripts/clear-ndis-line-items.js",
+    "renew-onboarding": "node server/scripts/run-onboarding-renewals.js",
+    "staff-cert-reminders": "node server/scripts/run-staff-certification-reminders.js",
+    "reset-password": "node server/scripts/reset-password.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

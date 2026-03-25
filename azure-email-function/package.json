@@ -1,0 +1,16 @@
+{
+  "name": "azure-email-function",
+  "version": "1.0.0",
+  "description": "Azure Function to send email via Microsoft Graph API",
+  "main": "src/functions/sendEmail.js",
+  "scripts": {
+    "start": "func start",
+    "test": "echo \"No tests specified\""
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

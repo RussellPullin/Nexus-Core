@@ -1,0 +1,233 @@
+"Invoice","Recipient Name","Recipient Email","Invoice Date","Due Date","Team Member","Team Member External ID","Participant Name","Participant NDIS Number","Participant External ID","Management Type","Item Date","Item Number","Item Name","Item Claim Type","Item Claim Code","Item Cancellation Reason","Item Cancellation Code","Item Description","Quantity","Item Price","GST Amount","Total Amount","GST Code"
+"I-121-0626","Parent to Parent","ndisfinance@p2pqld.org.au","15/02/2026","22/02/2026","Kathy Hayes","","Michael Duke","430648523","","Plan","09/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Direct Service","","","","Michael Duke
+430648523
+
+09/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Direct Service","5","70.23","","351.15","GST Free Income"
+"I-121-0626","Parent to Parent","ndisfinance@p2pqld.org.au","15/02/2026","22/02/2026","Kathy Hayes","","Michael Duke","430648523","","Plan","09/02/2026","04_590_0125_6_1","Activity Based Transport","Direct Service","","","","Michael Duke
+430648523
+
+09/02/2026
+
+04_590_0125_6_1
+Activity Based Transport
+Direct Service","22","1","","22","GST Free Income"
+"I-121-0626","Parent to Parent","ndisfinance@p2pqld.org.au","15/02/2026","22/02/2026","Kathy Hayes","","Michael Duke","430648523","","Plan","09/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Direct Service","","","","Michael Duke
+430648523
+
+09/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Direct Service","0.75","70.23","","52.67","GST Free Income"
+"I-121-0626","Parent to Parent","ndisfinance@p2pqld.org.au","15/02/2026","22/02/2026","Kathy Hayes","","Michael Duke","430648523","","Plan","11/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Direct Service","","","","Michael Duke
+430648523
+
+11/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Direct Service","2","70.23","","140.46","GST Free Income"
+"I-121-0626","Parent to Parent","ndisfinance@p2pqld.org.au","15/02/2026","22/02/2026","Kathy Hayes","","Michael Duke","430648523","","Plan","11/02/2026","04_590_0125_6_1","Activity Based Transport","Direct Service","","","","Michael Duke
+430648523
+
+11/02/2026
+
+04_590_0125_6_1
+Activity Based Transport
+Direct Service","56","1","","56","GST Free Income"
+"I-121-0626","Parent to Parent","ndisfinance@p2pqld.org.au","15/02/2026","22/02/2026","Kathy Hayes","","Michael Duke","430648523","","Plan","11/02/2026","15_053_0128_1_3","Therapy Assistant - Level 2","Direct Service","","","","Michael Duke
+430648523
+
+11/02/2026
+
+15_053_0128_1_3
+Therapy Assistant - Level 2
+Direct Service","1","86.79","","86.79","GST Free Income"
+"I-121-0626","Parent to Parent","ndisfinance@p2pqld.org.au","15/02/2026","22/02/2026","Kathy Hayes","","Michael Duke","430648523","","Plan","11/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Direct Service","","","","Michael Duke
+430648523
+
+11/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Direct Service","0.75","70.23","","52.67","GST Free Income"
+"I-121-0627","Tweed coast plan management","accounts@tweedcoastplanmanagement.com.au","15/02/2026","22/02/2026","Kathy Hayes","","tanya Hatfield","430725817","","Plan","10/02/2026","07_002_0106_8_3","Support Coordination Level 2: Coordination of Supports","Direct Service","","","","tanya Hatfield
+430725817
+
+10/02/2026
+
+07_002_0106_8_3
+Support Coordination Level 2: Coordination of Supports
+Direct Service","0.25","100.14","","25.04","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","09/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Direct Service","","","","Robert Purdue
+431969751
+
+09/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Direct Service","6.5","70.23","","456.5","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","09/02/2026","04_103_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Evening","Direct Service","","","","Robert Purdue
+431969751
+
+09/02/2026
+
+04_103_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Evening
+Direct Service","4","77.38","","309.52","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","09/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Provider Travel","TRAN","","","Robert Purdue
+431969751
+
+09/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Provider Travel","1","70.23","","70.23","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","09/02/2026","04_590_0125_6_1","Activity Based Transport","Direct Service","","","","Robert Purdue
+431969751
+
+09/02/2026
+
+04_590_0125_6_1
+Activity Based Transport
+Direct Service","15","1","","15","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","12/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Direct Service","","","","Robert Purdue
+431969751
+
+12/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Direct Service","6.5","70.23","","456.5","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","12/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Provider Travel","TRAN","","","Robert Purdue
+431969751
+
+12/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Provider Travel","1","70.23","","70.23","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","12/02/2026","04_590_0125_6_1","Activity Based Transport","Direct Service","","","","Robert Purdue
+431969751
+
+12/02/2026
+
+04_590_0125_6_1
+Activity Based Transport
+Direct Service","3","1","","3","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","12/02/2026","04_103_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Evening","Direct Service","","","","Robert Purdue
+431969751
+
+12/02/2026
+
+04_103_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Evening
+Direct Service","4","77.38","","309.52","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","14/02/2026","04_105_0125_6_1","Access Community Social and Rec Activ - Standard - Saturday","Direct Service","","","","Robert Purdue
+431969751
+
+14/02/2026
+
+04_105_0125_6_1
+Access Community Social and Rec Activ - Standard - Saturday
+Direct Service","6.5","98.83","","642.4","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","14/02/2026","04_105_0125_6_1","Access Community Social and Rec Activ - Standard - Saturday","Provider Travel","TRAN","","","Robert Purdue
+431969751
+
+14/02/2026
+
+04_105_0125_6_1
+Access Community Social and Rec Activ - Standard - Saturday
+Provider Travel","1","98.83","","98.83","GST Free Income"
+"I-121-0628","Pacific plan management","accounts@pacificplan.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Robert Purdue","431969751","","Plan","14/02/2026","04_590_0125_6_1","Activity Based Transport","Direct Service","","","","Robert Purdue
+431969751
+
+14/02/2026
+
+04_590_0125_6_1
+Activity Based Transport
+Direct Service","20","1","","20","GST Free Income"
+"I-121-0629","My plan assist","invoices@myplanassist.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Kruise Cupra","432217085","","Plan","13/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Direct Service","","","","Kruise Cupra
+432217085
+
+13/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Direct Service","4.75","70.23","","333.59","GST Free Income"
+"I-121-0629","My plan assist","invoices@myplanassist.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Kruise Cupra","432217085","","Plan","13/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Provider Travel","TRAN","","","Kruise Cupra
+432217085
+
+13/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Provider Travel","1","70.23","","70.23","GST Free Income"
+"I-121-0629","My plan assist","invoices@myplanassist.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Kruise Cupra","432217085","","Plan","13/02/2026","04_590_0125_6_1","Activity Based Transport","Direct Service","","","","Kruise Cupra
+432217085
+
+13/02/2026
+
+04_590_0125_6_1
+Activity Based Transport
+Direct Service","55","1","","55","GST Free Income"
+"I-121-0630","Sam Barnes","annesearle99@gmail.com","15/02/2026","22/02/2026","Kathy Hayes","","Sam Barnes","432117539","","Self","11/02/2026","10_021_0102_5_3","School Leaver Employment Supports","Direct Service","","","","Sam Barnes
+432117539
+
+11/02/2026
+
+10_021_0102_5_3
+School Leaver Employment Supports
+Direct Service","1","520.39","","520.39","GST Free Income"
+"I-121-0630","Sam Barnes","annesearle99@gmail.com","15/02/2026","22/02/2026","Kathy Hayes","","Sam Barnes","432117539","","Self","13/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Cancellation","CANC","Other","NSDO","Sam Barnes
+432117539
+
+13/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Cancellation - Other","3","70.23","","210.69","GST Free Income"
+"I-121-0631","My plan manager","accounts@myplanmanager.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Daniel Anderson","431516976","","Plan","11/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Direct Service","","","","Daniel Anderson
+431516976
+
+11/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Direct Service","3","70.23","","210.69","GST Free Income"
+"I-121-0631","My plan manager","accounts@myplanmanager.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Daniel Anderson","431516976","","Plan","11/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Provider Travel","TRAN","","","Daniel Anderson
+431516976
+
+11/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Provider Travel","0.5","70.23","","35.12","GST Free Income"
+"I-121-0631","My plan manager","accounts@myplanmanager.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Daniel Anderson","431516976","","Plan","11/02/2026","04_590_0125_6_1","Activity Based Transport","Direct Service","","","","Daniel Anderson
+431516976
+
+11/02/2026
+
+04_590_0125_6_1
+Activity Based Transport
+Direct Service","11","1","","11","GST Free Income"
+"I-121-0631","My plan manager","accounts@myplanmanager.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Daniel Anderson","431516976","","Plan","13/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Direct Service","","","","Daniel Anderson
+431516976
+
+13/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Direct Service","3","70.23","","210.69","GST Free Income"
+"I-121-0631","My plan manager","accounts@myplanmanager.com.au","15/02/2026","22/02/2026","Kathy Hayes","","Daniel Anderson","431516976","","Plan","13/02/2026","04_104_0125_6_1","Access Community Social and Rec Activ - Standard - Weekday Daytime","Provider Travel","TRAN","","","Daniel Anderson
+431516976
+
+13/02/2026
+
+04_104_0125_6_1
+Access Community Social and Rec Activ - Standard - Weekday Daytime
+Provider Travel","0.5","70.23","","35.12","GST Free Income"

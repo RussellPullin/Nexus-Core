@@ -1,0 +1,4 @@
+name,ndis_number,email,phone,address,date_of_birth,management_type,plan_manager,diagnosis,parent_guardian_phone,parent_guardian_email,notes
+John Smith,123456789,john@example.com,0412345678,123 Main St Sydney NSW 2000,1990-05-15,self,,Autism spectrum,,,
+Jane Doe,987654321,jane@example.com,0498765432,456 Oak Ave Melbourne VIC 3000,1985-11-20,plan,Parent to Parent,,0400111222,jane.parent@example.com,
+Bob Wilson,,bob@example.com,0422334455,,1980-01-01,ndia,,,,
