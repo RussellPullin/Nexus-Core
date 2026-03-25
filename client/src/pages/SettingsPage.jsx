@@ -520,10 +520,107 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {canManageUsers && <ShifterOrgLinkCard />}
       {canManageUsers && <ScheduleShiftAppLinkCard />}
       {canManageUsers && <BusinessSetup />}
       <LearningSettings />
       </div>
+    </div>
+  );
+}
+
+function ShifterOrgLinkCard() {
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState('');
+  const [shifterName, setShifterName] = useState('');
+  const [linkInfo, setLinkInfo] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await auth.getShifterOrgLink();
+      setLinkInfo(data || null);
+    } catch {
+      setLinkInfo(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const onLink = async () => {
+    const name = shifterName.trim();
+    if (!name) {
+      setMsg('Enter your Shifter organisation name first.');
+      return;
+    }
+    setMsg('');
+    setBusy(true);
+    try {
+      await auth.linkShifterOrg(name);
+      await load();
+      setMsg('Shifter organisation linked.');
+      setShifterName('');
+    } catch (err) {
+      setMsg(err.message || 'Could not link Shifter organisation');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onUnlink = async () => {
+    setMsg('');
+    setBusy(true);
+    try {
+      await auth.unlinkShifterOrg();
+      await load();
+      setMsg('Shifter organisation link removed.');
+    } catch (err) {
+      setMsg(err.message || 'Could not unlink Shifter organisation');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Shifter organisation link</h3>
+      <p className="settings-desc">
+        Your Nexus Core organisation is created independently. Link to Shifter here when you are ready.
+      </p>
+      <div className="form-group">
+        <label>Current status</label>
+        {loading ? (
+          <div className="form-hint">Loading…</div>
+        ) : linkInfo?.linked ? (
+          <div className="settings-success">Linked to Shifter org ID: {linkInfo.shifter_organization_id}</div>
+        ) : (
+          <div className="form-hint">Not linked</div>
+        )}
+      </div>
+      <div className="form-group">
+        <label>Shifter organisation name</label>
+        <input
+          className="form-input"
+          type="text"
+          value={shifterName}
+          onChange={(e) => setShifterName(e.target.value)}
+          placeholder="Exact name used in Shifter"
+        />
+      </div>
+      <div className="settings-buttons">
+        <button type="button" className="btn btn-primary" onClick={onLink} disabled={busy || loading}>
+          {busy ? 'Saving...' : 'Link to Shifter'}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={onUnlink} disabled={busy || loading || !linkInfo?.linked}>
+          Unlink
+        </button>
+      </div>
+      {msg && <div className={msg.toLowerCase().includes('linked') && !msg.toLowerCase().includes('could not') ? 'settings-success' : 'settings-error'} style={{ marginTop: '0.75rem' }}>{msg}</div>}
     </div>
   );
 }

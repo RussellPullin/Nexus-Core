@@ -84,7 +84,11 @@ export const auth = {
   supabaseRegisterOrg: (access_token, organization_name) =>
     fetchApi('/auth/supabase/register-org', { method: 'POST', body: JSON.stringify({ access_token, organization_name }) }),
   supabaseInviteStaff: (email, full_name) =>
-    fetchApi('/auth/supabase/invite-staff', { method: 'POST', body: JSON.stringify({ email, full_name: full_name || undefined }) })
+    fetchApi('/auth/supabase/invite-staff', { method: 'POST', body: JSON.stringify({ email, full_name: full_name || undefined }) }),
+  getShifterOrgLink: () => fetchApi('/auth/supabase/shifter-org-link'),
+  linkShifterOrg: (shifter_org_name) =>
+    fetchApi('/auth/supabase/link-shifter-org', { method: 'POST', body: JSON.stringify({ shifter_org_name }) }),
+  unlinkShifterOrg: () => fetchApi('/auth/supabase/unlink-shifter-org', { method: 'POST' })
 };
 
 function parseJsonSafe(text) {

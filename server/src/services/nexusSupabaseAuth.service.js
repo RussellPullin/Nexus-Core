@@ -2,7 +2,7 @@ import bcrypt from 'bcrypt';
 import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { verifySupabaseAccessToken } from '../lib/supabaseJwt.js';
-import { findShifterOrganizationByName, getSupabaseServiceRoleClient } from './supabaseStaffShifter.service.js';
+import { getSupabaseServiceRoleClient } from './supabaseStaffShifter.service.js';
 
 const PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
 
@@ -262,7 +262,14 @@ export async function registerOrganizationForUser({ accessToken, organizationNam
     throw err;
   }
 
-  const existing = await fetchSupabaseProfile(sub);
+  const actorUserId = String(sub || payload?.user_id || '').trim().toLowerCase();
+  if (!actorUserId) {
+    const err = new Error('Authenticated Supabase user id is missing in token; please sign in again.');
+    err.code = 'AUTH_INVALID';
+    throw err;
+  }
+
+  const existing = await fetchSupabaseProfile(actorUserId);
   if (existing?.org_id) {
     const err = new Error('This account already belongs to an organisation');
     err.code = 'ORG_ALREADY_SET';
@@ -276,56 +283,42 @@ export async function registerOrganizationForUser({ accessToken, organizationNam
     throw err;
   }
 
-  const shifterOrg = await findShifterOrganizationByName(name);
   let orgId = null;
 
-  if (shifterOrg?.id) {
-    const { data: byId, error: byIdErr } = await admin
-      .from('organizations')
-      .select('id')
-      .eq('id', shifterOrg.id)
-      .maybeSingle();
-    if (byIdErr) {
-      const err = new Error(byIdErr.message || 'Failed to verify organisation in Supabase');
-      err.code = 'SUPABASE_ORG';
-      throw err;
+  async function insertOrganizationRow(basePayload) {
+    const attempts = [
+      actorUserId ? { ...basePayload, admin_user_id: actorUserId } : null,
+      actorUserId ? { ...basePayload, owner_user_id: actorUserId } : null,
+      basePayload
+    ].filter(Boolean);
+
+    let lastErr = null;
+    for (const payload of attempts) {
+      const { data, error } = await admin.from('organizations').insert(payload).select('id').single();
+      if (!error) return data;
+
+      const message = String(error.message || '');
+      const isUnknownColumn =
+        /column ["']?(admin_user_id|owner_user_id)["']? does not exist/i.test(message) ||
+        /Could not find the ['"]?(admin_user_id|owner_user_id)['"]? column/i.test(message);
+      if (isUnknownColumn) {
+        lastErr = error;
+        continue;
+      }
+
+      lastErr = error;
+      break;
     }
 
-    if (byId?.id) {
-      const { error: updErr } = await admin
-        .from('organizations')
-        .update({ name, updated_at: new Date().toISOString() })
-        .eq('id', shifterOrg.id);
-      if (updErr) {
-        const err = new Error(updErr.message || 'Failed to update organisation');
-        err.code = 'SUPABASE_ORG';
-        throw err;
-      }
-      orgId = shifterOrg.id;
-    } else {
-      const { data: seededRow, error: seededErr } = await admin
-        .from('organizations')
-        .insert({ id: shifterOrg.id, name })
-        .select('id')
-        .single();
-      if (seededErr) {
-        const err = new Error(seededErr.message || 'Failed to create organisation');
-        err.code = 'SUPABASE_ORG';
-        throw err;
-      }
-      orgId = seededRow.id;
-    }
-  } else {
-    const { data: orgRow, error: orgErr } = await admin.from('organizations').insert({ name }).select('id').single();
-    if (orgErr) {
-      const err = new Error(orgErr.message || 'Failed to create organisation');
-      err.code = 'SUPABASE_ORG';
-      throw err;
-    }
-    orgId = orgRow.id;
+    const err = new Error(lastErr?.message || 'Failed to create organisation');
+    err.code = 'SUPABASE_ORG';
+    throw err;
   }
 
-  const { error: profErr } = await admin.from('profiles').update({ org_id: orgId, role: 'Admin' }).eq('id', sub);
+  const orgRow = await insertOrganizationRow({ name });
+  orgId = orgRow.id;
+
+  const { error: profErr } = await admin.from('profiles').update({ org_id: orgId, role: 'Admin' }).eq('id', actorUserId);
   if (profErr) {
     const err = new Error(profErr.message || 'Failed to update profile');
     err.code = 'SUPABASE_PROFILE';
@@ -344,7 +337,7 @@ export async function registerOrganizationForUser({ accessToken, organizationNam
 
   const email = String(payload.email || existing?.email || '').trim().toLowerCase();
   const profile = { ...existing, org_id: orgId, role: 'Admin', email: email || existing?.email };
-  upsertSqliteUserFromSupabase({ sub, email, profile });
+  upsertSqliteUserFromSupabase({ sub: actorUserId, email, profile });
 
   return { org_id: orgId, organization_name: name };
 }

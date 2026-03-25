@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import http from 'http';
 import { isSupabaseJwtConfigured } from '../lib/supabaseJwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
+import { findShifterOrganizationByName, getSupabaseServiceRoleClient } from '../services/supabaseStaffShifter.service.js';
 import {
   completeSupabaseSignIn,
   registerOrganizationForUser,
@@ -15,28 +15,6 @@ import {
 
 const router = Router();
 
-function agentDebugLog({ location, message, data, runId, hypothesisId }) {
-  try {
-    const payload = {
-      sessionId: '455d03',
-      location,
-      message,
-      data: data || {},
-      timestamp: Date.now(),
-      runId,
-      hypothesisId
-    };
-    const body = JSON.stringify(payload);
-    const req = http.request(
-      'http://127.0.0.1:7395/ingest/9396d2bf-ffd7-4cdc-a66d-39fbe0a7e677',
-      { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '455d03' } },
-      (res) => res.resume()
-    );
-    req.on('error', () => {});
-    req.end(body);
-  } catch {}
-}
-
 router.get('/public-config', (req, res) => {
   res.json({
     supabase_auth_enabled: isSupabaseJwtConfigured(),
@@ -46,9 +24,6 @@ router.get('/public-config', (req, res) => {
 
 router.post('/session', async (req, res) => {
   try {
-    // #region agent log
-    agentDebugLog({ runId: 'pre-fix', hypothesisId: 'H6', location: 'server/src/routes/supabaseAuth.js:/session:entry', message: 'Supabase session exchange attempt received', data: { access_token_present: Boolean(req.body?.access_token), supabase_auth_configured: isSupabaseJwtConfigured() } });
-    // #endregion
     if (!isSupabaseJwtConfigured()) {
       return res.status(503).json({ error: 'Supabase auth is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
     }
@@ -82,9 +57,6 @@ router.post('/session', async (req, res) => {
   } catch (err) {
     const code = err.code || 'SESSION_ERROR';
     const status = code === 'INVALID_JWT' ? 401 : 400;
-    // #region agent log
-    agentDebugLog({ runId: 'pre-fix', hypothesisId: 'H7', location: 'server/src/routes/supabaseAuth.js:/session:catch', message: 'Supabase session exchange failed', data: { code, status, error_message: String(err?.message || 'unknown') } });
-    // #endregion
     console.error('[supabaseAuth/session]', err.message);
     res.status(status).json({ error: err.message, code });
   }
@@ -184,6 +156,91 @@ router.post('/invite-staff', requireAuth, requireAdminOrDelegate, async (req, re
   } catch (err) {
     const code = err.code || 'INVITE_ERROR';
     console.error('[supabaseAuth/invite-staff]', err.message);
+    res.status(400).json({ error: err.message, code });
+  }
+});
+
+router.get('/shifter-org-link', requireAuth, requireAdminOrDelegate, async (req, res) => {
+  try {
+    const orgId = req.session.user?.org_id || null;
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account.', code: 'NO_ORG' });
+    const admin = getSupabaseServiceRoleClient();
+    if (!admin) {
+      return res.status(503).json({ error: 'Supabase is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
+    }
+    const { data, error } = await admin
+      .from('organizations')
+      .select('id, name, shifter_organization_id')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (error) {
+      return res.status(400).json({ error: error.message || 'Failed to read organisation link', code: 'SUPABASE_ORG' });
+    }
+    if (!data) return res.status(404).json({ error: 'Organisation not found in Supabase', code: 'ORG_NOT_FOUND' });
+    return res.json({
+      org_id: data.id,
+      organization_name: data.name || null,
+      shifter_organization_id: data.shifter_organization_id || null,
+      linked: Boolean(data.shifter_organization_id)
+    });
+  } catch (err) {
+    const code = err.code || 'SHIFTER_LINK_READ_ERROR';
+    res.status(400).json({ error: err.message, code });
+  }
+});
+
+router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, async (req, res) => {
+  try {
+    const orgId = req.session.user?.org_id || null;
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account.', code: 'NO_ORG' });
+    const admin = getSupabaseServiceRoleClient();
+    if (!admin) {
+      return res.status(503).json({ error: 'Supabase is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
+    }
+
+    const rawName = String(req.body?.shifter_org_name || '').trim();
+    if (!rawName) return res.status(400).json({ error: 'Shifter organisation name is required', code: 'VALIDATION' });
+
+    const shifterOrg = await findShifterOrganizationByName(rawName);
+    if (!shifterOrg?.id) {
+      return res.status(404).json({ error: 'No matching Shifter organisation found for that name', code: 'SHIFTER_ORG_NOT_FOUND' });
+    }
+
+    const { error: updErr } = await admin
+      .from('organizations')
+      .update({ shifter_organization_id: shifterOrg.id, updated_at: new Date().toISOString() })
+      .eq('id', orgId);
+    if (updErr) {
+      return res.status(400).json({ error: updErr.message || 'Failed to save Shifter link', code: 'SUPABASE_ORG' });
+    }
+
+    return res.json({ ok: true, org_id: orgId, shifter_organization_id: shifterOrg.id, source: shifterOrg.source || null });
+  } catch (err) {
+    const code = err.code || 'SHIFTER_LINK_ERROR';
+    res.status(400).json({ error: err.message, code });
+  }
+});
+
+router.post('/unlink-shifter-org', requireAuth, requireAdminOrDelegate, async (req, res) => {
+  try {
+    const orgId = req.session.user?.org_id || null;
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account.', code: 'NO_ORG' });
+    const admin = getSupabaseServiceRoleClient();
+    if (!admin) {
+      return res.status(503).json({ error: 'Supabase is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
+    }
+
+    const { error: updErr } = await admin
+      .from('organizations')
+      .update({ shifter_organization_id: null, updated_at: new Date().toISOString() })
+      .eq('id', orgId);
+    if (updErr) {
+      return res.status(400).json({ error: updErr.message || 'Failed to remove Shifter link', code: 'SUPABASE_ORG' });
+    }
+
+    return res.json({ ok: true, org_id: orgId, shifter_organization_id: null });
+  } catch (err) {
+    const code = err.code || 'SHIFTER_UNLINK_ERROR';
     res.status(400).json({ error: err.message, code });
   }
 });
