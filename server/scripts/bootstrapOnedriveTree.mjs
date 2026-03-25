@@ -202,6 +202,13 @@ function copyWorksheetTemplate(source, target) {
   for (const merge of Object.keys(source._merges || {})) target.mergeCells(merge);
 }
 
+function clearRows(ws, startRow) {
+  const maxCol = Math.max(40, ws.columnCount || 40);
+  for (let r = startRow; r <= ws.rowCount; r++) {
+    for (let c = 1; c <= maxCol; c++) ws.getRow(r).getCell(c).value = null;
+  }
+}
+
 async function main() {
   const token = await getAccessToken();
 
@@ -225,10 +232,27 @@ async function main() {
     const templateBuffer = await readFile(REGISTERS_TEMPLATE_PATH);
     const templateWb = new ExcelJS.Workbook();
     await templateWb.xlsx.load(templateBuffer);
+    const dataStartBySheet = {
+      Complaints: 4,
+      'Document Register': 3,
+      'Feedback and complaints': 4,
+      'HR role register': 9,
+      'Significant risk factor': 4,
+      'Training and Development': 6,
+      'Policy register': 3,
+      'Conflict of interest register': 3,
+      'Collection and storage of Med': 4,
+      'Continuous improvment': 3,
+      'Emergency test register': 3,
+      'Incident register': 4,
+      'Waste removal Register': 4
+    };
     for (const src of templateWb.worksheets) {
       const outWb = new ExcelJS.Workbook();
       const outWs = outWb.addWorksheet(src.name);
       copyWorksheetTemplate(src, outWs);
+      const startRow = dataStartBySheet[src.name];
+      if (startRow) clearRows(outWs, startRow);
       const out = await outWb.xlsx.writeBuffer();
       await putFileByPath(
         token,

@@ -421,6 +421,35 @@ function clearRows(ws, startRow) {
   }
 }
 
+function replaceBrandingInCellValue(value, orgName) {
+  const from = /Pristine Lifestyle Solutions(?: Pty Ltd)?/gi;
+  if (value == null) return value;
+  if (typeof value === 'string') return value.replace(from, orgName);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (value?.richText && Array.isArray(value.richText)) {
+    return {
+      ...value,
+      richText: value.richText.map((part) => ({
+        ...part,
+        text: typeof part?.text === 'string' ? part.text.replace(from, orgName) : part?.text
+      }))
+    };
+  }
+  if (value?.text && typeof value.text === 'string') {
+    return { ...value, text: value.text.replace(from, orgName) };
+  }
+  return value;
+}
+
+function replaceTemplateBranding(ws, orgName) {
+  if (!orgName) return;
+  ws.eachRow({ includeEmpty: true }, (row) => {
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      cell.value = replaceBrandingInCellValue(cell.value, orgName);
+    });
+  });
+}
+
 function writeRows(ws, startRow, rows) {
   let rowNum = startRow;
   for (const row of rows) {
@@ -698,6 +727,8 @@ export async function syncTemplateRegistersNow(organizationId, suppliedAccessTok
   const templateBuffer = await readFile(REGISTERS_TEMPLATE_PATH);
   const templateWb = new ExcelJS.Workbook();
   await templateWb.xlsx.load(templateBuffer);
+  const org = db.prepare('SELECT name FROM organisations WHERE id = ?').get(organizationId);
+  const orgName = (org?.name || 'Nexus Core organisation').trim();
   await ensureFolderPath(accessToken, [ROOT_NAME, FOLDER_REGISTER]);
 
   const sheetData = buildTemplateDataBySheet(organizationId);
@@ -721,10 +752,13 @@ export async function syncTemplateRegistersNow(organizationId, suppliedAccessTok
     const outWb = new ExcelJS.Workbook();
     const outWs = outWb.addWorksheet(src.name);
     copyWorksheetTemplate(src, outWs);
+    replaceTemplateBranding(outWs, orgName);
     const startRow = dataStartBySheet[src.name];
     const rows = sheetData[src.name] || [];
-    if (startRow && rows.length) {
+    if (startRow) {
       clearRows(outWs, startRow);
+    }
+    if (startRow && rows.length) {
       writeRows(outWs, startRow, rows);
     }
     const out = await outWb.xlsx.writeBuffer();

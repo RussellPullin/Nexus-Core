@@ -2,7 +2,7 @@ import bcrypt from 'bcrypt';
 import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { verifySupabaseAccessToken } from '../lib/supabaseJwt.js';
-import { getSupabaseServiceRoleClient } from './supabaseStaffShifter.service.js';
+import { findShifterOrganizationByName, getSupabaseServiceRoleClient } from './supabaseStaffShifter.service.js';
 
 const PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
 
@@ -162,14 +162,54 @@ export async function registerOrganizationForUser({ accessToken, organizationNam
     throw err;
   }
 
-  const { data: orgRow, error: orgErr } = await admin.from('organizations').insert({ name }).select('id').single();
-  if (orgErr) {
-    const err = new Error(orgErr.message || 'Failed to create organisation');
-    err.code = 'SUPABASE_ORG';
-    throw err;
-  }
+  const shifterOrg = await findShifterOrganizationByName(name);
+  let orgId = null;
 
-  const orgId = orgRow.id;
+  if (shifterOrg?.id) {
+    const { data: byId, error: byIdErr } = await admin
+      .from('organizations')
+      .select('id')
+      .eq('id', shifterOrg.id)
+      .maybeSingle();
+    if (byIdErr) {
+      const err = new Error(byIdErr.message || 'Failed to verify organisation in Supabase');
+      err.code = 'SUPABASE_ORG';
+      throw err;
+    }
+
+    if (byId?.id) {
+      const { error: updErr } = await admin
+        .from('organizations')
+        .update({ name, updated_at: new Date().toISOString() })
+        .eq('id', shifterOrg.id);
+      if (updErr) {
+        const err = new Error(updErr.message || 'Failed to update organisation');
+        err.code = 'SUPABASE_ORG';
+        throw err;
+      }
+      orgId = shifterOrg.id;
+    } else {
+      const { data: seededRow, error: seededErr } = await admin
+        .from('organizations')
+        .insert({ id: shifterOrg.id, name })
+        .select('id')
+        .single();
+      if (seededErr) {
+        const err = new Error(seededErr.message || 'Failed to create organisation');
+        err.code = 'SUPABASE_ORG';
+        throw err;
+      }
+      orgId = seededRow.id;
+    }
+  } else {
+    const { data: orgRow, error: orgErr } = await admin.from('organizations').insert({ name }).select('id').single();
+    if (orgErr) {
+      const err = new Error(orgErr.message || 'Failed to create organisation');
+      err.code = 'SUPABASE_ORG';
+      throw err;
+    }
+    orgId = orgRow.id;
+  }
 
   const { error: profErr } = await admin.from('profiles').update({ org_id: orgId, role: 'Admin' }).eq('id', sub);
   if (profErr) {

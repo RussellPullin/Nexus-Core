@@ -45,6 +45,7 @@ export default function AdminPage() {
   const [paySummary, setPaySummary] = useState(null);
   const [paySummaryLoading, setPaySummaryLoading] = useState(false);
   const [paySummaryErr, setPaySummaryErr] = useState('');
+  const [registerSyncLoading, setRegisterSyncLoading] = useState(false);
   const [payPeriodFilter, setPayPeriodFilter] = useState('');
   const [payAdjustMode, setPayAdjustMode] = useState(false);
   const [payEdits, setPayEdits] = useState({});
@@ -263,6 +264,19 @@ export default function AdminPage() {
     }
   };
 
+  const handleRefreshRegisters = async () => {
+    try {
+      setRegisterSyncLoading(true);
+      const out = await admin.refreshRegisters();
+      const separateCount = out?.separate_registers?.created_or_updated ?? 0;
+      setMsg(`Registers refreshed in OneDrive. Separate register files updated: ${separateCount}.`);
+    } catch (e) {
+      setMsg(e.message || 'Failed to refresh registers');
+    } finally {
+      setRegisterSyncLoading(false);
+    }
+  };
+
   if (!canManageUsers) {
     return (
       <div className="content">
@@ -312,6 +326,19 @@ export default function AdminPage() {
       {tab === 'users' && (
         <div className="card">
           <h3>Users</h3>
+          <div style={{ marginBottom: '1rem', padding: '0.75rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div>
+                <strong>OneDrive Register Sync</strong>
+                <div style={{ fontSize: '0.9rem', color: '#64748b' }}>
+                  Rebuilds `Document Register.xlsx` and all separate register files in `Nexus Core/Register`.
+                </div>
+              </div>
+              <button type="button" className="btn btn-primary" onClick={handleRefreshRegisters} disabled={registerSyncLoading}>
+                {registerSyncLoading ? 'Refreshing…' : 'Refresh Registers Now'}
+              </button>
+            </div>
+          </div>
           <table className="table">
             <thead>
               <tr><th>Email</th><th>Name</th><th>Role</th><th>Staff</th><th>Assigned</th><th>Actions</th></tr>

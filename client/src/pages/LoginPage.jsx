@@ -4,6 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import { auth as authApi } from '../lib/api';
 import { getSupabaseBrowserClient } from '../lib/supabaseClient';
 
+const RECOVERY_MODE_KEY = 'nexus_supabase_recovery_mode';
+const RECOVERY_REQUESTED_KEY = 'nexus_supabase_recovery_requested';
+
 export default function LoginPage() {
   const { user, loading, login, register, loginWithSupabase, registerWithSupabase } = useAuth();
   const navigate = useNavigate();
@@ -42,7 +45,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (window.sessionStorage.getItem('nexus_supabase_recovery_mode') === '1') {
+    if (window.sessionStorage.getItem(RECOVERY_MODE_KEY) === '1') {
       setIsRecoveryMode(true);
       setIsRegister(false);
       setInfo('Recovery link accepted. Set a new password below.');
@@ -133,11 +136,14 @@ export default function LoginPage() {
           return true;
         }
         const token = data?.session?.access_token;
-        if (type === 'recovery') {
+        const recoveryRequested = window.sessionStorage.getItem(RECOVERY_REQUESTED_KEY) === '1';
+        const isRecovery = type === 'recovery' || recoveryRequested;
+        if (isRecovery) {
           setIsRecoveryMode(true);
           setIsRegister(false);
           setInfo('Recovery link accepted. Set a new password below.');
-          window.sessionStorage.setItem('nexus_supabase_recovery_mode', '1');
+          window.sessionStorage.setItem(RECOVERY_MODE_KEY, '1');
+          window.sessionStorage.removeItem(RECOVERY_REQUESTED_KEY);
         } else if (token) {
           await completeSupabaseSession(token);
         }
@@ -160,11 +166,14 @@ export default function LoginPage() {
           return true;
         }
         const token = data?.session?.access_token;
-        if (type === 'recovery') {
+        const recoveryRequested = window.sessionStorage.getItem(RECOVERY_REQUESTED_KEY) === '1';
+        const isRecovery = type === 'recovery' || recoveryRequested;
+        if (isRecovery) {
           setIsRecoveryMode(true);
           setIsRegister(false);
           setInfo('Recovery link accepted. Set a new password below.');
-          window.sessionStorage.setItem('nexus_supabase_recovery_mode', '1');
+          window.sessionStorage.setItem(RECOVERY_MODE_KEY, '1');
+          window.sessionStorage.removeItem(RECOVERY_REQUESTED_KEY);
         } else if (token) {
           await completeSupabaseSession(token);
         }
@@ -181,6 +190,15 @@ export default function LoginPage() {
       const { data, error } = await sb.auth.getSession();
       if (!active || error) return;
       const token = data?.session?.access_token;
+      const recoveryRequested = window.sessionStorage.getItem(RECOVERY_REQUESTED_KEY) === '1';
+      if (recoveryRequested && token && !isRecoveryMode) {
+        setIsRecoveryMode(true);
+        setIsRegister(false);
+        setInfo('Recovery link accepted. Set a new password below.');
+        window.sessionStorage.setItem(RECOVERY_MODE_KEY, '1');
+        window.sessionStorage.removeItem(RECOVERY_REQUESTED_KEY);
+        return;
+      }
       if (token && !isRecoveryMode) await completeSupabaseSession(token);
     };
 
@@ -193,7 +211,8 @@ export default function LoginPage() {
         setIsRegister(false);
         setError('');
         setInfo('Recovery link accepted. Set a new password below.');
-        window.sessionStorage.setItem('nexus_supabase_recovery_mode', '1');
+        window.sessionStorage.setItem(RECOVERY_MODE_KEY, '1');
+        window.sessionStorage.removeItem(RECOVERY_REQUESTED_KEY);
         return;
       }
       const token = session?.access_token;
@@ -231,7 +250,8 @@ export default function LoginPage() {
       const { data: sessionData } = await sb.auth.getSession();
       const token = sessionData?.session?.access_token;
       if (!token) throw new Error('Password updated, but no session found. Please sign in again.');
-      window.sessionStorage.removeItem('nexus_supabase_recovery_mode');
+      window.sessionStorage.removeItem(RECOVERY_MODE_KEY);
+      window.sessionStorage.removeItem(RECOVERY_REQUESTED_KEY);
       setIsRecoveryMode(false);
       setNewPassword('');
       setConfirmPassword('');
@@ -263,6 +283,7 @@ export default function LoginPage() {
     }
     setSubmitting(true);
     try {
+      window.sessionStorage.setItem(RECOVERY_REQUESTED_KEY, '1');
       const redirectTo = (() => {
         if (typeof window === 'undefined') return 'http://localhost:5174/login';
         const host = window.location.hostname;
@@ -293,6 +314,7 @@ export default function LoginPage() {
     try {
       if (useCloudAuth) {
         if (isRegister) {
+          window.sessionStorage.removeItem(RECOVERY_REQUESTED_KEY);
           const r = await registerWithSupabase(email, password, name);
           if (r.awaiting_email_confirm) {
             const to = r.confirmEmail ? ` to ${r.confirmEmail}` : '';
@@ -315,6 +337,7 @@ export default function LoginPage() {
           navigate('/', { replace: true });
           return;
         }
+        window.sessionStorage.removeItem(RECOVERY_REQUESTED_KEY);
         const r = await loginWithSupabase(email, password);
         if (r.needs_org_setup) {
           navigate('/setup-org', { replace: true });

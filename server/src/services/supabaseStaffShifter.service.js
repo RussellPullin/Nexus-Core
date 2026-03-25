@@ -47,6 +47,42 @@ export function getShifterServiceRoleClient() {
   return getShifterAdminClient();
 }
 
+function normalizeOrgName(name) {
+  return String(name || '').trim();
+}
+
+/**
+ * Resolve a Shifter organization by name (case-insensitive exact match).
+ * Returns null when Shifter is not configured or no match exists.
+ */
+export async function findShifterOrganizationByName(orgNameRaw) {
+  const shifterAdmin = getShifterAdminClient();
+  const orgName = normalizeOrgName(orgNameRaw);
+  if (!shifterAdmin || !orgName) return null;
+
+  const namePattern = escapeIlikeLiteral(orgName);
+  const nameColumns = ['name', 'org_name', 'organisation_name', 'title'];
+  for (const nameCol of nameColumns) {
+    const { data, error } = await shifterAdmin
+      .from('organizations')
+      .select('id')
+      .ilike(nameCol, namePattern)
+      .limit(2);
+    if (error) continue;
+    const rows = data || [];
+    if (rows.length > 1) {
+      const err = new Error('Multiple Shifter organizations match this name');
+      err.code = 'SHIFTER_ORG_AMBIGUOUS';
+      throw err;
+    }
+    if (rows.length === 1 && rows[0]?.id) {
+      return { id: String(rows[0].id).trim(), source: `organizations.${nameCol}` };
+    }
+  }
+
+  return null;
+}
+
 /**
  * Maps NexusCore public.organizations.id to the org id used in Shifter (profiles.org_id, etc.).
  */

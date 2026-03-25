@@ -41,7 +41,8 @@ export const admin = {
   coordinatorActivity: (params) => fetchApi(`/admin/coordinator-activity?${new URLSearchParams(params || {}).toString()}`),
   billableSummary: (params) => fetchApi(`/admin/billable-summary?${new URLSearchParams(params || {}).toString()}`),
   financialOverview: (params) => fetchApi(`/admin/financial-overview?${new URLSearchParams(params || {}).toString()}`),
-  paySummary: () => fetchApi('/admin/pay-summary')
+  paySummary: () => fetchApi('/admin/pay-summary'),
+  refreshRegisters: () => fetchApi('/integrations/microsoft-drive/refresh-registers', { method: 'POST' })
 };
 
 /** Per-org flags in Supabase org_features; server uses service role. */

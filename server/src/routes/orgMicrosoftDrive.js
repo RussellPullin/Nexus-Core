@@ -9,7 +9,12 @@ import { requireAdmin } from '../middleware/roles.js';
 import { db } from '../db/index.js';
 import { signOAuthState, verifyOAuthState } from '../lib/oauthState.js';
 import { saveOnedriveLink, clearOnedriveLink, getOnedriveLinkRow } from '../services/orgOnedriveTokens.service.js';
-import { ensureNexusCoreLayout, listRegister } from '../services/orgOnedriveSync.service.js';
+import {
+  ensureNexusCoreLayout,
+  listRegister,
+  syncRegisterWorkbookNow,
+  syncTemplateRegistersNow
+} from '../services/orgOnedriveSync.service.js';
 
 const router = Router();
 
@@ -71,6 +76,35 @@ router.post('/disconnect', requireAuth, requireAdmin, (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/refresh-registers', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const u = db.prepare('SELECT org_id FROM users WHERE id = ?').get(req.session.user.id);
+    const orgId = u?.org_id;
+    if (!orgId) return res.status(400).json({ error: 'No organisation' });
+    const link = getOnedriveLinkRow(orgId);
+    if (!link?.refresh_token_encrypted) {
+      return res.status(400).json({ error: 'OneDrive is not connected for this organisation.' });
+    }
+
+    await ensureNexusCoreLayout(orgId);
+    const main = await syncRegisterWorkbookNow(orgId);
+    const separate = await syncTemplateRegistersNow(orgId);
+
+    res.json({
+      ok: true,
+      document_register: {
+        file: 'Document Register.xlsx',
+        web_url: main?.webUrl || null
+      },
+      separate_registers: {
+        created_or_updated: separate?.fileCount || 0
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to refresh registers' });
   }
 });
 

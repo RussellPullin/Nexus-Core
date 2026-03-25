@@ -74,7 +74,7 @@ export default function SetupOrgPage() {
         <p className="login-tagline">Where paperwork disappears.</p>
         <p className="login-subtitle">Name your organisation</p>
         <p style={{ marginBottom: '1rem', fontSize: '0.9rem', color: '#64748b' }}>
-          This creates your tenant in Nexus Core (and Supabase). All participants you add will belong to this organisation.
+          If this organisation exists in Shifter Supabase, Nexus Core will reuse that org ID. Otherwise a new org ID is created in Nexus Core.
         </p>
         <form onSubmit={handleSubmit}>
           {error && <div className="login-error">{error}</div>}
