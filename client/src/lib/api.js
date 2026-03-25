@@ -97,14 +97,20 @@ function parseJsonSafe(text) {
 }
 
 export async function fetchApi(path, options = {}) {
-  const res = await fetch(`${API}${path}`, {
+  const runRequest = () => fetch(`${API}${path}`, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options
   });
+  let res = await runRequest();
+  const isAuthPath = path.includes('/auth/');
+  if (res.status === 401 && !isAuthPath) {
+    const restored = await tryRestoreExpressSessionFromSupabase();
+    if (restored) res = await runRequest();
+  }
   const text = await res.text();
   if (!res.ok) {
-    if (res.status === 401 && !path.includes('/auth/')) {
+    if (res.status === 401 && !isAuthPath) {
       window.location.href = '/login';
     }
     const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;

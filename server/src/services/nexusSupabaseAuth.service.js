@@ -98,17 +98,70 @@ export function upsertSqliteUserFromSupabase({ sub, email, profile }) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
+const PROFILE_SELECT = 'id, email, org_id, role, shifter_enabled';
+
 /**
  * After Supabase password/session: sync profile + SQLite and return session fields.
+ * Looks up by auth user id first; if missing, by email (handles legacy rows where profiles.id ≠ auth.users.id).
  */
 export async function completeSupabaseSignIn(accessToken) {
   const payload = await verifySupabaseAccessToken(accessToken);
   const sub = payload.sub;
   const email = String(payload.email || '').trim().toLowerCase();
-  const profile = await fetchSupabaseProfile(sub);
+  const admin = getSupabaseServiceRoleClient();
+  if (!admin) {
+    const err = new Error('Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
+    err.code = 'SUPABASE_NOT_CONFIGURED';
+    throw err;
+  }
+
+  const { data: byId, error: errById } = await admin
+    .from('profiles')
+    .select(PROFILE_SELECT)
+    .eq('id', sub)
+    .maybeSingle();
+  if (errById) {
+    console.error('[nexusSupabaseAuth] profile by id', sub, errById.message);
+    const err = new Error(`Supabase profiles query failed: ${errById.message}`);
+    err.code = 'PROFILE_QUERY_ERROR';
+    throw err;
+  }
+
+  let profile = byId;
+  if (!profile && email) {
+    const { data: byEmail, error: errByEmail } = await admin
+      .from('profiles')
+      .select(PROFILE_SELECT)
+      .eq('email', email)
+      .maybeSingle();
+    if (errByEmail) {
+      console.error('[nexusSupabaseAuth] profile by email', email, errByEmail.message);
+      const err = new Error(`Supabase profiles query failed: ${errByEmail.message}`);
+      err.code = 'PROFILE_QUERY_ERROR';
+      throw err;
+    }
+    profile = byEmail;
+    if (profile && profile.id !== sub) {
+      console.warn(
+        '[nexusSupabaseAuth] profiles.id',
+        profile.id,
+        'does not match auth uid',
+        sub,
+        'for',
+        email,
+        '— sign-in allowed via email match; fix: set profiles.id = auth.users.id for this user in Supabase.'
+      );
+    }
+  }
+
   if (!profile) {
     const err = new Error(
-      'No profile row in Supabase. Apply the migration that creates profiles on signup, then try again.'
+      [
+        'No matching row in public.profiles for this login.',
+        'Check: (1) Nexus server SUPABASE_URL is the same Supabase project as this dashboard,',
+        '(2) profiles.id equals the user UUID under Authentication → Users for this account.',
+        'Apply repo supabase migrations (including backfill) if the table is empty or out of date.',
+      ].join(' ')
     );
     err.code = 'NO_PROFILE';
     throw err;

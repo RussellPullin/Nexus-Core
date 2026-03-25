@@ -5,6 +5,7 @@ import session from 'express-session';
 import { mkdirSync, existsSync, readFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import fileStoreFactory from 'session-file-store';
 
 // Load .env from project root (parent of server/) so config works regardless of cwd
 const __filename = fileURLToPath(import.meta.url);
@@ -82,6 +83,7 @@ import { mirrorAllShiftsToNexusSupabase } from './services/nexusPublicShiftsSync
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
+const FileStore = fileStoreFactory(session);
 
 const INSECURE_SESSION_DEFAULT = 'schedule-shift-session-secret-change-in-production';
 if (process.env.NODE_ENV === 'production') {
@@ -97,7 +99,15 @@ if (process.env.NODE_ENV === 'production') {
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+const sessionFilesDir = join(dataDir, 'sessions');
+if (!existsSync(sessionFilesDir)) mkdirSync(sessionFilesDir, { recursive: true });
 app.use(session({
+  store: new FileStore({
+    path: sessionFilesDir,
+    retries: 1,
+    ttl: 7 * 24 * 60 * 60,
+    reapInterval: 60 * 60
+  }),
   secret: process.env.SESSION_SECRET || INSECURE_SESSION_DEFAULT,
   resave: false,
   saveUninitialized: false,
