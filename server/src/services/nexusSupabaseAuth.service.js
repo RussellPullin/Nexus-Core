@@ -13,6 +13,18 @@ function escapeIlikeLiteral(s) {
   return String(s).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
+const UUID_STRING_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * JWT `sub` for Supabase is usually a UUID; some clients emit uppercase. PostgREST string filters
+ * can miss when `profiles.id` is stored lowercase — normalize for all lookups and SQLite keys.
+ */
+export function normalizeSupabaseUserId(sub) {
+  const s = String(sub || '').trim();
+  if (!s) return s;
+  return UUID_STRING_RE.test(s) ? s.toLowerCase() : s;
+}
+
 export function mapProfileRoleToSqliteRole(profileRole) {
   const r = String(profileRole || '').trim();
   if (r === 'Admin' || r === 'Manager') return 'admin';
@@ -22,10 +34,11 @@ export function mapProfileRoleToSqliteRole(profileRole) {
 export async function fetchSupabaseProfile(userId) {
   const admin = getSupabaseServiceRoleClient();
   if (!admin) return null;
+  const id = normalizeSupabaseUserId(userId);
   const { data, error } = await admin
     .from('profiles')
     .select(PROFILE_SELECT)
-    .eq('id', userId)
+    .eq('id', id)
     .maybeSingle();
   if (error) {
     console.warn('[nexusSupabaseAuth] profile fetch', error.message);
@@ -111,7 +124,7 @@ export function upsertSqliteUserFromSupabase({ sub, email, profile }) {
  */
 export async function completeSupabaseSignIn(accessToken) {
   const payload = await verifySupabaseAccessToken(accessToken);
-  const sub = payload.sub;
+  const sub = normalizeSupabaseUserId(payload.sub);
   let email = String(payload.email || '').trim().toLowerCase();
   const admin = getSupabaseServiceRoleClient();
   if (!admin) {
@@ -153,7 +166,7 @@ export async function completeSupabaseSignIn(accessToken) {
       throw err;
     }
     profile = byEmail;
-    if (profile && profile.id !== sub) {
+    if (profile && normalizeSupabaseUserId(profile.id) !== sub) {
       console.warn(
         '[nexusSupabaseAuth] profiles.id',
         profile.id,
@@ -206,7 +219,7 @@ export async function completeSupabaseSignIn(accessToken) {
  */
 export async function registerOrganizationForUser({ accessToken, organizationName }) {
   const payload = await verifySupabaseAccessToken(accessToken);
-  const sub = payload.sub;
+  const sub = normalizeSupabaseUserId(payload.sub);
   const admin = getSupabaseServiceRoleClient();
   if (!admin) {
     const err = new Error('Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');

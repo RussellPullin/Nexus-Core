@@ -42,7 +42,7 @@ const admin = createClient(url, key, {
 const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(arg.trim());
 
 if (isUuid) {
-  const sub = arg.trim();
+  const sub = arg.trim().toLowerCase();
   const { data: byId, error: errId } = await admin
     .from('profiles')
     .select(PROFILE_SELECT)
