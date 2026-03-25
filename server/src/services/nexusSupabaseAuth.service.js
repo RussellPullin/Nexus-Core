@@ -179,6 +179,41 @@ export async function completeSupabaseSignIn(accessToken) {
     }
   }
 
+  if (!profile && sub) {
+    try {
+      const autoEmail = email || null;
+      const autoRole = 'Support Coordinator';
+      const { error: insErr } = await admin
+        .from('profiles')
+        .upsert(
+          {
+            id: sub,
+            email: autoEmail,
+            role: autoRole
+          },
+          { onConflict: 'id' }
+        );
+      if (insErr) {
+        console.warn('[nexusSupabaseAuth] profile auto-heal upsert failed', sub, insErr.message);
+      } else {
+        console.log('[nexusSupabaseAuth] profile auto-healed for auth user', sub);
+      }
+    } catch (e) {
+      console.warn('[nexusSupabaseAuth] profile auto-heal error', sub, e?.message || e);
+    }
+
+    const { data: healedById, error: healedByIdErr } = await admin
+      .from('profiles')
+      .select(PROFILE_SELECT)
+      .eq('id', sub)
+      .maybeSingle();
+    if (!healedByIdErr && healedById) {
+      profile = healedById;
+    } else if (healedByIdErr) {
+      console.warn('[nexusSupabaseAuth] profile auto-heal recheck failed', sub, healedByIdErr.message);
+    }
+  }
+
   if (!profile) {
     console.warn('[nexusSupabaseAuth] NO_PROFILE sub=', sub, 'email_used=', email || '(empty)');
     const err = new Error(

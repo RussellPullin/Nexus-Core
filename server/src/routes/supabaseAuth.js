@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import http from 'http';
 import { isSupabaseJwtConfigured } from '../lib/supabaseJwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
@@ -14,6 +15,28 @@ import {
 
 const router = Router();
 
+function agentDebugLog({ location, message, data, runId, hypothesisId }) {
+  try {
+    const payload = {
+      sessionId: '455d03',
+      location,
+      message,
+      data: data || {},
+      timestamp: Date.now(),
+      runId,
+      hypothesisId
+    };
+    const body = JSON.stringify(payload);
+    const req = http.request(
+      'http://127.0.0.1:7395/ingest/9396d2bf-ffd7-4cdc-a66d-39fbe0a7e677',
+      { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '455d03' } },
+      (res) => res.resume()
+    );
+    req.on('error', () => {});
+    req.end(body);
+  } catch {}
+}
+
 router.get('/public-config', (req, res) => {
   res.json({
     supabase_auth_enabled: isSupabaseJwtConfigured(),
@@ -23,6 +46,9 @@ router.get('/public-config', (req, res) => {
 
 router.post('/session', async (req, res) => {
   try {
+    // #region agent log
+    agentDebugLog({ runId: 'pre-fix', hypothesisId: 'H6', location: 'server/src/routes/supabaseAuth.js:/session:entry', message: 'Supabase session exchange attempt received', data: { access_token_present: Boolean(req.body?.access_token), supabase_auth_configured: isSupabaseJwtConfigured() } });
+    // #endregion
     if (!isSupabaseJwtConfigured()) {
       return res.status(503).json({ error: 'Supabase auth is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
     }
@@ -56,6 +82,9 @@ router.post('/session', async (req, res) => {
   } catch (err) {
     const code = err.code || 'SESSION_ERROR';
     const status = code === 'INVALID_JWT' ? 401 : 400;
+    // #region agent log
+    agentDebugLog({ runId: 'pre-fix', hypothesisId: 'H7', location: 'server/src/routes/supabaseAuth.js:/session:catch', message: 'Supabase session exchange failed', data: { code, status, error_message: String(err?.message || 'unknown') } });
+    // #endregion
     console.error('[supabaseAuth/session]', err.message);
     res.status(status).json({ error: err.message, code });
   }

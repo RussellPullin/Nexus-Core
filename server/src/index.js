@@ -174,24 +174,21 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Start server; if port busy, try next. Vite proxy expects backend on 3001.
-function startServer(port, attemptsLeft = 5) {
+// Start server on configured port only. In dev, auto-shifting ports can route
+// auth callbacks through a stale backend and cause token validation failures.
+function startServer(port) {
   const server = app.listen(port, '0.0.0.0');
   server.on('listening', async () => {
-    if (port !== 3001) {
-      console.warn(`Server on port ${port}. Update client/vite.config.js proxy to http://127.0.0.1:${port} and webhook URL to http://localhost:${port}/api/webhooks/progress-app`);
-    }
+    console.log(`[nexus] Server listening on port ${port}`);
     const cfg = llm.getConfig?.() || {};
     const ok = await llm.isAvailable();
     console.log(`[nexus] Ollama: ${ok ? 'connected' : 'not available'} (model: ${cfg.model || 'default'}, base: ${cfg.baseUrl || 'localhost:11434'})`);
   });
   server.on('error', (err) => {
-    if (err?.code === 'EADDRINUSE' && attemptsLeft > 0) {
-      startServer(port + 1, attemptsLeft - 1);
-      return;
-    }
     if (err?.code === 'EADDRINUSE') {
-      console.error(`Port ${port} in use. Stop the process using it (e.g. lsof -i :${port}) and restart.`);
+      console.error(
+        `[nexus] Port ${port} already in use. Stop the existing process on this port and restart so client proxy/auth flow stays aligned.`
+      );
     }
     process.exit(1);
   });
