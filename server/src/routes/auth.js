@@ -7,6 +7,7 @@ import { isSuperAdminEmail } from '../lib/superAdmin.js';
 
 const USER_SELECT = `id, email, name, role, org_id, auth_uid, billing_interval_minutes, staff_id, signature_data,
   email_provider, email_connected_address, email_reconnect_required`;
+const SUPABASE_PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
 
 function shapeUser(row) {
   if (!row) return null;
@@ -36,7 +37,14 @@ router.post('/login', (req, res) => {
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
+    let isSupabaseOnlyAccount = false;
     if (user.auth_uid) {
+      const hasHash = Boolean(user.password_hash && String(user.password_hash).trim());
+      const usesPlaceholder =
+        hasHash && bcrypt.compareSync(SUPABASE_PLACEHOLDER_PW, String(user.password_hash));
+      isSupabaseOnlyAccount = !hasHash || usesPlaceholder;
+    }
+    if (isSupabaseOnlyAccount) {
       return res.status(401).json({
         error: 'This account uses Supabase sign-in. Use the same email on the login page with Supabase enabled.',
         code: 'USE_SUPABASE_AUTH'

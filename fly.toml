@@ -10,6 +10,7 @@ primary_region = 'syd'
   dockerfile = 'Dockerfile'
 
   [build.args]
+    VITE_PREFER_LOCAL_LOGIN = 'true'
     VITE_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5mZHdrYmlnd3ZxdXlsZGx4b296Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExOTMzMTUsImV4cCI6MjA4Njc2OTMxNX0.vKRPj2n6WX4zN5FGr2M4rMBHHN-9WyY7Z4U26lLDhtk'
     VITE_SUPABASE_URL = 'https://nfdwkbigwvquyldlxooz.supabase.co'
 [env]
