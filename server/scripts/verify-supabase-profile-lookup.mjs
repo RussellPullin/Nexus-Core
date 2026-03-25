@@ -33,6 +33,8 @@ if (!arg) {
   process.exit(1);
 }
 
+console.log('Lookup argument:', JSON.stringify(arg));
+
 const admin = createClient(url, key, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -66,6 +68,21 @@ if (isUuid) {
   }
 } else {
   const email = arg.trim().toLowerCase();
+
+  async function findAuthUserByEmailPaginated(target, { perPage = 200, maxPages = 50 } = {}) {
+    let scanned = 0;
+    for (let page = 1; page <= maxPages; page += 1) {
+      const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+      if (error) return { match: null, scanned, error };
+      const users = data?.users || [];
+      scanned += users.length;
+      const match = users.find((x) => String(x.email || '').trim().toLowerCase() === target);
+      if (match) return { match, scanned, error: null };
+      if (users.length < perPage) return { match: null, scanned, error: null };
+    }
+    return { match: null, scanned, error: null, truncated: true };
+  }
+
   const { data: byIlike, error: errIlike } = await admin
     .from('profiles')
     .select(PROFILE_SELECT)
@@ -80,15 +97,21 @@ if (isUuid) {
     .maybeSingle();
   console.log('profiles.eq(lower email):', errEq?.message || 'ok', byEq || null);
 
-  const { data: list, error: listErr } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
-  const match = list?.users?.find((x) => String(x.email || '').trim().toLowerCase() === email);
+  const { match, scanned, error: listErr, truncated } = await findAuthUserByEmailPaginated(email);
   console.log(
-    'auth user (first 200 users):',
+    'auth user (paginated search):',
     listErr?.message || 'ok',
+    `scanned ${scanned} users`,
+    truncated ? '(stopped at max pages)' : '',
     match ? { id: match.id, email: match.email } : 'no match',
   );
   if (match && byIlike && match.id !== byIlike.id) {
     console.log('MISMATCH: auth.users.id !== profiles.id for this email.');
+  }
+  if (!byIlike && !match) {
+    console.log(
+      '\nHint: No profile row and no auth user with this exact email. Check spelling, .env SERVICE_ROLE_KEY matches this project, and Supabase Dashboard → Authentication → Users for the real address.',
+    );
   }
 }
 
