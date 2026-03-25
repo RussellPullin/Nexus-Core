@@ -26,8 +26,10 @@ export function normalizeSupabaseUserId(sub) {
 }
 
 export function mapProfileRoleToSqliteRole(profileRole) {
-  const r = String(profileRole || '').trim();
-  if (r === 'Admin' || r === 'Manager') return 'admin';
+  const r = String(profileRole || '').trim().toLowerCase();
+  if (['admin', 'manager', 'org admin', 'organization admin', 'organisation admin', 'owner'].includes(r)) {
+    return 'admin';
+  }
   return 'support_coordinator';
 }
 
@@ -91,9 +93,10 @@ export function upsertSqliteUserFromSupabase({ sub, email, profile }) {
   if (row) {
     const nextOrgId = orgFromProfile ?? row.org_id ?? null;
     // Keep explicit local roles to avoid downgrading established accounts on Supabase profile sync.
+    // Allow promotion to admin when the upstream profile is elevated.
     let nextRole = row.role || sqliteRole;
     if (row.role === 'delegate') nextRole = 'delegate';
-    else if (!row.role) nextRole = sqliteRole;
+    else if (!row.role || (row.role !== 'admin' && sqliteRole === 'admin')) nextRole = sqliteRole;
 
     db.prepare(`
       UPDATE users SET

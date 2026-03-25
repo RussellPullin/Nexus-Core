@@ -4,6 +4,15 @@ import { getSupabaseBrowserClient } from '../lib/supabaseClient';
 
 const AuthContext = createContext(null);
 
+function normalizeRole(roleRaw) {
+  const role = String(roleRaw || '').trim().toLowerCase();
+  if (['admin', 'manager', 'org admin', 'organization admin', 'organisation admin', 'owner'].includes(role)) {
+    return 'admin';
+  }
+  if (role === 'delegate') return 'delegate';
+  return 'support_coordinator';
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -119,10 +128,11 @@ export function AuthProvider({ children }) {
     await authApi.changePassword(currentPassword, newPassword);
   };
 
-  const isAdmin = user?.role === 'admin';
-  const isDelegate = user?.role === 'delegate';
+  const normalizedRole = normalizeRole(user?.role);
+  const isAdmin = normalizedRole === 'admin';
+  const isDelegate = normalizedRole === 'delegate';
   const canManageUsers = isAdmin || (isDelegate && user?.delegate_grant_active);
-  const canAccessCaseTasks = isAdmin || (isDelegate && user?.delegate_grant_active) || user?.role === 'support_coordinator';
+  const canAccessCaseTasks = isAdmin || (isDelegate && user?.delegate_grant_active) || normalizedRole === 'support_coordinator';
 
   return (
     <AuthContext.Provider

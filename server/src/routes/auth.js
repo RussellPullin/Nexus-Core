@@ -2,7 +2,6 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { v4 as uuid } from 'uuid';
-import http from 'http';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
@@ -11,26 +10,13 @@ const USER_SELECT = `id, email, name, role, org_id, auth_uid, billing_interval_m
   email_provider, email_connected_address, email_reconnect_required`;
 const SUPABASE_PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
 
-function agentDebugLog({ location, message, data, runId, hypothesisId }) {
-  try {
-    const payload = {
-      sessionId: '455d03',
-      location,
-      message,
-      data: data || {},
-      timestamp: Date.now(),
-      runId,
-      hypothesisId
-    };
-    const body = JSON.stringify(payload);
-    const req = http.request(
-      'http://127.0.0.1:7395/ingest/9396d2bf-ffd7-4cdc-a66d-39fbe0a7e677',
-      { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '455d03' } },
-      (res) => res.resume()
-    );
-    req.on('error', () => {});
-    req.end(body);
-  } catch {}
+function normalizeAppRole(roleRaw) {
+  const r = String(roleRaw || '').trim().toLowerCase();
+  if (['admin', 'manager', 'org admin', 'organization admin', 'organisation admin', 'owner'].includes(r)) {
+    return 'admin';
+  }
+  if (r === 'delegate') return 'delegate';
+  return 'support_coordinator';
 }
 
 function secureEquals(a, b) {
@@ -44,7 +30,7 @@ function shapeUser(row) {
   if (!row) return null;
   return {
     ...row,
-    role: row.role || 'admin',
+    role: normalizeAppRole(row.role),
     billing_interval_minutes: row.billing_interval_minutes ?? 15,
     signature_data: row.signature_data || null,
     email_reconnect_required: !!row.email_reconnect_required,
@@ -59,18 +45,12 @@ router.get('/ping', (req, res) => res.json({ ok: true }));
 router.post('/login', (req, res) => {
   try {
     const { email, password } = req.body;
-    // #region agent log
-    agentDebugLog({ runId: 'pre-fix', hypothesisId: 'H1', location: 'server/src/routes/auth.js:/login:entry', message: 'Password login attempt received', data: { email_present: Boolean(email), password_present: Boolean(password) } });
-    // #endregion
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password required' });
     }
     const emailNorm = String(email).trim().toLowerCase();
     const passwordNorm = String(password).trim();
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(emailNorm);
-    // #region agent log
-    agentDebugLog({ runId: 'pre-fix', hypothesisId: 'H2', location: 'server/src/routes/auth.js:/login:user_lookup', message: 'Password login user lookup result', data: { user_found: Boolean(user), has_auth_uid: Boolean(user?.auth_uid), has_password_hash: Boolean(user?.password_hash) } });
-    // #endregion
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
@@ -82,9 +62,6 @@ router.post('/login', (req, res) => {
       isSupabaseOnlyAccount = !hasHash || usesPlaceholder;
     }
     if (isSupabaseOnlyAccount) {
-      // #region agent log
-      agentDebugLog({ runId: 'pre-fix', hypothesisId: 'H3', location: 'server/src/routes/auth.js:/login:supabase_only_branch', message: 'Password login rejected due to Supabase-only account', data: { user_id: user?.id || null, has_auth_uid: Boolean(user?.auth_uid) } });
-      // #endregion
       return res.status(401).json({
         error: 'This account uses Supabase sign-in. Use the same email on the login page with Supabase enabled.',
         code: 'USE_SUPABASE_AUTH'
@@ -92,19 +69,13 @@ router.post('/login', (req, res) => {
     }
     const ok = bcrypt.compareSync(passwordNorm, user.password_hash);
     if (!ok) {
-      // #region agent log
-      agentDebugLog({ runId: 'pre-fix', hypothesisId: 'H4', location: 'server/src/routes/auth.js:/login:password_compare', message: 'Password login failed bcrypt compare', data: { user_id: user?.id || null, is_supabase_only: false } });
-      // #endregion
       return res.status(401).json({ error: 'Invalid email or password' });
     }
-    // #region agent log
-    agentDebugLog({ runId: 'pre-fix', hypothesisId: 'H5', location: 'server/src/routes/auth.js:/login:success', message: 'Password login succeeded', data: { user_id: user?.id || null, role: user?.role || null } });
-    // #endregion
     req.session.user = {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role || 'admin',
+      role: normalizeAppRole(user.role),
       org_id: user.org_id || null
     };
     const u = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(user.id);
@@ -142,7 +113,7 @@ router.post('/emergency-login', (req, res) => {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role || 'admin',
+      role: normalizeAppRole(user.role),
       org_id: user.org_id || null
     };
     return res.json({
@@ -176,7 +147,7 @@ router.post('/register', (req, res) => {
       VALUES (?, ?, ?, ?, ?)
     `).run(id, emailNorm, hash, name || null, role);
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-    req.session.user = { id: user.id, email: user.email, name: user.name, role: user.role || 'admin', org_id: user.org_id || null };
+    req.session.user = { id: user.id, email: user.email, name: user.name, role: normalizeAppRole(user.role), org_id: user.org_id || null };
     const u = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(id);
     res.status(201).json({ user: shapeUser(u) });
   } catch (err) {
@@ -193,7 +164,7 @@ router.get('/me', (req, res) => {
     req.session.destroy();
     return res.status(401).json({ error: 'User not found' });
   }
-  const role = user.role || 'admin';
+  const role = normalizeAppRole(user.role);
   req.session.user.role = role;
   req.session.user.org_id = user.org_id || null;
   const assignedCount = db.prepare('SELECT COUNT(*) as c FROM user_participants WHERE user_id = ?').get(req.session.user.id)?.c ?? 0;
