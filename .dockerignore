@@ -1,0 +1,18 @@
+# Secrets and local config — never commit
+.env
+.env.local
+.env.*.local
+azure-email-function/local.settings.json
+
+# Dependencies and build output
+node_modules/
+client/node_modules/
+server/node_modules/
+client/dist/
+
+# Data (often contains PII)
+data/
+
+# OS / editor
+.DS_Store
+*.log
