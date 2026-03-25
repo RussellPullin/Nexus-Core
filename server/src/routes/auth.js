@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { v4 as uuid } from 'uuid';
+import { normalizeAppRole } from '../../../shared/appRoles.js';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
@@ -9,15 +10,6 @@ import { isSuperAdminEmail } from '../lib/superAdmin.js';
 const USER_SELECT = `id, email, name, role, org_id, auth_uid, billing_interval_minutes, staff_id, signature_data,
   email_provider, email_connected_address, email_reconnect_required`;
 const SUPABASE_PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
-
-function normalizeAppRole(roleRaw) {
-  const r = String(roleRaw || '').trim().toLowerCase();
-  if (['admin', 'manager', 'org admin', 'organization admin', 'organisation admin', 'owner'].includes(r)) {
-    return 'admin';
-  }
-  if (r === 'delegate') return 'delegate';
-  return 'support_coordinator';
-}
 
 function secureEquals(a, b) {
   const left = Buffer.from(String(a || ''), 'utf8');

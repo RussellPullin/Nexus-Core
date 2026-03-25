@@ -22,6 +22,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=builder /app/server /app/server
+COPY --from=builder /app/shared /app/shared
 COPY --from=builder /app/client/dist /app/client/dist
 COPY --from=builder /app/database /app/database
 COPY --from=builder /app/package.json /app/package.json

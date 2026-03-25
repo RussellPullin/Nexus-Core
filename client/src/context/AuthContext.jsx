@@ -1,17 +1,9 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { normalizeAppRole } from '@nexus-shared/appRoles.js';
 import { auth as authApi, tryRestoreExpressSessionFromSupabase } from '../lib/api';
 import { getSupabaseBrowserClient } from '../lib/supabaseClient';
 
 const AuthContext = createContext(null);
-
-function normalizeRole(roleRaw) {
-  const role = String(roleRaw || '').trim().toLowerCase();
-  if (['admin', 'manager', 'org admin', 'organization admin', 'organisation admin', 'owner'].includes(role)) {
-    return 'admin';
-  }
-  if (role === 'delegate') return 'delegate';
-  return 'support_coordinator';
-}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -128,7 +120,7 @@ export function AuthProvider({ children }) {
     await authApi.changePassword(currentPassword, newPassword);
   };
 
-  const normalizedRole = normalizeRole(user?.role);
+  const normalizedRole = normalizeAppRole(user?.role);
   const isAdmin = normalizedRole === 'admin';
   const isDelegate = normalizedRole === 'delegate';
   const canManageUsers = isAdmin || (isDelegate && user?.delegate_grant_active);

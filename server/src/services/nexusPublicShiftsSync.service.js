@@ -6,6 +6,7 @@ import { db } from '../db/index.js';
 import {
   getSupabaseServiceRoleClient,
   getShifterServiceRoleClient,
+  provisionNexusSupabaseProfileForStaff,
   resolveEffectiveShifterOrgIdForNexusOrg,
 } from './supabaseStaffShifter.service.js';
 
@@ -64,6 +65,7 @@ function runDeferred(fn) {
   if (typeof queueMicrotask === 'function') queueMicrotask(fn);
   else setImmediate(fn);
 }
+const _profileProvisionBlockedEmails = new Set();
 
 function pickFirstNonEmptyString(obj, keys) {
   for (const k of keys) {
@@ -103,11 +105,14 @@ async function findShifterClientIdByName(shifter, clientNameRaw, shifterOrgId, c
             return pickFirstNonEmptyString(rows[0], ['id', 'client_id', 'participant_id', 'profile_id']);
           }
         }
-        const { data, error } = await shifter.from(table).select('*').ilike(emailCol, emailPat).limit(2);
-        if (error) continue;
-        const rows = data || [];
-        if (!rows.length) continue;
-        return pickFirstNonEmptyString(rows[0], ['id', 'client_id', 'participant_id', 'profile_id']);
+        // Never cross org boundaries: only run unscoped email lookup when no org scope exists.
+        if (!shifterOrgId) {
+          const { data, error } = await shifter.from(table).select('*').ilike(emailCol, emailPat).limit(2);
+          if (error) continue;
+          const rows = data || [];
+          if (!rows.length) continue;
+          return pickFirstNonEmptyString(rows[0], ['id', 'client_id', 'participant_id', 'profile_id']);
+        }
       }
     }
 
@@ -128,15 +133,18 @@ async function findShifterClientIdByName(shifter, clientNameRaw, shifterOrgId, c
         }
       }
 
-      const { data, error } = await shifter.from(table).select('*').ilike(nameCol, exactName).limit(2);
-      if (error) continue;
-      const rows = data || [];
-      if (rows.length) {
-        return pickFirstNonEmptyString(rows[0], ['id', 'client_id', 'participant_id', 'profile_id']);
+      // Never cross org boundaries: only run unscoped name lookup when no org scope exists.
+      if (!shifterOrgId) {
+        const { data, error } = await shifter.from(table).select('*').ilike(nameCol, exactName).limit(2);
+        if (error) continue;
+        const rows = data || [];
+        if (rows.length) {
+          return pickFirstNonEmptyString(rows[0], ['id', 'client_id', 'participant_id', 'profile_id']);
+        }
       }
 
       // Loose contains match for cases where Shifter stores suffix/prefix labels.
-      if (fuzzyName) {
+      if (fuzzyName && !shifterOrgId) {
         const { data: fuzzyRows, error: fuzzyErr } = await shifter.from(table).select('*').ilike(nameCol, fuzzyName).limit(2);
         if (fuzzyErr) continue;
         const fr = fuzzyRows || [];
@@ -162,18 +170,18 @@ async function upsertShiftDirectlyToShifter({
   if (!workerProfileId) return { ok: false, skipped: true, reason: 'no_shifter_worker_profile_id' };
   const shifter = getShifterServiceRoleClient();
   if (!shifter) return { ok: false, skipped: true, reason: 'shifter_not_configured' };
-
-  const fallbackOrgRow =
-    !nexusOrgId ? db.prepare('SELECT id FROM organisations ORDER BY created_at ASC LIMIT 1').get() : null;
-  const nexusOrgIdResolved = nexusOrgId || fallbackOrgRow?.id || null;
+  if (!isUuid(nexusOrgId)) {
+    return { ok: false, skipped: true, reason: 'no_valid_nexus_org_id' };
+  }
 
   let shifterOrgId = null;
-  if (isUuid(nexusOrgIdResolved)) {
-    try {
-      shifterOrgId = await resolveEffectiveShifterOrgIdForNexusOrg(nexusOrgIdResolved.trim());
-    } catch (e) {
-      console.warn('[nexus-public-shifts] resolve shifter org failed', shiftId, e?.message || e);
-    }
+  try {
+    shifterOrgId = await resolveEffectiveShifterOrgIdForNexusOrg(nexusOrgId.trim());
+  } catch (e) {
+    console.warn('[nexus-public-shifts] resolve shifter org failed', shiftId, e?.message || e);
+  }
+  if (!isUuid(shifterOrgId)) {
+    return { ok: false, skipped: true, reason: 'no_valid_shifter_org_id' };
   }
   const shifterClientId = await findShifterClientIdByName(shifter, clientName, shifterOrgId, clientEmail);
 
@@ -184,8 +192,8 @@ async function upsertShiftDirectlyToShifter({
     scheduled_end: scheduledEndIso,
     client: clientName || null,
     client_id: shifterClientId || null,
-    org_id: shifterOrgId || (isUuid(nexusOrgIdResolved) ? nexusOrgIdResolved.trim() : null),
-    org: shifterOrgId || (isUuid(nexusOrgIdResolved) ? nexusOrgIdResolved.trim() : null),
+    org_id: shifterOrgId.trim(),
+    org: shifterOrgId.trim(),
     status: status || 'scheduled',
   };
 
@@ -273,6 +281,7 @@ export async function mirrorShiftToNexusSupabase(shiftId) {
            st.id AS sqlite_staff_id,
            st.email AS staff_email,
            st.shifter_worker_profile_id,
+           st.role AS staff_role,
            st.org_id AS staff_org_id
     FROM shifts s
     JOIN participants p ON s.participant_id = p.id
@@ -297,11 +306,44 @@ export async function mirrorShiftToNexusSupabase(shiftId) {
   } catch (e) {
     console.warn('[nexus-public-shifts] profile lookup failed', shiftId, e.message);
   }
+
+  if (!profileStaffId && row.staff_email) {
+    const emailKey = normalizeEmail(row.staff_email);
+    const provisionBlocked = emailKey && _profileProvisionBlockedEmails.has(emailKey);
+    if (provisionBlocked) {
+      console.warn('[nexus-public-shifts] profile auto-provision disabled for email due to prior auth-admin failure', {
+        shiftId,
+        staff_email: row.staff_email || null,
+      });
+    } else {
+    try {
+      const provision = await provisionNexusSupabaseProfileForStaff(row.staff_email, row.staff_org_id || row.provider_org_id || null, {
+        staffRole: row.staff_role || null,
+      });
+      if (provision?.ok) {
+        profileStaffId = await findNexusProfileIdByStaffEmail(admin, row.staff_email);
+      } else if (!provision?.skipped) {
+        console.warn('[nexus-public-shifts] profile provision failed', shiftId, provision?.error || 'unknown');
+        if (/valid Bearer token/i.test(String(provision?.error || '')) && emailKey) {
+          _profileProvisionBlockedEmails.add(emailKey);
+        }
+      }
+    } catch (e) {
+      console.warn('[nexus-public-shifts] profile provision error', shiftId, e?.message || e);
+      if (/valid Bearer token/i.test(String(e?.message || '')) && emailKey) {
+        _profileProvisionBlockedEmails.add(emailKey);
+      }
+    }
+    }
+  }
+
   if (!profileStaffId) {
-    console.warn(
-      '[nexus-public-shifts] no Supabase profile match for staff email; shift will mirror without staff_id',
-      { shiftId, sqlite_staff_id: row.sqlite_staff_id, staff_email: row.staff_email || null },
-    );
+    console.warn('[nexus-public-shifts] no Supabase profile match for staff email; skipping shift mirror to avoid RLS failure', {
+      shiftId,
+      sqlite_staff_id: row.sqlite_staff_id,
+      staff_email: row.staff_email || null,
+    });
+    return { ok: false, skipped: true, reason: 'staff_profile_missing' };
   }
 
   const localStatus = row.status || 'scheduled';

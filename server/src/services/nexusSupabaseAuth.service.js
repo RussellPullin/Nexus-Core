@@ -1,4 +1,5 @@
 import bcrypt from 'bcrypt';
+import { normalizeAppRole } from '../../../shared/appRoles.js';
 import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { verifySupabaseAccessToken } from '../lib/supabaseJwt.js';
@@ -26,11 +27,7 @@ export function normalizeSupabaseUserId(sub) {
 }
 
 export function mapProfileRoleToSqliteRole(profileRole) {
-  const r = String(profileRole || '').trim().toLowerCase();
-  if (['admin', 'manager', 'org admin', 'organization admin', 'organisation admin', 'owner'].includes(r)) {
-    return 'admin';
-  }
-  return 'support_coordinator';
+  return normalizeAppRole(profileRole);
 }
 
 export async function fetchSupabaseProfile(userId) {

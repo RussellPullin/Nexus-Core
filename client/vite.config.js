@@ -15,7 +15,15 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), ...(useHttps ? [basicSsl()] : [])],
     envDir: __dirname,
+    resolve: {
+      alias: {
+        '@nexus-shared': fileURLToPath(new URL('../shared', import.meta.url)),
+      },
+    },
     server: {
+      fs: {
+        allow: [fileURLToPath(new URL('..', import.meta.url))],
+      },
       port: Number(env.VITE_DEV_PORT) || 5174,
       proxy: {
         '/api': {
