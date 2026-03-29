@@ -543,9 +543,12 @@ function ShifterIntegrationCard() {
   const [copyMsg, setCopyMsg] = useState('');
   const [linkInfo, setLinkInfo] = useState(null);
 
-  const base = window.location.origin.replace(/\/$/, '');
-  const webhookUrl = `${base}/api/webhooks/progress-app`;
-  const syncUrl = `${base}/api/sync/from-excel`;
+  const clientOrigin = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : '';
+  const webhookUrl =
+    (linkInfo?.webhook_url && String(linkInfo.webhook_url).trim()) ||
+    `${clientOrigin}/api/webhooks/progress-app`;
+  const syncUrl =
+    (linkInfo?.sync_url && String(linkInfo.sync_url).trim()) || `${clientOrigin}/api/sync/from-excel`;
 
   const load = async () => {
     setLoading(true);
@@ -613,7 +616,8 @@ function ShifterIntegrationCard() {
             — yours is <strong>{linkInfo.organization_name}</strong>
           </>
         ) : null}
-        ). <strong>Push into Nexus:</strong> configure your schedule / Progress app with the URLs below so shifts are sent here.
+        ). <strong>Push into Nexus:</strong> use the URLs below in your schedule / Progress app. The public host comes from
+        Supabase (see below) when set; otherwise this site’s address or server environment defaults apply.
       </p>
 
       <div className="settings-shifter-card-layout">
@@ -631,9 +635,31 @@ function ShifterIntegrationCard() {
 
           <h4 className="settings-subsection-title">Send shifts into Nexus Core</h4>
           <p className="form-hint" style={{ marginTop: 0 }}>
-            Paste these into your external app (webhook preferred; Excel sync as fallback).
+            Paste these into your external app (webhook preferred; Excel sync as fallback). To pin the correct public host
+            (for example when the UI and API use different domains), open Supabase <strong>Table editor → profiles</strong>,
+            find your <strong>Org Admin</strong> row (match <code>email</code>), and set{' '}
+            <code>nexus_shift_api_base_url</code> to your Nexus API origin only — e.g.{' '}
+            <code>https://nexus-core-crm.fly.dev</code> with no trailing slash.
           </p>
-          <div className="form-group">
+          {!loading && linkInfo?.shift_urls_source === 'supabase_profile' && linkInfo?.shift_url_profile_email && (
+            <p className="settings-success" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.9rem' }}>
+              URLs use <code>nexus_shift_api_base_url</code> from the Admin profile{' '}
+              <strong>{linkInfo.shift_url_profile_email}</strong> in Supabase.
+            </p>
+          )}
+          {!loading && linkInfo?.shift_urls_source === 'env' && (
+            <p className="form-hint" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+              No Admin profile base in Supabase; using server env (<code>NEXUS_PUBLIC_API_URL</code> /{' '}
+              <code>OAUTH_PUBLIC_URL</code> / <code>FRONTEND_BASE_URL</code>).
+            </p>
+          )}
+          {!loading && linkInfo?.shift_urls_source === 'client_origin' && (
+            <p className="form-hint" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+              No Supabase Admin base or env fallback; using this browser origin. Set{' '}
+              <code>nexus_shift_api_base_url</code> on an Admin profile if that is wrong for your shift app.
+            </p>
+          )}
+          <div className="form-group" style={{ marginTop: '0.75rem' }}>
             <label>Webhook endpoint (if enabled)</label>
             <input className="form-input" value={webhookUrl} readOnly />
             <small className="form-hint">

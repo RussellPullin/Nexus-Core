@@ -16,6 +16,67 @@ import {
 
 const router = Router();
 
+function trimApiBase(u) {
+  if (!u || typeof u !== 'string') return null;
+  const t = u.trim().replace(/\/$/, '');
+  return t || null;
+}
+
+function defaultShiftApiBaseFromEnv() {
+  return (
+    trimApiBase(process.env.NEXUS_PUBLIC_API_URL) ||
+    trimApiBase(process.env.OAUTH_PUBLIC_URL) ||
+    trimApiBase(process.env.FRONTEND_BASE_URL) ||
+    null
+  );
+}
+
+/**
+ * Webhook/sync URLs for external shift apps. Prefer Supabase Admin profile nexus_shift_api_base_url,
+ * then NEXUS_PUBLIC_API_URL / OAUTH_PUBLIC_URL / FRONTEND_BASE_URL; otherwise client uses browser origin.
+ */
+async function resolveShiftIntegrationUrls(admin, orgId) {
+  const { data: rows, error } = await admin
+    .from('profiles')
+    .select('email, nexus_shift_api_base_url')
+    .eq('org_id', orgId)
+    .eq('role', 'Admin');
+  if (error) {
+    console.warn('[shifter-org-link] profiles for shift URLs:', error.message);
+  }
+  const sorted = (rows || []).slice().sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')));
+  const hit = sorted.find((r) => trimApiBase(r.nexus_shift_api_base_url));
+  let base = hit ? trimApiBase(hit.nexus_shift_api_base_url) : null;
+  let source = 'client_origin';
+  let profileEmail = null;
+  if (base) {
+    source = 'supabase_profile';
+    profileEmail = hit.email || null;
+  } else {
+    const envB = defaultShiftApiBaseFromEnv();
+    if (envB) {
+      base = envB;
+      source = 'env';
+    }
+  }
+  if (base) {
+    return {
+      shift_api_base_url: base,
+      shift_urls_source: source,
+      shift_url_profile_email: profileEmail,
+      webhook_url: `${base}/api/webhooks/progress-app`,
+      sync_url: `${base}/api/sync/from-excel`,
+    };
+  }
+  return {
+    shift_api_base_url: null,
+    shift_urls_source: 'client_origin',
+    shift_url_profile_email: null,
+    webhook_url: null,
+    sync_url: null,
+  };
+}
+
 /** Prefer RPC so the update is plain SQL (avoids PostgREST PATCH / schema-cache column errors on organizations). */
 async function persistOrgShifterLink(admin, orgId, shifterOrganizationId) {
   const { error: rpcErr } = await admin.rpc('set_org_shifter_link', {
@@ -199,11 +260,13 @@ router.get('/shifter-org-link', requireAuth, requireAdminOrDelegate, async (req,
       return res.status(400).json({ error: error.message || 'Failed to read organisation link', code: 'SUPABASE_ORG' });
     }
     if (!data) return res.status(404).json({ error: 'Organisation not found in Supabase', code: 'ORG_NOT_FOUND' });
+    const shiftUrls = await resolveShiftIntegrationUrls(admin, orgId);
     return res.json({
       org_id: data.id,
       organization_name: data.name || null,
       shifter_organization_id: data.shifter_organization_id || null,
-      linked: Boolean(data.shifter_organization_id)
+      linked: Boolean(data.shifter_organization_id),
+      ...shiftUrls,
     });
   } catch (err) {
     const code = err.code || 'SHIFTER_LINK_READ_ERROR';
