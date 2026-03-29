@@ -100,6 +100,7 @@ router.post('/send-roster', async (req, res) => {
         await sendICSByEmail(st.email, `Your roster – ${weekLabel}`, ics, safeFilename, staffShifts, userId);
         for (const sh of staffShifts) {
           db.prepare('UPDATE shifts SET roster_sent_at = datetime(\'now\') WHERE id = ?').run(sh.id);
+          scheduleMirrorShiftToNexusSupabase(sh.id);
         }
         results.sent++;
         console.log('[send-roster] sent to', st.email);
@@ -226,7 +227,10 @@ router.get('/:id/refresh-expense', async (req, res) => {
     if (!shift.shifter_shift_id) {
       return res.json(shift);
     }
-    const { shifts } = await pullShiftsFromExcel({}).catch(() => ({ shifts: [] }));
+    const orgId = req.session?.user?.org_id || null;
+    const { shifts } = await pullShiftsFromExcel({ organizationId: orgId || undefined }).catch(() => ({
+      shifts: [],
+    }));
     const excelShift = (shifts || []).find(
       (s) => String(s.shiftId || '').trim() === String(shift.shifter_shift_id).trim()
     );
@@ -531,6 +535,7 @@ router.post('/:id/send-ics', async (req, res) => {
     const dateStr = new Date(shift.start_time).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
     await sendICSByEmail(shift.staff_email, `Your shift – ${dateStr}`, ics, `shift-${req.params.id}.ics`, [shift], userId);
     db.prepare('UPDATE shifts SET roster_sent_at = datetime(\'now\') WHERE id = ?').run(req.params.id);
+    scheduleMirrorShiftToNexusSupabase(req.params.id);
     res.json({ sent: true, to: shift.staff_email });
   } catch (err) {
     res.status(500).json({ error: err.message });

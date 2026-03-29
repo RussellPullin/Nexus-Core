@@ -89,12 +89,40 @@ function encodeMimeHeader(s) {
   return `=?UTF-8?B?${Buffer.from(str, 'utf8').toString('base64')}?=`;
 }
 
+function normalizeApiKeyEnv(value) {
+  if (value == null || typeof value !== 'string') return '';
+  let s = value.trim().replace(/^\uFEFF/, '');
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
 async function handleSendEmail(request, context) {
   loadLocalSettings();
-  const apiKey = process.env.API_KEY;
+  const apiKey = normalizeApiKeyEnv(process.env.API_KEY);
   if (apiKey) {
-    const reqKey = request.headers.get('x-api-key');
+    const reqKey = normalizeApiKeyEnv(request.headers.get('x-api-key') || '');
     if (reqKey !== apiKey) {
+      context.log(
+        '[sendEmail] API key mismatch headerPresent=%s headerLen=%s expectedLen=%s',
+        Boolean(reqKey),
+        reqKey.length,
+        apiKey.length
+      );
+      // #region agent log
+      fetch('http://127.0.0.1:7395/ingest/9396d2bf-ffd7-4cdc-a66d-39fbe0a7e677', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fa9c18' },
+        body: JSON.stringify({
+          sessionId: 'fa9c18',
+          location: 'azure-email-function/sendEmail.js:api-key-mismatch',
+          message: 'function API key check failed',
+          data: { hypothesisId: 'A,B', headerPresent: Boolean(reqKey), headerLen: reqKey.length, expectedLen: apiKey.length },
+          timestamp: Date.now()
+        })
+      }).catch(() => {});
+      // #endregion
       return { status: 401, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Invalid or missing API key' }) };
     }
   }

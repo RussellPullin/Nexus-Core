@@ -484,7 +484,7 @@ export default function ShiftsPage() {
           </button>
         </h3>
         <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-          Pull shifts from OneDrive Excel (Progress Notes App backup). Matched staff/client appear in Shifts; unmatched appear here for manual linking.
+          Pull shifts from the Progress Notes Excel file in OneDrive. If your org connected Microsoft OneDrive in Settings, that account is used; otherwise the server needs ONEDRIVE_ADMIN_USER_ID and Azure app credentials. Matched staff/client appear in Shifts; unmatched appear here for manual linking.
         </p>
         {showAppShifts && (
           <div style={{ marginTop: '0.75rem', maxHeight: 300, overflowY: 'auto' }}>

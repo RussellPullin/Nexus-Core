@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { participants, organisations, ndis } from '../lib/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate } from '../lib/dateUtils';
@@ -35,6 +36,7 @@ const defaultForm = () => ({
 });
 
 export default function ParticipantsPage() {
+  const { canManageUsers } = useAuth();
   const [list, setList] = useState([]);
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
@@ -284,6 +286,13 @@ export default function ParticipantsPage() {
         ) : list.length === 0 ? (
           <div className="empty-state">
             <p>No participants yet.</p>
+            {!canManageUsers && (
+              <p style={{ color: '#64748b', fontSize: '0.95rem', marginTop: '0.75rem', maxWidth: 520 }}>
+                Accounts without admin access only see participants assigned to them. If clients are missing, ask an
+                organisation admin to assign you to those participants (Admin), or confirm you are signed into the
+                correct workspace.
+              </p>
+            )}
             <button className="btn btn-primary" onClick={() => setShowModal(true)}>Add your first participant</button>
           </div>
         ) : (

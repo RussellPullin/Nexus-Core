@@ -5,6 +5,8 @@
 
 const ADMIN_ALIASES = new Set([
   'admin',
+  'shifter admin',
+  'shifter administrator',
   'administrator',
   'manager',
   'org admin',

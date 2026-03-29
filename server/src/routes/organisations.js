@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
-import { requireAdminOrDelegate } from '../middleware/roles.js';
+import { requireAdminOrDelegate, includeNullProviderParticipantsForUser } from '../middleware/roles.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 
 const router = Router();
@@ -11,6 +11,22 @@ router.use(requireAuth);
 function requesterScope(req) {
   const u = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(req.session?.user?.id);
   return { orgId: u?.org_id || null, superAdmin: isSuperAdminEmail(u?.email) };
+}
+
+/** SQL fragment + params to limit participants to the requester's provider tenant (matches /participants list). */
+function participantOrgScopeClause(req, tableAlias = 'p') {
+  const u = db.prepare('SELECT id, org_id, email FROM users WHERE id = ?').get(req.session?.user?.id);
+  const scope = requesterScope(req);
+  if (!scope.orgId || scope.superAdmin) return { sql: '', params: [] };
+  const a = tableAlias;
+  const legacyNull = includeNullProviderParticipantsForUser(u);
+  if (legacyNull) {
+    return {
+      sql: ` AND (${a}.provider_org_id = ? OR ${a}.provider_org_id IS NULL OR TRIM(COALESCE(${a}.provider_org_id, '')) = '')`,
+      params: [scope.orgId]
+    };
+  }
+  return { sql: ` AND ${a}.provider_org_id = ?`, params: [scope.orgId] };
 }
 
 // Standalone contacts - must be before /:id
@@ -39,15 +55,17 @@ router.get('/contacts/all', (req, res) => {
 router.get('/', (req, res) => {
   try {
     const scope = requesterScope(req);
+    const pc = participantOrgScopeClause(req, 'p');
     const { search, type } = req.query;
+    const listParams = [...pc.params, ...(scope.orgId && !scope.superAdmin ? [scope.orgId] : [])];
     let orgs = db.prepare(`
       SELECT o.*, 
         (SELECT COUNT(*) FROM contacts c WHERE c.organisation_id = o.id) as contact_count,
-        (SELECT COUNT(*) FROM participants p WHERE p.plan_manager_id = o.id) as participant_count
+        (SELECT COUNT(*) FROM participants p WHERE p.plan_manager_id = o.id${pc.sql}) as participant_count
       FROM organisations o
       ${scope.orgId && !scope.superAdmin ? 'WHERE o.owner_org_id = ?' : ''}
       ORDER BY o.name
-    `).all(...(scope.orgId && !scope.superAdmin ? [scope.orgId] : []));
+    `).all(...listParams);
 
     if (search) {
       const s = search.toLowerCase();
@@ -58,10 +76,13 @@ router.get('/', (req, res) => {
     }
     if (type) {
       if (type === 'plan_manager') {
-        const planManagerIds = new Set(
-          db.prepare('SELECT DISTINCT plan_manager_id FROM participants WHERE plan_manager_id IS NOT NULL').all()
-            .map(r => r.plan_manager_id)
-        );
+        const pmPc = participantOrgScopeClause(req, 'participants');
+        const planManagerRows = db
+          .prepare(
+            `SELECT DISTINCT plan_manager_id FROM participants WHERE plan_manager_id IS NOT NULL${pmPc.sql}`
+          )
+          .all(...pmPc.params);
+        const planManagerIds = new Set(planManagerRows.map((r) => r.plan_manager_id));
         orgs = orgs.filter(o => {
           const t = (o.type || '').toLowerCase();
           const isPlanManagerType = t.includes('plan') && t.includes('manager');
@@ -87,7 +108,10 @@ router.get('/:id', (req, res) => {
       : db.prepare('SELECT * FROM organisations WHERE id = ?').get(req.params.id);
     if (!org) return res.status(404).json({ error: 'Organisation not found' });
     const contacts = db.prepare('SELECT * FROM contacts WHERE organisation_id = ?').all(req.params.id);
-    const participants = db.prepare('SELECT id, name, ndis_number FROM participants WHERE plan_manager_id = ?').all(req.params.id);
+    const pc = participantOrgScopeClause(req, 'p');
+    const participants = db
+      .prepare(`SELECT id, name, ndis_number FROM participants p WHERE p.plan_manager_id = ?${pc.sql}`)
+      .all(req.params.id, ...pc.params);
     res.json({ ...org, contacts, participants });
   } catch (err) {
     res.status(500).json({ error: err.message });

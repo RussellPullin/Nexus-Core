@@ -3,13 +3,24 @@ import { encrypt, decrypt } from '../lib/crypto.js';
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
 
+/** SQLite user id match even if OAuth state / session casing differs from row (UUID hex). */
+function resolveCanonicalUserId(userId) {
+  if (userId == null || userId === '') return userId;
+  const direct = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+  if (direct?.id) return direct.id;
+  const folded = db.prepare('SELECT id FROM users WHERE lower(id) = lower(?) LIMIT 1').get(userId);
+  return folded?.id ?? userId;
+}
+
 function markReconnectRequired(userId) {
+  const uid = resolveCanonicalUserId(userId);
   db.prepare(`
     UPDATE users SET email_reconnect_required = 1, updated_at = datetime('now') WHERE id = ?
-  `).run(userId);
+  `).run(uid);
 }
 
 export function disconnectUserEmail(userId) {
+  const uid = resolveCanonicalUserId(userId);
   db.prepare(`
     UPDATE users SET
       email_provider = NULL,
@@ -20,13 +31,15 @@ export function disconnectUserEmail(userId) {
       email_reconnect_required = 0,
       updated_at = datetime('now')
     WHERE id = ?
-  `).run(userId);
+  `).run(uid);
 }
 
 export function saveOAuthTokens(userId, { provider, connectedAddress, accessToken, refreshToken, expiresInSec }) {
+  const uid = resolveCanonicalUserId(userId);
   const now = Date.now();
   const expiresAt = expiresInSec ? now + expiresInSec * 1000 : now + 3600 * 1000;
-  db.prepare(`
+  const info = db
+    .prepare(`
     UPDATE users SET
       email_provider = ?,
       email_connected_address = ?,
@@ -36,14 +49,42 @@ export function saveOAuthTokens(userId, { provider, connectedAddress, accessToke
       email_reconnect_required = 0,
       updated_at = datetime('now')
     WHERE id = ?
-  `).run(
-    provider,
-    connectedAddress,
-    encrypt(accessToken),
-    refreshToken ? encrypt(refreshToken) : null,
-    expiresAt,
-    userId
-  );
+  `)
+    .run(
+      provider,
+      connectedAddress,
+      encrypt(accessToken),
+      refreshToken ? encrypt(refreshToken) : null,
+      expiresAt,
+      uid
+    );
+  // #region agent log
+  const dbgTok = {
+    sessionId: 'a4dffc',
+    location: 'emailOAuthTokens.service.js:saveOAuthTokens',
+    message: 'saveOAuthTokens result',
+    data: {
+      changes: info.changes,
+      provider,
+      uidPrefix: String(uid || '').slice(0, 8)
+    },
+    timestamp: Date.now(),
+    hypothesisId: 'B'
+  };
+  fetch('http://127.0.0.1:7395/ingest/9396d2bf-ffd7-4cdc-a66d-39fbe0a7e677', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'a4dffc' },
+    body: JSON.stringify(dbgTok)
+  }).catch(() => {});
+  console.error('__NEXUS_DEBUG_A4DFFC__', JSON.stringify(dbgTok));
+  // #endregion
+  if (info.changes === 0) {
+    const err = new Error(
+      'Could not save email connection (user record missing). Sign out, sign in again, then reconnect email.'
+    );
+    err.code = 'EMAIL_OAUTH_SAVE_NO_USER';
+    throw err;
+  }
 }
 
 /**
@@ -51,11 +92,12 @@ export function saveOAuthTokens(userId, { provider, connectedAddress, accessToke
  * @throws {Error} with .code EMAIL_RECONNECT_REQUIRED
  */
 export async function getValidAccessToken(userId) {
+  const uid = resolveCanonicalUserId(userId);
   const row = db.prepare(`
     SELECT email_provider, email_oauth_access_encrypted, email_oauth_refresh_encrypted,
            email_token_expires_at, email_reconnect_required
     FROM users WHERE id = ?
-  `).get(userId);
+  `).get(uid);
 
   if (!row?.email_oauth_refresh_encrypted) {
     const err = new Error('Connect your email in Settings to send messages.');
@@ -70,7 +112,7 @@ export async function getValidAccessToken(userId) {
 
   const refresh = decrypt(row.email_oauth_refresh_encrypted);
   if (!refresh) {
-    markReconnectRequired(userId);
+    markReconnectRequired(uid);
     const err = new Error('Your email connection expired. Please reconnect in Settings.');
     err.code = 'EMAIL_RECONNECT_REQUIRED';
     throw err;
@@ -85,19 +127,19 @@ export async function getValidAccessToken(userId) {
   const provider = row.email_provider;
   try {
     if (provider === 'google') {
-      return await refreshGoogle(userId, refresh);
+      return await refreshGoogle(uid, refresh);
     }
     if (provider === 'microsoft') {
-      return await refreshMicrosoft(userId, refresh);
+      return await refreshMicrosoft(uid, refresh);
     }
   } catch (e) {
     if (e?.code === 'EMAIL_RECONNECT_REQUIRED') throw e;
-    markReconnectRequired(userId);
+    markReconnectRequired(uid);
     const err = new Error('Your email connection expired. Please reconnect in Settings.');
     err.code = 'EMAIL_RECONNECT_REQUIRED';
     throw err;
   }
-  markReconnectRequired(userId);
+  markReconnectRequired(uid);
   const err = new Error('Your email connection expired. Please reconnect in Settings.');
   err.code = 'EMAIL_RECONNECT_REQUIRED';
   throw err;

@@ -48,9 +48,11 @@ router.post('/from-excel', async (req, res) => {
       req.body?.useLlm !== 'false' &&
       req.query?.useLlm !== 'false';
 
+    const orgId = req.session?.user?.org_id || null;
     const { shifts, llmUsed } = await pullShiftsFromExcel({
       log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
       useLlm,
+      organizationId: orgId || undefined,
     });
 
     if (!shifts || shifts.length === 0) {
@@ -85,7 +87,8 @@ router.post('/from-excel', async (req, res) => {
     });
   } catch (err) {
     console.error('[sync-from-excel]', err);
-    const hint = 'Check .env: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID, ONEDRIVE_EXCEL_PATH.';
+    const hint =
+      'Connect Microsoft OneDrive in Settings (file in that user’s OneDrive), or set API .env: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID (owner’s Microsoft 365 email / UPN), ONEDRIVE_EXCEL_PATH (optional). See repo root .env.example.';
     res.status(500).json({
       error: err.message || 'Sync from Excel failed',
       errorDetail: hint,

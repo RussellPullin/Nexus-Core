@@ -159,6 +159,36 @@ async function findShifterWorkerInOrg(shifterAdmin, emailKey, shifterOrgId) {
   return null;
 }
 
+/**
+ * Resolve Shifter worker profiles.id (or equivalent) from email when SQLite staff.shifter_worker_profile_id
+ * is unset — same lookup as enabling Shifter for a worker, so roster shifts reach the app without that extra step.
+ */
+export async function resolveShifterWorkerProfileIdForEmail(emailRaw, nexusOrgIdRaw) {
+  const shifter = getShifterAdminClient();
+  if (!shifter) return null;
+  const nexusAdmin = getAdminClient();
+  if (!nexusAdmin) return null;
+  const emailKey = normalizeEmail(emailRaw);
+  const nexusOrgId =
+    typeof nexusOrgIdRaw === 'string' && nexusOrgIdRaw.trim() ? nexusOrgIdRaw.trim() : null;
+  if (!emailKey || !nexusOrgId || !isUuidString(nexusOrgId)) return null;
+  let effectiveShifterOrg;
+  try {
+    effectiveShifterOrg = await resolveEffectiveShifterOrgId(nexusAdmin, nexusOrgId);
+  } catch (e) {
+    console.warn('[shifter-link] resolveShifterWorkerProfileIdForEmail org', e?.message || e);
+    return null;
+  }
+  if (!effectiveShifterOrg) return null;
+  try {
+    const match = await findShifterWorkerInOrg(shifter, emailKey, effectiveShifterOrg);
+    return match?.profileId ?? null;
+  } catch (e) {
+    console.warn('[shifter-link] resolveShifterWorkerProfileIdForEmail worker', e?.message || e);
+    return null;
+  }
+}
+
 async function findNexusProfileByEmail(nexusAdmin, emailKey) {
   let { data: rows, error: selErr } = await nexusAdmin.from('profiles').select('id').eq('email', emailKey).limit(2);
   if (selErr) throw selErr;

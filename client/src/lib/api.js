@@ -5,7 +5,8 @@ const API = '/api';
 export const settings = {
   getBusiness: () => fetchApi('/settings/business'),
   updateBusiness: (data) => fetchApi('/settings/business', { method: 'PUT', body: JSON.stringify(data) }),
-  xeroSaveAndConnect: (data) => fetchApi('/settings/xero/save-and-connect', { method: 'POST', body: JSON.stringify(data) }),
+  /** Requires server env XERO_CLIENT_ID, XERO_CLIENT_SECRET, XERO_REDIRECT_URI */
+  xeroConnect: () => fetchApi('/settings/xero/connect', { method: 'POST' }),
   xeroDisconnect: () => fetchApi('/settings/xero/disconnect', { method: 'POST' }),
   xeroTestInvoice: () => fetchApi('/settings/xero/test-invoice', { method: 'POST' }),
   uploadLogo: async (file) => {
@@ -86,8 +87,14 @@ export const auth = {
   supabaseInviteStaff: (email, full_name) =>
     fetchApi('/auth/supabase/invite-staff', { method: 'POST', body: JSON.stringify({ email, full_name: full_name || undefined }) }),
   getShifterOrgLink: () => fetchApi('/auth/supabase/shifter-org-link'),
+  /** Omit name to link using the signed-in Nexus organisation name (must match Shifter). */
   linkShifterOrg: (shifter_org_name) =>
-    fetchApi('/auth/supabase/link-shifter-org', { method: 'POST', body: JSON.stringify({ shifter_org_name }) }),
+    fetchApi('/auth/supabase/link-shifter-org', {
+      method: 'POST',
+      body: JSON.stringify(
+        shifter_org_name != null && String(shifter_org_name).trim() ? { shifter_org_name: String(shifter_org_name).trim() } : {}
+      )
+    }),
   unlinkShifterOrg: () => fetchApi('/auth/supabase/unlink-shifter-org', { method: 'POST' })
 };
 
@@ -120,8 +127,11 @@ export async function fetchApi(path, options = {}) {
     const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
     const msg = err?.error || text || res.statusText;
     const extra = err?.errorDetail || err?.detail;
-    const detail = extra ? `\n\n${extra}` : '';
-    const e = new Error(msg + detail);
+    const msgStr = String(msg);
+    const extraStr = extra != null ? String(extra) : '';
+    const detail =
+      extraStr && extraStr.trim() !== msgStr.trim() ? `\n\n${extraStr}` : '';
+    const e = new Error(msgStr + detail);
     if (err?.code) e.code = err.code;
     throw e;
   }

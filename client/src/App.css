@@ -1735,6 +1735,32 @@ textarea {
   align-self: start;
 }
 
+.settings-shifter-card-layout {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.settings-shifter-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 11rem;
+}
+
+@media (max-width: 640px) {
+  .settings-shifter-card-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-shifter-card-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+}
+
 .settings-section-title {
   margin: 2rem 0 1rem;
   font-size: 1.1rem;

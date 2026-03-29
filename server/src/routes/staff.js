@@ -322,8 +322,10 @@ router.get('/:id/excel-summary', async (req, res) => {
   try {
     const s = db.prepare('SELECT id, name FROM staff WHERE id = ?').get(req.params.id);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
+    const orgId = req.session?.user?.org_id || null;
     const { summaryRows } = await pullSummaryFromExcel({
       staffName: s.name,
+      organizationId: orgId || undefined,
       log: (msg, data) => console.log('[staff excel-summary]', msg, data || ''),
     });
     res.json({ summaryRows });
@@ -382,7 +384,7 @@ router.post('/send-test-email', async (req, res) => {
     res.json({ ok: true, message: `Test email sent to ${s.email}` });
   } catch (err) {
     const msg = formatSmtpAuthError(err);
-    res.status(400).json({ error: msg, errorDetail: err?.message });
+    res.status(400).json({ error: msg });
   }
 });
 
@@ -469,7 +471,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
   } catch (err) {
     console.error('[start-onboarding]', err);
     const msg = formatSmtpAuthError(err);
-    res.status(400).json({ error: msg, errorDetail: err?.message });
+    res.status(400).json({ error: msg });
   }
 });
 

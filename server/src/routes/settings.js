@@ -10,6 +10,8 @@ import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
+import { frontendBaseUrl } from '../lib/frontendBaseUrl.js';
+import { oauthPublicApiOriginFromEnv } from '../lib/oauthPublicOrigin.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -42,53 +44,110 @@ function resolveTargetOrgId(req) {
   return orgId || null;
 }
 
+/** True if a business_settings row exists for this org (avoids INSERT ... ON CONFLICT(org_id), which needs a matching UNIQUE index). */
+function hasBusinessSettingsForOrg(orgId) {
+  return Boolean(db.prepare('SELECT 1 AS x FROM business_settings WHERE org_id = ?').get(orgId));
+}
+
 function getBusinessSettings(orgId = null) {
   if (orgId) {
     const byOrg = db.prepare('SELECT * FROM business_settings WHERE org_id = ?').get(orgId);
     if (byOrg) return byOrg;
+    // Do not fall back to id='default' here. A legacy bug returned that row whenever COUNT(DISTINCT users.org_id) was 1,
+    // so a brand-new org (sole user in the table for that moment) saw another tenant's invoice + Xero data.
+    return null;
   }
   const row = db.prepare('SELECT * FROM business_settings WHERE id = ?').get('default');
   return row || null;
 }
 
 /**
- * URL origin for redirecting the browser to /settings after Xero OAuth.
- * In local dev the callback often hits the API as :3080 (via Vite proxy); the SPA runs on Vite (default 5174), not on 3080.
+ * @param {object | null} row
+ * @param {{ noOrgRowYet?: boolean }} [options] When true, omit deployment env fallbacks for tenant fields so a new org starts blank (not another tenant's COMPANY_* env). Also forces Xero to “not connected” so another org’s OAuth state never appears in the UI.
  */
-function frontendBaseUrl(req) {
-  const explicit = process.env.FRONTEND_BASE_URL?.trim();
-  if (explicit) return explicit.replace(/\/$/, '');
-  const host = req.get('host') || '';
-  if (process.env.NODE_ENV !== 'production' && host.endsWith(':3080')) {
-    const vitePort = process.env.VITE_DEV_PORT || '5174';
-    const httpsDev = process.env.VITE_DEV_HTTPS === 'true' || process.env.VITE_DEV_HTTPS === '1';
-    return `${httpsDev ? 'https' : 'http'}://localhost:${vitePort}`;
-  }
-  return `${req.protocol}://${host}`.replace(/\/$/, '');
-}
-
-function mergeWithEnv(row) {
+function mergeWithEnv(row, options = {}) {
+  const noOrgRowYet = options.noOrgRowYet === true;
   const envDays = parseInt(process.env.PAYMENT_TERMS_DAYS || '7', 10);
   const paymentTerms = Number.isNaN(envDays) ? 7 : envDays;
+  const envName = noOrgRowYet ? '' : (process.env.COMPANY_NAME ?? '');
+  const envAbn = noOrgRowYet ? '' : (process.env.COMPANY_ABN ?? '');
+  const envEmail = noOrgRowYet ? '' : (process.env.COMPANY_EMAIL ?? '');
+  const envBsb = noOrgRowYet ? '' : (process.env.COMPANY_BSB ?? '');
+  const envAccount = noOrgRowYet ? '' : (process.env.COMPANY_ACCOUNT ?? '');
   return {
-    company_name: row?.company_name ?? process.env.COMPANY_NAME ?? '',
-    company_abn: row?.company_abn ?? process.env.COMPANY_ABN ?? '',
+    company_name: row?.company_name ?? envName,
+    company_abn: row?.company_abn ?? envAbn,
     company_acn: row?.company_acn ?? '',
     ndis_provider_number: row?.ndis_provider_number ?? '',
-    company_email: row?.company_email ?? process.env.COMPANY_EMAIL ?? '',
+    company_email: row?.company_email ?? envEmail,
     company_address: row?.company_address ?? '',
     company_phone: row?.company_phone ?? '',
     logo_path: row?.logo_path ?? null,
-    account_name: row?.account_name ?? process.env.COMPANY_NAME ?? '',
-    bsb: row?.bsb ?? process.env.COMPANY_BSB ?? '',
-    account_number: row?.account_number ?? process.env.COMPANY_ACCOUNT ?? '',
+    account_name: row?.account_name ?? envName,
+    bsb: row?.bsb ?? envBsb,
+    account_number: row?.account_number ?? envAccount,
     payment_terms_days: row?.payment_terms_days != null ? row.payment_terms_days : paymentTerms,
-    accounting_provider: row?.accounting_provider ?? null,
-    xero_client_id: row?.xero_client_id ?? null,
-    xero_redirect_uri: row?.xero_redirect_uri ?? null,
-    xero_tenant_name: row?.xero_tenant_name ?? null,
-    xero_linked: !!(row?.xero_refresh_token && row?.xero_tenant_id),
+    accounting_provider: noOrgRowYet ? null : (row?.accounting_provider ?? null),
+    xero_client_id: noOrgRowYet ? null : (row?.xero_client_id ?? null),
+    xero_redirect_uri: noOrgRowYet ? null : (row?.xero_redirect_uri ?? null),
+    xero_tenant_name: noOrgRowYet ? null : (row?.xero_tenant_name ?? null),
+    xero_linked: noOrgRowYet ? false : !!(row?.xero_refresh_token && row?.xero_tenant_id),
+    /** When true, Settings shows one-click Xero connect (credentials from server env). */
+    xero_oauth_via_env: xeroOauthConfiguredViaEnv(),
   };
+}
+
+/**
+ * Callback URL Xero redirects to (must match the Xero developer app).
+ * Prefer XERO_REDIRECT_URI; otherwise derive from OAUTH_PUBLIC_URL (API origin only; see oauthPublicOrigin.js).
+ */
+function getEffectiveXeroRedirectUri() {
+  const explicit = process.env.XERO_REDIRECT_URI?.trim();
+  if (explicit) return explicit;
+  const origin = oauthPublicApiOriginFromEnv();
+  if (origin) return `${origin}/api/settings/xero-callback`;
+  return '';
+}
+
+function isAllowedXeroRedirectUri(redirectUri) {
+  if (!redirectUri) return false;
+  if (redirectUri.startsWith('https://')) return true;
+  if (redirectUri.startsWith('http://localhost')) return true;
+  if (redirectUri.startsWith('http://127.0.0.1')) return true;
+  return false;
+}
+
+/** Single Xero “partner” app for the whole deployment (set on the server). */
+function xeroOauthConfiguredViaEnv() {
+  const id = process.env.XERO_CLIENT_ID?.trim();
+  const secret = process.env.XERO_CLIENT_SECRET?.trim();
+  const redirect = getEffectiveXeroRedirectUri();
+  return !!(id && secret && redirect);
+}
+
+/**
+ * OAuth client credentials: env app (preferred) or per-org row in DB.
+ * @returns {{ clientId: string, clientSecret: string, redirectUri: string, fromEnv: boolean } | null}
+ */
+function getXeroOAuthAppCredentials(orgId) {
+  if (xeroOauthConfiguredViaEnv()) {
+    return {
+      clientId: process.env.XERO_CLIENT_ID.trim(),
+      clientSecret: process.env.XERO_CLIENT_SECRET.trim(),
+      redirectUri: getEffectiveXeroRedirectUri(),
+      fromEnv: true,
+    };
+  }
+  const row = getBusinessSettings(orgId);
+  if (row?.xero_client_id && row?.xero_client_secret && row?.xero_redirect_uri) {
+    return {
+      clientId: row.xero_client_id,
+      clientSecret: row.xero_client_secret,
+      redirectUri: row.xero_redirect_uri,
+      fromEnv: false,
+    };
+  }
+  return null;
 }
 
 // GET /api/settings/logo - stream logo image (for preview and PDF)
@@ -117,7 +176,8 @@ router.get('/business', (req, res) => {
   try {
     const orgId = resolveTargetOrgId(req);
     const row = getBusinessSettings(orgId);
-    const merged = mergeWithEnv(row);
+    const merged = mergeWithEnv(row, { noOrgRowYet: Boolean(orgId) && !row });
+    res.setHeader('Cache-Control', 'no-store, private');
     res.json(merged);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -170,27 +230,7 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
       accounting_provider: accountingProviderValue,
     };
 
-    db.prepare(`
-      INSERT INTO business_settings (id, org_id, company_name, company_abn, company_acn, ndis_provider_number,
-        company_email, company_address, company_phone, account_name, bsb, account_number, payment_terms_days, accounting_provider, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(org_id) DO UPDATE SET
-        company_name = excluded.company_name,
-        company_abn = excluded.company_abn,
-        company_acn = excluded.company_acn,
-        ndis_provider_number = excluded.ndis_provider_number,
-        company_email = excluded.company_email,
-        company_address = excluded.company_address,
-        company_phone = excluded.company_phone,
-        account_name = excluded.account_name,
-        bsb = excluded.bsb,
-        account_number = excluded.account_number,
-        payment_terms_days = excluded.payment_terms_days,
-        accounting_provider = excluded.accounting_provider,
-        updated_at = datetime('now')
-    `).run(
-      orgId,
-      orgId,
+    const bizParams = [
       updates.company_name,
       updates.company_abn,
       updates.company_acn,
@@ -202,10 +242,26 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
       updates.bsb,
       updates.account_number,
       updates.payment_terms_days,
-      updates.accounting_provider
-    );
+      updates.accounting_provider,
+    ];
+    if (hasBusinessSettingsForOrg(orgId)) {
+      db.prepare(`
+        UPDATE business_settings SET
+          company_name = ?, company_abn = ?, company_acn = ?, ndis_provider_number = ?,
+          company_email = ?, company_address = ?, company_phone = ?, account_name = ?, bsb = ?, account_number = ?,
+          payment_terms_days = ?, accounting_provider = ?, updated_at = datetime('now')
+        WHERE org_id = ?
+      `).run(...bizParams, orgId);
+    } else {
+      db.prepare(`
+        INSERT INTO business_settings (id, org_id, company_name, company_abn, company_acn, ndis_provider_number,
+          company_email, company_address, company_phone, account_name, bsb, account_number, payment_terms_days, accounting_provider, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(orgId, orgId, ...bizParams);
+    }
 
-    const merged = mergeWithEnv(getBusinessSettings(orgId));
+    const saved = getBusinessSettings(orgId);
+    const merged = mergeWithEnv(saved, { noOrgRowYet: Boolean(orgId) && !saved });
     res.json(merged);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -242,11 +298,14 @@ router.post('/logo', requireAdminOrDelegate, upload.single('file'), (req, res) =
       }
     }
 
-    db.prepare(`
-      INSERT INTO business_settings (id, org_id, logo_path, updated_at)
-      VALUES (?, ?, ?, datetime('now'))
-      ON CONFLICT(org_id) DO UPDATE SET logo_path = excluded.logo_path, updated_at = datetime('now')
-    `).run(orgId, orgId, filename);
+    if (hasBusinessSettingsForOrg(orgId)) {
+      db.prepare(`UPDATE business_settings SET logo_path = ?, updated_at = datetime('now') WHERE org_id = ?`).run(filename, orgId);
+    } else {
+      db.prepare(`
+        INSERT INTO business_settings (id, org_id, logo_path, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+      `).run(orgId, orgId, filename);
+    }
 
     res.json({ logo_path: filename });
   } catch (err) {
@@ -292,15 +351,16 @@ const XERO_SCOPES =
 async function getXeroAccessToken(orgId = null) {
   const row = orgId
     ? db
-        .prepare('SELECT xero_client_id, xero_client_secret, xero_refresh_token, xero_tenant_id FROM business_settings WHERE org_id = ?')
+        .prepare('SELECT xero_refresh_token, xero_tenant_id FROM business_settings WHERE org_id = ?')
         .get(orgId)
     : db
-        .prepare('SELECT xero_client_id, xero_client_secret, xero_refresh_token, xero_tenant_id FROM business_settings WHERE id = ?')
+        .prepare('SELECT xero_refresh_token, xero_tenant_id FROM business_settings WHERE id = ?')
         .get('default');
-  if (!row?.xero_client_id || !row?.xero_client_secret || !row?.xero_refresh_token || !row?.xero_tenant_id) {
+  const creds = getXeroOAuthAppCredentials(orgId);
+  if (!creds || !row?.xero_refresh_token || !row?.xero_tenant_id) {
     throw new Error('Xero is not linked. Connect in Settings first.');
   }
-  const authHeader = Buffer.from(row.xero_client_id + ':' + row.xero_client_secret).toString('base64');
+  const authHeader = Buffer.from(creds.clientId + ':' + creds.clientSecret).toString('base64');
   const tokenRes = await fetch(XERO_TOKEN_URL, {
     method: 'POST',
     headers: {
@@ -346,18 +406,73 @@ router.post('/xero/save-and-connect', requireAdminOrDelegate, (req, res) => {
       return res.status(400).json({ error: 'Redirect URI must use HTTPS (or http://localhost for testing).' });
     }
 
-    db.prepare(`
-      INSERT INTO business_settings (id, org_id, xero_client_id, xero_client_secret, xero_redirect_uri, accounting_provider, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'xero', datetime('now'))
-      ON CONFLICT(org_id) DO UPDATE SET
-        xero_client_id = ?, xero_client_secret = ?, xero_redirect_uri = ?,
-        accounting_provider = 'xero', updated_at = datetime('now')
-    `).run(orgId, orgId, clientId, clientSecret, redirectUri, clientId, clientSecret, redirectUri);
+    if (hasBusinessSettingsForOrg(orgId)) {
+      db.prepare(`
+        UPDATE business_settings SET
+          xero_client_id = ?, xero_client_secret = ?, xero_redirect_uri = ?,
+          accounting_provider = 'xero', updated_at = datetime('now')
+        WHERE org_id = ?
+      `).run(clientId, clientSecret, redirectUri, orgId);
+    } else {
+      db.prepare(`
+        INSERT INTO business_settings (id, org_id, xero_client_id, xero_client_secret, xero_redirect_uri, accounting_provider, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'xero', datetime('now'))
+      `).run(orgId, orgId, clientId, clientSecret, redirectUri);
+    }
 
     const state = randomBytes(24).toString('hex');
     req.session.xero_oauth_state = state;
     req.session.xero_oauth_org_id = orgId;
 
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      scope: XERO_SCOPES,
+      state,
+    });
+    const redirectUrl = `${XERO_AUTH_URL}?${params.toString()}`;
+    res.json({ redirectUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/settings/xero/connect - start OAuth using server env XERO_CLIENT_* (one click per org)
+router.post('/xero/connect', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = resolveTargetOrgId(req);
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
+    if (!xeroOauthConfiguredViaEnv()) {
+      return res.status(400).json({
+        error:
+          'This server is not set up for one-click Xero. On the API server set XERO_CLIENT_ID, XERO_CLIENT_SECRET, and either XERO_REDIRECT_URI or OAUTH_PUBLIC_URL (callback URL is OAUTH_PUBLIC_URL + /api/settings/xero-callback). Restart the server after changing .env.',
+      });
+    }
+    const redirectUri = getEffectiveXeroRedirectUri();
+    if (!isAllowedXeroRedirectUri(redirectUri)) {
+      return res.status(400).json({
+        error:
+          'Xero redirect URI must use HTTPS, or http://localhost / http://127.0.0.1 for local dev. Set XERO_REDIRECT_URI or fix OAUTH_PUBLIC_URL.',
+      });
+    }
+
+    if (hasBusinessSettingsForOrg(orgId)) {
+      db.prepare(`
+        UPDATE business_settings SET accounting_provider = 'xero', updated_at = datetime('now') WHERE org_id = ?
+      `).run(orgId);
+    } else {
+      db.prepare(`
+        INSERT INTO business_settings (id, org_id, accounting_provider, updated_at)
+        VALUES (?, ?, 'xero', datetime('now'))
+      `).run(orgId, orgId);
+    }
+
+    const state = randomBytes(24).toString('hex');
+    req.session.xero_oauth_state = state;
+    req.session.xero_oauth_org_id = orgId;
+
+    const clientId = process.env.XERO_CLIENT_ID.trim();
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: clientId,
@@ -395,12 +510,12 @@ router.get('/xero-callback', requireAdminOrDelegate, async (req, res) => {
     if (!orgId) {
       return res.redirect(settingsUrl + '?xero=error&message=' + encodeURIComponent('No organisation on your account.'));
     }
-    const row = getBusinessSettings(orgId);
-    if (!row?.xero_client_id || !row?.xero_client_secret || !row?.xero_redirect_uri) {
+    const creds = getXeroOAuthAppCredentials(orgId);
+    if (!creds) {
       return res.redirect(settingsUrl + '?xero=error&message=' + encodeURIComponent('Xero credentials not configured'));
     }
 
-    const authHeader = Buffer.from(row.xero_client_id + ':' + row.xero_client_secret).toString('base64');
+    const authHeader = Buffer.from(creds.clientId + ':' + creds.clientSecret).toString('base64');
     const tokenRes = await fetch(XERO_TOKEN_URL, {
       method: 'POST',
       headers: {
@@ -410,7 +525,7 @@ router.get('/xero-callback', requireAdminOrDelegate, async (req, res) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
-        redirect_uri: row.xero_redirect_uri,
+        redirect_uri: creds.redirectUri,
       }).toString(),
     });
 

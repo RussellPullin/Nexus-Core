@@ -800,7 +800,8 @@ router.get('/:id/pdf', async (req, res) => {
     doc.on('error', (err) => res.status(500).json({ error: err.message }));
 
     const billingOrgId = resolveOrgIdForBillingParticipant(inv.participant_id);
-    const biz = mergeWithEnv(getBusinessSettings(billingOrgId));
+    const bizRow = getBusinessSettings(billingOrgId);
+    const biz = mergeWithEnv(bizRow, { noOrgRowYet: Boolean(billingOrgId) && !bizRow });
     const companyName = sanitizePdfText(biz.company_name || 'Provider');
     const companyEmail = sanitizePdfText(biz.company_email || '');
     const companyAbn = sanitizePdfText(biz.company_abn || '');

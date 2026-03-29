@@ -1159,7 +1159,20 @@ try {
     if (!businessCols.some((c) => c.name === 'org_id')) {
       db.exec('ALTER TABLE business_settings ADD COLUMN org_id TEXT');
     }
-    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS business_settings_org_unique ON business_settings(org_id) WHERE org_id IS NOT NULL');
+    // Non-partial UNIQUE on org_id: required for INSERT ... ON CONFLICT(org_id). Partial unique indexes are not valid UPSERT conflict targets in SQLite.
+    try {
+      const idx = db.prepare(`SELECT sql FROM sqlite_master WHERE type='index' AND name='business_settings_org_unique'`).get();
+      if (idx?.sql && /\bWHERE\b/i.test(idx.sql)) {
+        db.exec('DROP INDEX business_settings_org_unique');
+      }
+    } catch (e) {
+      console.warn('business_settings_org_unique migration (drop partial):', e.message);
+    }
+    try {
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS business_settings_org_unique ON business_settings(org_id)');
+    } catch (e) {
+      console.warn('business_settings_org_unique index:', e.message);
+    }
     if (!businessCols.some((c) => c.name === 'accounting_provider')) {
       db.exec('ALTER TABLE business_settings ADD COLUMN accounting_provider TEXT');
     }
@@ -1171,6 +1184,27 @@ try {
     }
   } catch (e) {
     if (!e.message?.includes('duplicate column')) console.warn('business_settings xero migration:', e.message);
+  }
+
+  // Tie legacy id='default' to the sole CRM tenant so SELECT ... WHERE org_id = ? finds it (startup only; avoids runtime fallback that leaked default into other orgs).
+  try {
+    const def = db.prepare(`SELECT org_id AS o FROM business_settings WHERE id = 'default'`).get();
+    if (def && def.o == null) {
+      const distinctRow = db
+        .prepare(`SELECT COUNT(DISTINCT org_id) AS c FROM users WHERE org_id IS NOT NULL`)
+        .get();
+      if (distinctRow?.c === 1) {
+        const one = db.prepare(`SELECT org_id FROM users WHERE org_id IS NOT NULL LIMIT 1`).get();
+        if (one?.org_id) {
+          const taken = db.prepare(`SELECT 1 AS x FROM business_settings WHERE org_id = ?`).get(one.org_id);
+          if (!taken) {
+            db.prepare(`UPDATE business_settings SET org_id = ? WHERE id = 'default' AND org_id IS NULL`).run(one.org_id);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    if (!e.message?.includes('no such table')) console.warn('business_settings default org_id backfill:', e.message);
   }
 
   // ── End Learning Layer tables ─────────────────────────────────────────────

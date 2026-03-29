@@ -264,6 +264,14 @@ export default function SettingsPage() {
               Sending as <strong>{user.email_connected_address}</strong>
               {user.email_provider === 'google' ? ' (Gmail)' : user.email_provider === 'microsoft' ? ' (Microsoft 365)' : ''}
             </p>
+            {user.email_relay_configured === false && (
+              <div
+                className="settings-error"
+                style={{ marginTop: '0.75rem', marginBottom: 0, background: '#fff7ed', borderColor: '#fdba74', color: '#9a3412' }}
+              >
+                The server is not configured to send mail yet. Set <code>AZURE_EMAIL_FUNCTION_URL</code> on the host (see repo <code>azure-email-function</code> and <code>.env.example</code>). Test email and roster send will fail until this is set.
+              </div>
+            )}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
               <button type="button" className="btn btn-secondary" onClick={handleTestEmail} disabled={testing}>
                 {testing ? 'Sending…' : 'Send test email to me'}
@@ -520,8 +528,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {canManageUsers && <ShifterOrgLinkCard />}
-      {canManageUsers && <ScheduleShiftAppLinkCard />}
+      {canManageUsers && <ShifterIntegrationCard />}
       {canManageUsers && <BusinessSetup />}
       <LearningSettings />
       </div>
@@ -529,12 +536,16 @@ export default function SettingsPage() {
   );
 }
 
-function ShifterOrgLinkCard() {
+function ShifterIntegrationCard() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
-  const [shifterName, setShifterName] = useState('');
+  const [copyMsg, setCopyMsg] = useState('');
   const [linkInfo, setLinkInfo] = useState(null);
+
+  const base = window.location.origin.replace(/\/$/, '');
+  const webhookUrl = `${base}/api/webhooks/progress-app`;
+  const syncUrl = `${base}/api/sync/from-excel`;
 
   const load = async () => {
     setLoading(true);
@@ -553,18 +564,12 @@ function ShifterOrgLinkCard() {
   }, []);
 
   const onLink = async () => {
-    const name = shifterName.trim();
-    if (!name) {
-      setMsg('Enter your Shifter organisation name first.');
-      return;
-    }
     setMsg('');
     setBusy(true);
     try {
-      await auth.linkShifterOrg(name);
+      await auth.linkShifterOrg();
       await load();
       setMsg('Shifter organisation linked.');
-      setShifterName('');
     } catch (err) {
       setMsg(err.message || 'Could not link Shifter organisation');
     } finally {
@@ -586,51 +591,6 @@ function ShifterOrgLinkCard() {
     }
   };
 
-  return (
-    <div className="card">
-      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Shifter organisation link</h3>
-      <p className="settings-desc">
-        Your Nexus Core organisation is created independently. Link to Shifter here when you are ready.
-      </p>
-      <div className="form-group">
-        <label>Current status</label>
-        {loading ? (
-          <div className="form-hint">Loading…</div>
-        ) : linkInfo?.linked ? (
-          <div className="settings-success">Linked to Shifter org ID: {linkInfo.shifter_organization_id}</div>
-        ) : (
-          <div className="form-hint">Not linked</div>
-        )}
-      </div>
-      <div className="form-group">
-        <label>Shifter organisation name</label>
-        <input
-          className="form-input"
-          type="text"
-          value={shifterName}
-          onChange={(e) => setShifterName(e.target.value)}
-          placeholder="Exact name used in Shifter"
-        />
-      </div>
-      <div className="settings-buttons">
-        <button type="button" className="btn btn-primary" onClick={onLink} disabled={busy || loading}>
-          {busy ? 'Saving...' : 'Link to Shifter'}
-        </button>
-        <button type="button" className="btn btn-secondary" onClick={onUnlink} disabled={busy || loading || !linkInfo?.linked}>
-          Unlink
-        </button>
-      </div>
-      {msg && <div className={msg.toLowerCase().includes('linked') && !msg.toLowerCase().includes('could not') ? 'settings-success' : 'settings-error'} style={{ marginTop: '0.75rem' }}>{msg}</div>}
-    </div>
-  );
-}
-
-function ScheduleShiftAppLinkCard() {
-  const [copyMsg, setCopyMsg] = useState('');
-  const base = window.location.origin.replace(/\/$/, '');
-  const webhookUrl = `${base}/api/webhooks/progress-app`;
-  const syncUrl = `${base}/api/sync/from-excel`;
-
   const copyText = async (label, value) => {
     setCopyMsg('');
     try {
@@ -643,46 +603,103 @@ function ScheduleShiftAppLinkCard() {
 
   return (
     <div className="card">
-      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Schedule Shift App Link</h3>
+      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Shifter and shift schedule</h3>
       <p className="settings-desc">
-        Use this URL in your external app when sending shift data into Nexus Core.
+        <strong>Pulls from Shifter:</strong> link your Nexus Core organisation to the matching org in Shifter (same organisation
+        name in both apps
+        {linkInfo?.organization_name ? (
+          <>
+            {' '}
+            — yours is <strong>{linkInfo.organization_name}</strong>
+          </>
+        ) : null}
+        ). <strong>Push into Nexus:</strong> configure your schedule / Progress app with the URLs below so shifts are sent here.
       </p>
 
-      <div className="form-group">
-        <label>Webhook endpoint (if enabled)</label>
-        <input className="form-input" value={webhookUrl} readOnly />
-        <small className="form-hint">
-          Method: <code>POST</code>. If your current build does not expose this route, use the Excel sync endpoint below.
-        </small>
-      </div>
-      <div className="settings-buttons">
-        <button type="button" className="btn btn-secondary" onClick={() => copyText('Webhook URL', webhookUrl)}>
-          Copy webhook URL
-        </button>
+      <div className="settings-shifter-card-layout">
+        <div className="settings-shifter-card-main">
+          <div className="form-group">
+            <label>Shifter link status</label>
+            {loading ? (
+              <div className="form-hint">Loading…</div>
+            ) : linkInfo?.linked ? (
+              <div className="settings-success">Linked to Shifter.</div>
+            ) : (
+              <div className="form-hint">Not linked — use Link to Shifter on the right.</div>
+            )}
+          </div>
+
+          <h4 className="settings-subsection-title">Send shifts into Nexus Core</h4>
+          <p className="form-hint" style={{ marginTop: 0 }}>
+            Paste these into your external app (webhook preferred; Excel sync as fallback).
+          </p>
+          <div className="form-group">
+            <label>Webhook endpoint (if enabled)</label>
+            <input className="form-input" value={webhookUrl} readOnly />
+            <small className="form-hint">
+              Method: <code>POST</code>. If this route is not available on your server, use the Excel sync endpoint below.
+            </small>
+          </div>
+          <div className="settings-buttons">
+            <button type="button" className="btn btn-secondary" onClick={() => copyText('Webhook URL', webhookUrl)}>
+              Copy webhook URL
+            </button>
+          </div>
+          <div className="form-group" style={{ marginTop: '1rem' }}>
+            <label>Excel sync endpoint (fallback)</label>
+            <input className="form-input" value={syncUrl} readOnly />
+            <small className="form-hint">
+              Method: <code>POST</code> with signed-in session, or header <code>x-api-key: CRM_API_KEY</code>.
+            </small>
+          </div>
+          <div className="settings-buttons">
+            <button type="button" className="btn btn-secondary" onClick={() => copyText('Sync URL', syncUrl)}>
+              Copy sync URL
+            </button>
+          </div>
+          <small className="form-hint" style={{ display: 'block', marginTop: '0.5rem' }}>
+            You can also run the fallback from the Shifts page: <strong>Sync from Excel</strong>.
+          </small>
+        </div>
+
+        <div className="settings-shifter-card-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onLink}
+            disabled={busy || loading || linkInfo?.linked}
+          >
+            {busy ? 'Linking…' : 'Link to Shifter'}
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={onUnlink} disabled={busy || loading || !linkInfo?.linked}>
+            Unlink
+          </button>
+        </div>
       </div>
 
-      <div className="form-group" style={{ marginTop: '1rem' }}>
-        <label>Excel sync endpoint (fallback)</label>
-        <input className="form-input" value={syncUrl} readOnly />
-        <small className="form-hint">
-          Method: <code>POST</code> with signed-in session, or send header <code>x-api-key: CRM_API_KEY</code>.
-        </small>
-      </div>
-      <div className="settings-buttons">
-        <button type="button" className="btn btn-secondary" onClick={() => copyText('Sync URL', syncUrl)}>
-          Copy sync URL
-        </button>
-      </div>
-
-      <small className="form-hint" style={{ display: 'block', marginTop: '0.5rem' }}>
-        You can always trigger the fallback manually from the Shifts page using <strong>Sync from Excel</strong>.
-      </small>
-      {copyMsg && <div className={copyMsg.includes('copied') ? 'settings-success' : 'settings-error'} style={{ marginTop: '0.75rem' }}>{copyMsg}</div>}
+      {msg && (
+        <div
+          className={
+            msg.toLowerCase().includes('linked') && !msg.toLowerCase().includes('could not')
+              ? 'settings-success'
+              : 'settings-error'
+          }
+          style={{ marginTop: '0.75rem' }}
+        >
+          {msg}
+        </div>
+      )}
+      {copyMsg && (
+        <div className={copyMsg.includes('copied') ? 'settings-success' : 'settings-error'} style={{ marginTop: '0.75rem' }}>
+          {copyMsg}
+        </div>
+      )}
     </div>
   );
 }
 
 function BusinessSetup() {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [biz, setBiz] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -691,8 +708,20 @@ function BusinessSetup() {
   const [logoKey, setLogoKey] = useState(0);
 
   useEffect(() => {
-    settings.getBusiness().then(setBiz).catch(() => setBiz(null));
-  }, []);
+    let cancelled = false;
+    setBiz(null);
+    settings
+      .getBusiness()
+      .then((data) => {
+        if (!cancelled) setBiz(data);
+      })
+      .catch(() => {
+        if (!cancelled) setBiz(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.org_id]);
 
   useEffect(() => {
     const xero = searchParams.get('xero');
@@ -933,17 +962,35 @@ function BusinessSetup() {
       </div>
 
       <h4 className="settings-subsection-title">Accounting software – Xero</h4>
+      <div
+        className="settings-desc"
+        style={{
+          marginBottom: '0.75rem',
+          padding: '0.75rem 1rem',
+          background: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: 8,
+          fontSize: '0.95rem',
+          lineHeight: 1.5,
+        }}
+      >
+        <strong>One Xero company for this Nexus organisation.</strong> The link is not per staff member: you connect once, and everyone in this
+        organisation uses the same Xero tenant for billing (for example <strong>Financial → Invoice Batches → Send batch to Xero</strong>). An
+        admin or delegate runs the connection flow and signs in to Xero; if that account can access several Xero organisations, the one Nexus
+        attaches is determined during that login (you can disconnect and reconnect to change it).
+      </div>
       <p className="settings-desc">
-        Link your Xero organisation. Use <strong>Financial → Invoice Batches → Send batch to Xero</strong> to post each participant invoice as an
-        authorised sales invoice (for payment / reconciliation). Set server env <code>XERO_SALES_ACCOUNT_CODE</code> (and tax type overrides if
-        needed) to match your chart of accounts. Create an app at{' '}
-        <a href="https://developer.xero.com/app/manage" target="_blank" rel="noopener noreferrer">developer.xero.com</a>{' '}
-        (Auth Code grant), then enter the details below and connect.
+        Authorised sales invoices are posted for payment and reconciliation. Set server env <code>XERO_SALES_ACCOUNT_CODE</code> (and tax type
+        overrides if needed) to match your chart of accounts. Use <strong>Connect to Xero</strong> below and sign in to authorise Nexus for this
+        organisation.
       </p>
       {biz.xero_linked ? (
         <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: '1rem' }}>
           <strong style={{ color: '#166534' }}>Linked to Xero</strong>
           {biz.xero_tenant_name && <span style={{ marginLeft: '0.5rem', color: '#15803d' }}>({biz.xero_tenant_name})</span>}
+          <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', color: '#166534' }}>
+            This Xero organisation is shared for all billing actions in this Nexus organisation.
+          </p>
           <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
               type="button"
@@ -980,72 +1027,35 @@ function BusinessSetup() {
           </div>
         </div>
       ) : (
-        <>
-          <div className="form-group">
-            <label>Client ID</label>
-            <input
-              type="text"
-              value={biz.xero_client_id || ''}
-              onChange={(e) => setBiz({ ...biz, xero_client_id: e.target.value })}
-              placeholder="From your Xero app"
-              className="form-input"
-              autoComplete="off"
-            />
-          </div>
-          <div className="form-group">
-            <label>Client Secret</label>
-            <input
-              type="password"
-              value={biz.xero_client_secret || ''}
-              onChange={(e) => setBiz({ ...biz, xero_client_secret: e.target.value })}
-              placeholder="From your Xero app"
-              className="form-input"
-              autoComplete="new-password"
-            />
-            <small className="form-hint">Stored securely. Not shown after save.</small>
-          </div>
-          <div className="form-group">
-            <label>Redirect URI</label>
-            <input
-              type="url"
-              value={biz.xero_redirect_uri || ''}
-              onChange={(e) => setBiz({ ...biz, xero_redirect_uri: e.target.value })}
-              placeholder="https://your-nexus.com/api/settings/xero-callback"
-              className="form-input"
-            />
-            <small className="form-hint">
-              Must match exactly what you add in your Xero app. Production: https://…/api/settings/xero-callback. If Xero requires https on
-              localhost, set <code>VITE_DEV_HTTPS=true</code> in project root <code>.env</code>, restart <code>npm start</code>, use{' '}
-              https://localhost:5174/api/settings/xero-callback (accept the self-signed cert in your browser once). Otherwise use http:// for
-              local dev.
-            </small>
-          </div>
-          <div style={{ marginBottom: '1rem' }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={async () => {
-                setMsg('');
-                const clientId = (biz.xero_client_id || '').trim();
-                const clientSecret = (biz.xero_client_secret || '').trim();
-                const redirectUri = (biz.xero_redirect_uri || '').trim();
-                if (!clientId || !clientSecret || !redirectUri) {
-                  setMsg('Enter Client ID, Client Secret, and Redirect URI.');
-                  return;
-                }
-                try {
-                  const { redirectUrl } = await settings.xeroSaveAndConnect({ client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri });
-                  if (redirectUrl) window.location.href = redirectUrl;
-                  else setMsg('No redirect URL returned.');
-                } catch (err) {
-                  setMsg(err?.message || 'Failed to connect');
-                }
-              }}
-            >
-              Save and connect to Xero
-            </button>
-          </div>
-        </>
+        <div style={{ marginBottom: '1rem' }}>
+          {!biz.xero_oauth_via_env && (
+            <p className="settings-desc" style={{ marginBottom: '0.75rem', color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', padding: '0.75rem 1rem', borderRadius: 8 }}>
+              Xero is not enabled on this server yet. The <strong>API server</strong> needs <code>XERO_CLIENT_ID</code>, <code>XERO_CLIENT_SECRET</code>, and either{' '}
+              <code>XERO_REDIRECT_URI</code> or <code>OAUTH_PUBLIC_URL</code> (if you use the latter, the callback URL is{' '}
+              <code>OAUTH_PUBLIC_URL</code> + <code>/api/settings/xero-callback</code>). Put these in the repo root <code>.env</code> next to{' '}
+              <code>package.json</code>, not in <code>client/.env</code>. Restart the API and check the server console for{' '}
+              <code>[nexus] Xero OAuth (server env)</code>. Register the exact callback URL in the{' '}
+              <a href="https://developer.xero.com/app/manage" target="_blank" rel="noopener noreferrer">Xero developer portal</a>.
+            </p>
+          )}
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!biz.xero_oauth_via_env}
+            onClick={async () => {
+              setMsg('');
+              try {
+                const { redirectUrl } = await settings.xeroConnect();
+                if (redirectUrl) window.location.href = redirectUrl;
+                else setMsg('No redirect URL returned.');
+              } catch (err) {
+                setMsg(err?.message || 'Failed to connect');
+              }
+            }}
+          >
+            Connect to Xero
+          </button>
+        </div>
       )}
 
       {msg && <div className={msg.includes('saved') || msg.includes('uploaded') || msg.includes('removed') || msg.includes('Disconnected') || msg.includes('created in Xero') || msg.includes('Invoice #') ? 'settings-success' : 'settings-error'}>{msg}</div>}

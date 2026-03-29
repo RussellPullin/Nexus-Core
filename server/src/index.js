@@ -13,6 +13,9 @@ const __dirname = dirname(__filename);
 const projectRoot = resolve(__dirname, '../..');
 const envPath = join(projectRoot, '.env');
 config({ path: envPath, override: true });
+// Optional second file (does not override keys already set — e.g. host injects secrets, root .env has the rest)
+config({ path: join(projectRoot, 'server', '.env'), override: false });
+config({ path: join(process.cwd(), '.env'), override: false });
 
 // Fallback: dotenv can fail to parse CRM_API_KEY (e.g. OneDrive sync). Read .env directly.
 if (!process.env.CRM_API_KEY) {
@@ -34,13 +37,50 @@ if (!process.env.CRM_API_KEY) {
 }
 
 console.log('[nexus] .env path:', envPath);
-console.log('[nexus] OneDrive Excel pull config:', {
-  CRM_API_KEY: process.env.CRM_API_KEY ? 'set' : 'NOT SET',
-  ONEDRIVE_ADMIN_USER_ID: process.env.ONEDRIVE_ADMIN_USER_ID ? 'set' : 'NOT SET',
-  AZURE_TENANT_ID: process.env.AZURE_TENANT_ID ? 'set' : 'NOT SET',
-  AZURE_CLIENT_ID: process.env.AZURE_CLIENT_ID ? 'set' : 'NOT SET',
-  AZURE_CLIENT_SECRET: process.env.AZURE_CLIENT_SECRET ? 'set' : 'NOT SET',
-});
+{
+  const azureOk =
+    Boolean(process.env.AZURE_TENANT_ID?.trim()) &&
+    Boolean(process.env.AZURE_CLIENT_ID?.trim()) &&
+    Boolean(process.env.AZURE_CLIENT_SECRET?.trim());
+  const adminUpn =
+    process.env.ONEDRIVE_ADMIN_USER_ID?.trim() || process.env.ADMIN_USER_ID?.trim() || '';
+  const excelPath =
+    process.env.ONEDRIVE_EXCEL_PATH?.trim() || 'Progress Notes App/master progress notes.xlsx';
+  console.log('[nexus] OneDrive Excel pull config:', {
+    CRM_API_KEY: process.env.CRM_API_KEY ? 'set' : 'NOT SET',
+    ONEDRIVE_ADMIN_USER_ID: process.env.ONEDRIVE_ADMIN_USER_ID ? 'set' : 'NOT SET',
+    ADMIN_USER_ID: process.env.ADMIN_USER_ID ? 'set' : 'NOT SET',
+    onedrive_owner_upn: adminUpn ? 'set' : 'NOT SET',
+    AZURE_TENANT_ID: process.env.AZURE_TENANT_ID ? 'set' : 'NOT SET',
+    AZURE_CLIENT_ID: process.env.AZURE_CLIENT_ID ? 'set' : 'NOT SET',
+    AZURE_CLIENT_SECRET: process.env.AZURE_CLIENT_SECRET ? 'set' : 'NOT SET',
+    ONEDRIVE_EXCEL_PATH: excelPath,
+  });
+  if (azureOk && !adminUpn) {
+    console.warn(
+      '[nexus] Azure app credentials are set but ONEDRIVE_ADMIN_USER_ID (or ADMIN_USER_ID) is missing. Set the Microsoft 365 email (UPN) of the account where the Excel file lives — see repo root .env.example OneDrive section.'
+    );
+  }
+}
+{
+  const xid = Boolean(process.env.XERO_CLIENT_ID?.trim());
+  const xsec = Boolean(process.env.XERO_CLIENT_SECRET?.trim());
+  const xuri = Boolean(process.env.XERO_REDIRECT_URI?.trim());
+  const oauth = Boolean(process.env.OAUTH_PUBLIC_URL?.trim());
+  const xeroReady = xid && xsec && (xuri || oauth);
+  console.log('[nexus] Xero OAuth (server env):', {
+    XERO_CLIENT_ID: xid ? 'set' : 'NOT SET',
+    XERO_CLIENT_SECRET: xsec ? 'set' : 'NOT SET',
+    XERO_REDIRECT_URI: xuri ? 'set' : 'NOT SET',
+    OAUTH_PUBLIC_URL: oauth ? 'set' : 'NOT SET',
+    xero_one_click_ready: xeroReady ? 'yes' : 'no',
+  });
+  if (!xeroReady && (xid || xsec || xuri)) {
+    console.warn(
+      '[nexus] Xero vars are incomplete: need CLIENT_ID + CLIENT_SECRET + (XERO_REDIRECT_URI or OAUTH_PUBLIC_URL). Put them in the repo root .env (not client/.env) and restart the API.'
+    );
+  }
+}
 
 // Ensure data directories exist (use DATA_DIR for Azure Files mount when set)
 const dataDir = process.env.DATA_DIR || join(projectRoot, 'data');

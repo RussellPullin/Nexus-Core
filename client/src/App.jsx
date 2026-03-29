@@ -40,10 +40,14 @@ function Layout({ children }) {
     ai.status().then((s) => setOllamaOk(s?.available)).catch(() => setOllamaOk(false));
   }, []);
 
-  const showEmailBanner =
-    user &&
-    (user.email_reconnect_required || !user.email_connected_address) &&
-    !emailBannerDismissed;
+  const needsEmailOauth =
+    Boolean(user) && (user.email_reconnect_required || !user.email_connected_address);
+  const needsEmailRelay =
+    Boolean(user) &&
+    user.email_connected_address &&
+    !user.email_reconnect_required &&
+    user.email_relay_configured === false;
+  const showEmailBanner = Boolean(user) && !emailBannerDismissed && (needsEmailOauth || needsEmailRelay);
 
   return (
     <div className="app">
@@ -108,8 +112,11 @@ function Layout({ children }) {
             style={{
               margin: '0 0 1rem 0',
               padding: '0.85rem 1rem',
-              background: user.email_reconnect_required ? '#fef3c7' : '#e0f2fe',
-              border: `1px solid ${user.email_reconnect_required ? '#fcd34d' : '#7dd3fc'}`,
+              background:
+                user.email_reconnect_required ? '#fef3c7' : needsEmailRelay ? '#fff7ed' : '#e0f2fe',
+              border: `1px solid ${
+                user.email_reconnect_required ? '#fcd34d' : needsEmailRelay ? '#fdba74' : '#7dd3fc'
+              }`,
               borderRadius: 8,
               display: 'flex',
               flexWrap: 'wrap',
@@ -120,10 +127,16 @@ function Layout({ children }) {
             <span style={{ flex: '1 1 200px', color: '#0f172a', fontSize: '0.95rem' }}>
               {user.email_reconnect_required
                 ? 'Your email connection needs to be renewed. Reconnect in Settings to keep sending rosters and messages.'
-                : 'Connect your email so you can send rosters and staff messages from your own address.'}
+                : needsEmailRelay
+                  ? 'Your inbox is connected, but this server is not set up to send mail yet (missing AZURE_EMAIL_FUNCTION_URL). An administrator must deploy the email relay and set that environment variable on the host.'
+                  : 'Connect your email so you can send rosters and staff messages from your own address.'}
             </span>
             <Link to="/settings" className="btn btn-primary" style={{ textDecoration: 'none' }}>
-              {user.email_reconnect_required ? 'Reconnect email' : 'Connect email'}
+              {user.email_reconnect_required
+                ? 'Reconnect email'
+                : needsEmailRelay
+                  ? 'Settings'
+                  : 'Connect email'}
             </Link>
             {!user.email_reconnect_required && (
               <button

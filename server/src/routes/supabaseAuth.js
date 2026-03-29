@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
+import { getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 import { findShifterOrganizationByName, getSupabaseServiceRoleClient } from '../services/supabaseStaffShifter.service.js';
 import {
   completeSupabaseSignIn,
@@ -14,6 +15,25 @@ import {
 } from '../services/nexusSupabaseAuth.service.js';
 
 const router = Router();
+
+/** Prefer RPC so the update is plain SQL (avoids PostgREST PATCH / schema-cache column errors on organizations). */
+async function persistOrgShifterLink(admin, orgId, shifterOrganizationId) {
+  const { error: rpcErr } = await admin.rpc('set_org_shifter_link', {
+    p_org_id: orgId,
+    p_shifter_organization_id: shifterOrganizationId
+  });
+  if (!rpcErr) return { error: null };
+  const rpcMsg = String(rpcErr.message || '');
+  const rpcMissing =
+    /function .* does not exist/i.test(rpcMsg) || /Could not find the function/i.test(rpcMsg);
+  if (!rpcMissing) return { error: rpcErr };
+
+  const { error: updErr } = await admin
+    .from('organizations')
+    .update({ shifter_organization_id: shifterOrganizationId })
+    .eq('id', orgId);
+  return { error: updErr };
+}
 
 router.get('/public-config', (req, res) => {
   res.json({
@@ -51,7 +71,8 @@ router.post('/session', async (req, res) => {
       needs_org_setup: false,
       user: {
         ...u,
-        is_super_admin: isSuperAdminEmail(u?.email)
+        is_super_admin: isSuperAdminEmail(u?.email),
+        email_relay_configured: Boolean(getRelayConfigFromEnv()?.url)
       }
     });
   } catch (err) {
@@ -96,7 +117,8 @@ router.post('/register-org', async (req, res) => {
       user: u
         ? {
             ...u,
-            is_super_admin: isSuperAdminEmail(u?.email)
+            is_super_admin: isSuperAdminEmail(u?.email),
+            email_relay_configured: Boolean(getRelayConfigFromEnv()?.url)
           }
         : null
     });
@@ -198,20 +220,34 @@ router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, async (req
       return res.status(503).json({ error: 'Supabase is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
     }
 
-    const rawName = String(req.body?.shifter_org_name || '').trim();
-    if (!rawName) return res.status(400).json({ error: 'Shifter organisation name is required', code: 'VALIDATION' });
+    let rawName = String(req.body?.shifter_org_name ?? '').trim();
+    if (!rawName) {
+      const { data: orgRow, error: orgReadErr } = await admin
+        .from('organizations')
+        .select('name')
+        .eq('id', orgId)
+        .maybeSingle();
+      if (orgReadErr) {
+        return res.status(400).json({ error: orgReadErr.message || 'Failed to read organisation', code: 'SUPABASE_ORG' });
+      }
+      rawName = String(orgRow?.name ?? '').trim();
+    }
+    if (!rawName) {
+      return res.status(400).json({
+        error:
+          'Your Nexus Core organisation has no name yet. Add a name to your organisation, then use Link to Shifter again.',
+        code: 'NO_ORG_NAME'
+      });
+    }
 
     const shifterOrg = await findShifterOrganizationByName(rawName);
     if (!shifterOrg?.id) {
       return res.status(404).json({ error: 'No matching Shifter organisation found for that name', code: 'SHIFTER_ORG_NOT_FOUND' });
     }
 
-    const { error: updErr } = await admin
-      .from('organizations')
-      .update({ shifter_organization_id: shifterOrg.id, updated_at: new Date().toISOString() })
-      .eq('id', orgId);
-    if (updErr) {
-      return res.status(400).json({ error: updErr.message || 'Failed to save Shifter link', code: 'SUPABASE_ORG' });
+    const { error: linkErr } = await persistOrgShifterLink(admin, orgId, shifterOrg.id);
+    if (linkErr) {
+      return res.status(400).json({ error: linkErr.message || 'Failed to save Shifter link', code: 'SUPABASE_ORG' });
     }
 
     return res.json({ ok: true, org_id: orgId, shifter_organization_id: shifterOrg.id, source: shifterOrg.source || null });
@@ -230,12 +266,9 @@ router.post('/unlink-shifter-org', requireAuth, requireAdminOrDelegate, async (r
       return res.status(503).json({ error: 'Supabase is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
     }
 
-    const { error: updErr } = await admin
-      .from('organizations')
-      .update({ shifter_organization_id: null, updated_at: new Date().toISOString() })
-      .eq('id', orgId);
-    if (updErr) {
-      return res.status(400).json({ error: updErr.message || 'Failed to remove Shifter link', code: 'SUPABASE_ORG' });
+    const { error: unlinkErr } = await persistOrgShifterLink(admin, orgId, null);
+    if (unlinkErr) {
+      return res.status(400).json({ error: unlinkErr.message || 'Failed to remove Shifter link', code: 'SUPABASE_ORG' });
     }
 
     return res.json({ ok: true, org_id: orgId, shifter_organization_id: null });

@@ -1,3 +1,4 @@
+import { normalizeAppRole } from '../../../shared/appRoles.js';
 import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 
@@ -19,7 +20,11 @@ export function getSingleDistinctUserOrgId() {
   return row?.org_id || null;
 }
 
-/** True if this user should see participants whose provider_org_id is still NULL (single-tenant legacy rows). */
+/**
+ * True if this user should see participants whose provider_org_id is still NULL (legacy rows).
+ * Strict: only when every user row with an org_id shares the same org_id (true single-tenant).
+ * Broader heuristics were removed — they leaked NULL rows across tenants when multiple provider orgs existed.
+ */
 export function includeNullProviderParticipantsForUser(user) {
   if (!user?.org_id) return false;
   const single = getSingleDistinctUserOrgId();
@@ -44,7 +49,8 @@ export function requireRole(roles) {
  * Require admin role.
  */
 export function requireAdmin(req, res, next) {
-  if (req.session?.user?.role === 'admin') {
+  const role = normalizeAppRole(req.session?.user?.role);
+  if (role === 'admin') {
     return next();
   }
   return res.status(403).json({ error: 'Admin access required' });
@@ -84,10 +90,10 @@ export function requireAdminOrDelegate(req, res, next) {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
-  let role = user.role;
+  let role = normalizeAppRole(user.role);
   if (!role) {
     const row = db.prepare('SELECT role FROM users WHERE id = ?').get(user.id);
-    role = row?.role || 'support_coordinator';
+    role = normalizeAppRole(row?.role || 'support_coordinator');
     req.session.user.role = role;
   }
 
@@ -122,8 +128,9 @@ export function canAccessParticipant(userId, participantId) {
     if (!po && !includeNullProviderParticipantsForUser(user)) return false;
   }
 
-  if (user.role === 'admin') return true;
-  if (user.role === 'delegate') {
+  const effectiveRole = normalizeAppRole(user.role);
+  if (effectiveRole === 'admin') return true;
+  if (effectiveRole === 'delegate') {
     const now = new Date().toISOString().slice(0, 10);
     const grant = db.prepare(`
       SELECT 1 FROM delegate_grants
@@ -153,8 +160,9 @@ export function getAssignedParticipantIds(userId) {
   const legacyNull = includeNullProviderParticipantsForUser(user);
 
   const now = new Date().toISOString().slice(0, 10);
+  const effectiveRole = normalizeAppRole(user.role);
   const delegateGrant =
-    user.role === 'delegate'
+    effectiveRole === 'delegate'
       ? db
           .prepare(`
       SELECT 1 FROM delegate_grants
@@ -164,7 +172,7 @@ export function getAssignedParticipantIds(userId) {
           .get(userId, now)
       : null;
 
-  if (user.role === 'admin' || (user.role === 'delegate' && delegateGrant)) {
+  if (effectiveRole === 'admin' || (effectiveRole === 'delegate' && delegateGrant)) {
     if (!orgScoped) return null;
     const sql = legacyNull
       ? 'SELECT id FROM participants WHERE provider_org_id = ? OR provider_org_id IS NULL'
