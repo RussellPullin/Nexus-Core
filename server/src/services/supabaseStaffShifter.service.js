@@ -89,11 +89,22 @@ function isUuidString(s) {
   );
 }
 
+async function tryPushNexusOrgIdOnShifterOrganization(shifter, shifterOrgUuid, nexusOrgId) {
+  const nid = String(nexusOrgId || '').trim();
+  if (!nid || !isUuidString(nid)) return { skipped: true, reason: 'invalid_nexus_org_id' };
+  const cols = ['nexus_org_id', 'nexus_core_org_id', 'crm_org_id'];
+  for (const col of cols) {
+    const { error } = await shifter.from('organizations').update({ [col]: nid }).eq('id', shifterOrgUuid);
+    if (!error) return { ok: true, nexus_org_column: col };
+  }
+  return { ok: false, skipped: false, reason: 'no_nexus_org_column' };
+}
+
 /**
- * After Nexus links to a Shifter org, write Schedule Shift / CRM webhook URL (+ optional API key) on Shifter
- * public.organizations when known column names exist. Best-effort; Shifter schemas differ between deployments.
+ * After Nexus links to a Shifter org, write webhook URL (+ optional API key) and optionally Nexus org UUID
+ * so the worker can POST { org_id, shifts } to Nexus using one deployment-wide CRM_API_KEY.
  */
-export async function pushScheduleShiftIntegrationToShifter(shifterOrgId, { webhookUrl, apiKey } = {}) {
+export async function pushScheduleShiftIntegrationToShifter(shifterOrgId, { webhookUrl, apiKey, nexusOrgId } = {}) {
   const shifter = getShifterAdminClient();
   if (!shifter || !isUuidString(String(shifterOrgId || ''))) {
     return { ok: false, skipped: true, reason: 'shifter_not_configured_or_invalid_org_id' };
@@ -121,12 +132,16 @@ export async function pushScheduleShiftIntegrationToShifter(shifterOrgId, { webh
     if (key && keyCol) patch[keyCol] = key;
     const { error } = await shifter.from('organizations').update(patch).eq('id', oid);
     if (!error) {
-      return {
+      const out = {
         ok: true,
         webhook_column: urlCol,
         api_key_column: key && keyCol ? keyCol : null,
         api_key_set: Boolean(key && keyCol),
       };
+      if (nexusOrgId) {
+        out.nexus_org_push = await tryPushNexusOrgIdOnShifterOrganization(shifter, oid, nexusOrgId);
+      }
+      return out;
     }
   }
 
@@ -140,7 +155,7 @@ export async function pushScheduleShiftIntegrationToShifter(shifterOrgId, { webh
   for (const col of urlOnlyCols) {
     const { error } = await shifter.from('organizations').update({ [col]: url }).eq('id', oid);
     if (!error) {
-      return {
+      const out = {
         ok: true,
         webhook_column: col,
         api_key_column: null,
@@ -149,6 +164,10 @@ export async function pushScheduleShiftIntegrationToShifter(shifterOrgId, { webh
           ? 'Server has CRM_API_KEY but no matching API key column on Shifter organisations — set the key in Shifter admin or align column names.'
           : null,
       };
+      if (nexusOrgId) {
+        out.nexus_org_push = await tryPushNexusOrgIdOnShifterOrganization(shifter, oid, nexusOrgId);
+      }
+      return out;
     }
   }
 
@@ -208,20 +227,50 @@ function isShifterAdminLikeRole(role) {
   );
 }
 
+function extractProgressNotesLocationFromRow(row) {
+  if (!row || typeof row !== 'object') return { path: null, sharingUrl: null };
+  const sharingUrl = String(row.progress_notes_onedrive_sharing_url || '').trim();
+  const full = String(row.progress_notes_onedrive_path || '').trim().replace(/^\/+/, '');
+  if (full) return { path: full, sharingUrl: sharingUrl || null };
+  const joined = joinShifterProgressNotesPath(row.progress_notes_folder, row.progress_notes_filename);
+  const path = joined ? joined.replace(/^\/+/, '') : null;
+  return { path, sharingUrl: sharingUrl || null };
+}
+
+function locationIsSet(loc) {
+  return Boolean((loc?.path && String(loc.path).trim()) || (loc?.sharingUrl && String(loc.sharingUrl).trim()));
+}
+
 /**
- * OneDrive path (folder + file under the connected user’s drive root) for the Progress Notes / shifts workbook.
- * Loaded from the Shifter Supabase project: Org Admin profiles for the same org (see supabase/shifter-migrations).
- * @param {string} nexusOrgId - Nexus / public.organizations.id (uuid)
- * @returns {Promise<string | null>} Relative path, or null to fall back to env default
+ * OneDrive location for the Progress Notes workbook: path and/or sharing URL from Shifter (per-org + profiles).
+ * Priority: Shifter public.organizations row → Org Admin profiles → any profile with path or link (see supabase/shifter-migrations).
+ * @param {string} nexusOrgId - Nexus public.organizations.id (uuid)
+ * @returns {Promise<{ path: string | null, sharingUrl: string | null, source: string | null }>}
  */
-export async function resolveOnedriveExcelPathFromShifterForNexusOrg(nexusOrgId) {
+export async function resolveOnedriveExcelLocationFromShifterForNexusOrg(nexusOrgId) {
+  const empty = { path: null, sharingUrl: null, source: null };
   const shifter = getShifterAdminClient();
-  if (!shifter || !nexusOrgId) return null;
+  if (!shifter || !nexusOrgId) return { ...empty };
 
   const shifterOrgId = await resolveEffectiveShifterOrgIdForNexusOrg(nexusOrgId);
-  if (!shifterOrgId) return null;
+  if (!shifterOrgId) return { ...empty };
 
-  const sel = 'email, role, progress_notes_onedrive_path, progress_notes_folder, progress_notes_filename';
+  const orgSel =
+    'progress_notes_onedrive_path, progress_notes_folder, progress_notes_filename, progress_notes_onedrive_sharing_url';
+  const { data: orgRow, error: orgErr } = await shifter
+    .from('organizations')
+    .select(orgSel)
+    .eq('id', shifterOrgId)
+    .maybeSingle();
+  if (orgErr && !/column .* does not exist/i.test(String(orgErr.message || ''))) {
+    console.warn('[shifter-excel-path] organizations read:', orgErr.message);
+  } else if (orgRow) {
+    const loc = extractProgressNotesLocationFromRow(orgRow);
+    if (locationIsSet(loc)) return { ...loc, source: 'shifter_organizations' };
+  }
+
+  const sel =
+    'email, role, progress_notes_onedrive_path, progress_notes_folder, progress_notes_filename, progress_notes_onedrive_sharing_url';
   const { data, error } = await shifter
     .from('profiles')
     .select(sel)
@@ -230,7 +279,7 @@ export async function resolveOnedriveExcelPathFromShifterForNexusOrg(nexusOrgId)
 
   if (error) {
     console.warn('[shifter-excel-path] profiles read:', error.message);
-    return null;
+    return { ...empty };
   }
 
   let rows = data || [];
@@ -241,16 +290,32 @@ export async function resolveOnedriveExcelPathFromShifterForNexusOrg(nexusOrgId)
       console.warn('[shifter-excel-path] profiles organization_id read:', alt.error.message);
     }
   }
+
+  const tryRows = (list) => {
+    for (const row of list) {
+      const loc = extractProgressNotesLocationFromRow(row);
+      if (locationIsSet(loc)) return loc;
+    }
+    return null;
+  };
+
   const admins = rows.filter((r) => isShifterAdminLikeRole(r.role));
+  const fromAdmins = tryRows(admins);
+  if (fromAdmins) return { ...fromAdmins, source: 'shifter_profile_admin' };
 
-  for (const row of admins) {
-    const full = String(row.progress_notes_onedrive_path || '').trim().replace(/^\/+/, '');
-    if (full) return full;
-    const joined = joinShifterProgressNotesPath(row.progress_notes_folder, row.progress_notes_filename);
-    if (joined) return joined.replace(/^\/+/, '');
-  }
+  const fromAnyone = tryRows(rows);
+  if (fromAnyone) return { ...fromAnyone, source: 'shifter_profile' };
 
-  return null;
+  return { ...empty };
+}
+
+/**
+ * @deprecated Prefer resolveOnedriveExcelLocationFromShifterForNexusOrg for sharing-link support.
+ * @returns {Promise<string | null>}
+ */
+export async function resolveOnedriveExcelPathFromShifterForNexusOrg(nexusOrgId) {
+  const loc = await resolveOnedriveExcelLocationFromShifterForNexusOrg(nexusOrgId);
+  return loc.path || null;
 }
 
 function pickShifterProfileIdFromRow(row, table) {

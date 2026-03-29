@@ -108,6 +108,7 @@ import coordinatorCasesRouter from './routes/coordinatorCases.js';
 import billingRouter from './routes/billing.js';
 import appShiftsRouter from './routes/appShifts.js';
 import syncFromExcelRouter from './routes/syncFromExcel.js';
+import webhooksPublicRouter from './routes/webhooksPublic.js';
 import receiptsRouter from './routes/receipts.js';
 import settingsRouter from './routes/settings.js';
 import learningRouter from './routes/learning.js';
@@ -164,6 +165,9 @@ app.use('/api/integrations/microsoft-drive', orgMicrosoftDriveRouter);
 
 // Public staff onboarding form (token in URL, no login)
 app.use('/api/public/staff-onboarding', staffOnboardingPublicRouter);
+
+// Progress Notes / Schedule Shift → Nexus (CRM_API_KEY only)
+app.use('/api/webhooks', webhooksPublicRouter);
 
 // Sync from OneDrive Excel (auth: session OR CRM_API_KEY for cron)
 app.use('/api/sync', syncFromExcelRouter);

@@ -8,8 +8,15 @@ import { pullShiftsFromExcel } from '../services/excelPull.service.js';
 import { processShifts } from '../services/webhookProcessor.js';
 import { mirrorAllShiftsToNexusSupabase } from '../services/nexusPublicShiftsSync.service.js';
 import { pullShiftsFromShifterSupabase, debugShifterShiftsByOrg } from '../services/shifterPull.service.js';
+import { isShifterRemoteConfigured } from '../services/supabaseStaffShifter.service.js';
 
 const router = Router();
+
+function shouldTryShifterAfterOnedriveNotFound(err) {
+  if (!isShifterRemoteConfigured()) return false;
+  const m = String(err?.message || err || '');
+  return /itemNotFound|item not found|"code":"itemNotFound"|The resource could not be found|Item not found/u.test(m);
+}
 
 function hasValidApiKey(req) {
   const expected = process.env.CRM_API_KEY?.trim?.() || process.env.CRM_API_KEY || '';
@@ -49,17 +56,38 @@ router.post('/from-excel', async (req, res) => {
       req.query?.useLlm !== 'false';
 
     const orgId = req.session?.user?.org_id || null;
-    const { shifts, llmUsed } = await pullShiftsFromExcel({
-      log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
-      useLlm,
-      organizationId: orgId || undefined,
-    });
+    let shifts;
+    let llmUsed = false;
+    let source = 'onedrive_excel';
+
+    try {
+      const pulled = await pullShiftsFromExcel({
+        log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
+        useLlm,
+        organizationId: orgId || undefined,
+      });
+      shifts = pulled.shifts;
+      llmUsed = !!pulled.llmUsed;
+    } catch (excelErr) {
+      if (orgId && shouldTryShifterAfterOnedriveNotFound(excelErr)) {
+        log('OneDrive Excel not found; falling back to Shifter Supabase shifts for this org', { orgId });
+        const pulled = await pullShiftsFromShifterSupabase({
+          nexusOrgId: orgId,
+          log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
+        });
+        shifts = pulled.shifts;
+        llmUsed = false;
+        source = 'shifter_supabase_fallback';
+      } else {
+        throw excelErr;
+      }
+    }
 
     if (!shifts || shifts.length === 0) {
-      log('No shifts found in Excel');
+      log('No shifts found');
       return res.json({
         ok: true,
-        source: 'onedrive_excel',
+        source,
         llm_used: !!llmUsed,
         processed: 0,
         matched: 0,
@@ -71,7 +99,7 @@ router.post('/from-excel', async (req, res) => {
     log('Processing shifts', { count: shifts.length });
 
     const result = processShifts(shifts, {
-      orgId: null,
+      orgId,
       log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
       logWarn: (msg, data) => console.warn('[sync-from-excel]', msg, data || ''),
       logError: (msg, err) => console.error('[sync-from-excel]', msg, err),
@@ -81,14 +109,14 @@ router.post('/from-excel', async (req, res) => {
 
     res.json({
       ok: true,
-      source: 'onedrive_excel',
+      source,
       llm_used: !!llmUsed,
       ...result,
     });
   } catch (err) {
     console.error('[sync-from-excel]', err);
     const hint =
-      'Connect Microsoft OneDrive in Settings (file in that user’s OneDrive), or set API .env: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID (owner’s Microsoft 365 email / UPN), ONEDRIVE_EXCEL_PATH (optional). With SHIFTER_SUPABASE_URL, set progress_notes_onedrive_path (or folder + filename) on an Org Admin profile in Shifter — see supabase/shifter-migrations.';
+      'Connect Microsoft OneDrive in Settings (file in that user’s OneDrive), or set API .env: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID (owner’s Microsoft 365 email / UPN), ONEDRIVE_EXCEL_PATH (optional). With SHIFTER_SUPABASE_URL, set progress_notes_onedrive_path, sharing link, or folder+filename on Shifter public.organizations or profiles — see supabase/shifter-migrations. If the workbook is missing but shifts exist in Shifter, sync will fall back to Shifter automatically when OneDrive returns 404.';
     res.status(500).json({
       error: err.message || 'Sync from Excel failed',
       errorDetail: hint,

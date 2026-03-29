@@ -14,3 +14,21 @@ COMMENT ON COLUMN public.profiles.progress_notes_folder IS
 
 COMMENT ON COLUMN public.profiles.progress_notes_filename IS
   'Workbook file name; combined with progress_notes_folder when progress_notes_onedrive_path is null.';
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS progress_notes_onedrive_sharing_url text;
+
+COMMENT ON COLUMN public.profiles.progress_notes_onedrive_sharing_url IS
+  'Optional Microsoft "Copy link" URL to the workbook; Nexus can open the file via Graph shares API when path-based lookup fails.';
+
+ALTER TABLE public.organizations
+  ADD COLUMN IF NOT EXISTS progress_notes_onedrive_path text,
+  ADD COLUMN IF NOT EXISTS progress_notes_folder text,
+  ADD COLUMN IF NOT EXISTS progress_notes_filename text,
+  ADD COLUMN IF NOT EXISTS progress_notes_onedrive_sharing_url text;
+
+COMMENT ON COLUMN public.organizations.progress_notes_onedrive_path IS
+  'Per-org default path to the Progress Notes workbook under the connected OneDrive (same as profiles columns).';
+
+COMMENT ON COLUMN public.organizations.progress_notes_onedrive_sharing_url IS
+  'Per-org sharing link to the workbook (optional alternative to path).';

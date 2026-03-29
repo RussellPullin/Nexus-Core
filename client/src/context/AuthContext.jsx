@@ -55,11 +55,11 @@ export function AuthProvider({ children }) {
    */
   const loginWithSupabase = async (email, password) => {
     const sb = getSupabaseBrowserClient();
-    if (!sb) throw new Error('Supabase client is not configured (set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY).');
+    if (!sb) throw new Error('Sign-in is not set up in this app. Ask your administrator.');
     const { data, error } = await sb.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);
     const token = data.session?.access_token;
-    if (!token) throw new Error('No session returned from Supabase.');
+    if (!token) throw new Error('No session returned. Please try signing in again.');
     const body = await authApi.supabaseSession(token);
     if (body.needs_org_setup) return { needs_org_setup: true };
     const meData = await authApi.me();
@@ -72,7 +72,7 @@ export function AuthProvider({ children }) {
    */
   const registerWithSupabase = async (email, password, name) => {
     const sb = getSupabaseBrowserClient();
-    if (!sb) throw new Error('Supabase client is not configured.');
+    if (!sb) throw new Error('Sign-in is not set up in this app. Ask your administrator.');
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const emailRedirectTo = origin ? `${origin}/login` : undefined;
     const { data, error } = await sb.auth.signUp({

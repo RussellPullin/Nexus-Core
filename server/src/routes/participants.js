@@ -1917,6 +1917,15 @@ router.post('/import-csv', requireCoordinatorOrAdmin, memoryUpload.single('file'
           });
           continue;
         }
+        // Support coordinators only see user_participants links; re-import skips creating a row, so link them to existing org-scoped duplicates.
+        if (
+          myOrg &&
+          existing.provider_org_id != null &&
+          String(existing.provider_org_id).trim() !== '' &&
+          String(existing.provider_org_id) === String(myOrg)
+        ) {
+          assignCreatorIfSupportCoordinator(req.session?.user?.id, existing.id);
+        }
         skipped.push({ name: row.name, reason: 'NDIS number already exists' });
         continue;
       }

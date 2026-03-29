@@ -97,10 +97,10 @@ export default function LoginPage() {
               // Ignore signOut cleanup failures
             }
           }
-          setError('Your Supabase session token is invalid or expired.');
+          setError('Your sign-in session is invalid or has expired.');
           setInfo('Please sign in again or use Forgot password to get a fresh link.');
         } else {
-          setError(msg || 'Could not complete Supabase sign-in.');
+          setError(msg || 'Could not complete sign-in.');
         }
       } finally {
         syncingSupabaseSessionRef.current = false;
@@ -240,7 +240,7 @@ export default function LoginPage() {
     }
     const sb = getSupabaseBrowserClient();
     if (!sb) {
-      setError('Supabase client is not configured.');
+      setError('Sign-in is not set up in this app. Ask your administrator.');
       return;
     }
     setSubmitting(true);
@@ -272,13 +272,13 @@ export default function LoginPage() {
       return;
     }
     if (!useCloudAuth) {
-      setInfo('Forgot password is only available in Supabase login mode.');
+      setInfo('Forgot password is only available when your organisation uses cloud sign-in.');
       return;
     }
     const sb = getSupabaseBrowserClient();
     if (!sb) {
-      setError('Supabase client is not configured in this browser origin.');
-      setInfo('Open http://localhost:5174/login and retry Forgot password.');
+      setError('Password reset is not available from this address.');
+      setInfo('Open the sign-in page your administrator gave you and try Forgot password again.');
       return;
     }
     setSubmitting(true);
@@ -320,11 +320,9 @@ export default function LoginPage() {
             const to = r.confirmEmail ? ` to ${r.confirmEmail}` : '';
             setInfo(
               [
-                `If email confirmation is enabled in Supabase, a message should arrive${to}. After you click the link, sign in here to finish organisation setup.`,
+                `If your organisation requires email confirmation, check your inbox${to}. After you click the link, sign in here to finish organisation setup.`,
                 '',
-                'No email? Confirmation is sent by your Supabase project (not Nexus email in Settings). Check spam and wait a few minutes.',
-                'In Supabase Dashboard: Authentication → Providers → Email — use Custom SMTP for reliable delivery. For local testing you can turn off "Confirm email".',
-                `Authentication → URL Configuration → add your Redirect URLs (e.g. ${typeof window !== 'undefined' ? `${window.location.origin}/**` : 'https://your-app/**'}).`,
+                'No email yet? Check spam and wait a few minutes. If it still does not arrive, ask your administrator.',
               ].join('\n'),
             );
             setIsRegister(false);
@@ -359,9 +357,9 @@ export default function LoginPage() {
         setError('');
         setInfo(
           [
-            'This account must use cloud sign-in (Supabase). Your next Sign in will check the password stored in Supabase Auth — that can differ from an older password that only ever lived in Nexus’s local database.',
+            'This account uses cloud sign-in. The password may differ from an older password used only on this device.',
             '',
-            'Click Sign in again. If Supabase still rejects it: Supabase Dashboard → Authentication → Users → your email → reset password (or Send magic link).',
+            'Click Sign in again. If it still fails, use Forgot password or ask your administrator to reset your account.',
           ].join('\n'),
         );
         return;
@@ -369,14 +367,11 @@ export default function LoginPage() {
       let msg = err.message || 'Login failed';
       if (useCloudAuth) {
         if (err?.code === 'NO_PROFILE') {
-          msg +=
-            '\n\nYour Supabase user exists but there is no matching row in public.profiles. A developer needs to run the profiles migration / trigger that creates profiles on signup.';
+          msg += '\n\nYour account exists but your profile is not ready yet. Ask your administrator.';
         } else if (/invalid login credentials|invalid email or password/i.test(msg)) {
-          msg +=
-            '\n\nThat error is from Supabase Auth, not Nexus. The password in Supabase may not match what you expect if you first created the user locally. Reset it: Dashboard → Authentication → Users → pick your user → reset password.';
+          msg += '\n\nCheck your email and password, use Forgot password, or ask your administrator to reset your account.';
         } else if (/email not confirmed|confirm your email/i.test(msg)) {
-          msg +=
-            '\n\nConfirm your email using the link Supabase sent, or for local testing turn off “Confirm email” under Authentication → Providers → Email.';
+          msg += '\n\nConfirm your email using the link you were sent, then try again.';
         }
       }
       setError(msg);
@@ -402,7 +397,7 @@ export default function LoginPage() {
           {isRegister ? 'Create your account' : 'Sign in to continue'}
           {useCloudAuth && (
             <span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginTop: '0.35rem' }}>
-              Secured with Supabase (same project as org features &amp; Shifter sync).
+              Organisation cloud sign-in.
             </span>
           )}
         </p>
@@ -502,11 +497,11 @@ export default function LoginPage() {
             onClick={() => {
               setUseCloudAuth(true);
               setError('');
-              setInfo('Using cloud sign-in (Supabase). Use the email and password from your Supabase project.');
+              setInfo('Using organisation cloud sign-in. Use the email and password your administrator gave you.');
             }}
             style={{ display: 'block', width: '100%', marginTop: '0.5rem' }}
           >
-            Use organisation sign-in (Supabase) instead
+            Use organisation cloud sign-in instead
           </button>
         )}
         {!isRecoveryMode && (

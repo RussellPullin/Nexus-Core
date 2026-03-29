@@ -269,7 +269,7 @@ export default function SettingsPage() {
                 className="settings-error"
                 style={{ marginTop: '0.75rem', marginBottom: 0, background: '#fff7ed', borderColor: '#fdba74', color: '#9a3412' }}
               >
-                The server is not configured to send mail yet. Set <code>AZURE_EMAIL_FUNCTION_URL</code> on the host (see repo <code>azure-email-function</code> and <code>.env.example</code>). Test email and roster send will fail until this is set.
+                Outgoing mail is not set up on this server yet. Ask your administrator to finish email setup — test email and roster send will not work until then.
               </div>
             )}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
@@ -470,7 +470,7 @@ export default function SettingsPage() {
             )}
           </>
         )}
-        <small className="form-hint" style={{ display: 'block', marginTop: '0.5rem' }}>Server admins: set OLLAMA_MODEL to any model name (e.g. gemma3, qwen2.5:14b). OLLAMA_BASE_URL defaults to 127.0.0.1:11434. If OLLAMA_MODEL is not set, the first model in Ollama is used.</small>
+        <small className="form-hint" style={{ display: 'block', marginTop: '0.5rem' }}>Your administrator can choose a different AI model or server address if needed.</small>
       </div>
 
       {isAdmin && (
@@ -522,8 +522,8 @@ export default function SettingsPage() {
             </button>
           )}
           <p className="form-hint" style={{ marginTop: '0.5rem' }}>
-            Azure app needs delegated <code>Files.ReadWrite.All</code> and redirect URI{' '}
-            <code>{`${window.location.origin}/api/integrations/microsoft-drive/callback`}</code> (use <code>OAUTH_PUBLIC_URL</code> on the server if the API host differs).
+            If connection fails, your IT administrator may need to allow this app in Microsoft 365 and register the redirect address{' '}
+            <code>{`${window.location.origin}/api/integrations/microsoft-drive/callback`}</code>.
           </p>
         </div>
       )}
@@ -575,14 +575,23 @@ function ShifterIntegrationCard() {
       await load();
       const push = data?.schedule_shift_push;
       if (push?.ok) {
+        const hostMissingKey = data?.crm_api_key_configured === false;
         const keyPart = push.api_key_set
-          ? ' API key was saved in Shifter too.'
-          : ' If Shifter still needs an API key, set CRM_API_KEY on the Nexus server and use Link to Shifter again, or enter the key in Shifter admin.';
-        setMsg(`Shifter linked. Webhook URL was written to your Shifter organisation.${keyPart}`);
+          ? ' The shared security key was saved in Shifter too, so the Progress app can call Nexus without anyone pasting it.'
+          : hostMissingKey
+            ? ' The webhook address was saved, but the server security key is not set yet — your administrator should add it, then use Link to Shifter again or paste the key manually in Shifter.'
+            : ' The webhook address was saved. If Shifter still asks for a key, use Link to Shifter again or paste the same server key in Shifter admin.';
+        const nexusIdPart =
+          push.nexus_org_push?.ok === true
+            ? ' Nexus also saved this organisation’s id in Shifter for scoped webhook payloads.'
+            : push.nexus_org_push?.reason === 'no_nexus_org_column'
+              ? ' Your administrator may need to update Shifter so Nexus can store this organisation’s id automatically.'
+              : '';
+        setMsg(`Shifter linked. ${keyPart}${nexusIdPart}`);
         setManualUrlsOpen(false);
       } else if (push?.skipped && push.reason === 'nexus_shift_api_base_unresolved') {
         setMsg(
-          'Shifter linked, but the public Nexus API URL is unknown — set NEXUS_PUBLIC_API_URL or OAUTH_PUBLIC_URL on the server, or nexus_shift_api_base_url on an Admin profile in Supabase, then use Link to Shifter again to push the webhook into Shifter.'
+          'Shifter linked, but the public web address for Nexus could not be determined. Ask your administrator to set the correct API base URL, then use Link to Shifter again.'
         );
         setManualUrlsOpen(true);
       } else if (push?.skipped && push.reason === 'no_webhook_url') {
@@ -595,7 +604,7 @@ function ShifterIntegrationCard() {
         setManualUrlsOpen(true);
       } else if (push?.skipped && push.reason === 'shifter_not_configured_or_invalid_org_id') {
         setMsg(
-          'Shifter linked in Nexus. To push the webhook into Shifter automatically, set SHIFTER_SUPABASE_URL and SHIFTER_SERVICE_ROLE_KEY on the server, then use Link to Shifter again — or use manual setup below.'
+          'Shifter linked in Nexus. Automatic setup into Shifter is not available until your administrator finishes server configuration — or use manual setup below.'
         );
         setManualUrlsOpen(true);
       } else {
@@ -633,9 +642,75 @@ function ShifterIntegrationCard() {
     }
   };
 
+  const crmReady = linkInfo?.crm_api_key_configured === true;
+  const shifterRemoteReady = linkInfo?.shifter_remote_configured === true;
+
   return (
     <div className="card">
       <h3 className="settings-section-title" style={{ marginTop: 0 }}>Shifter and shift schedule</h3>
+
+      <div
+        style={{
+          padding: '0.85rem 1rem',
+          marginBottom: '1rem',
+          background: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: 8,
+          fontSize: '0.95rem',
+          lineHeight: 1.55,
+        }}
+      >
+        <p style={{ margin: '0 0 0.6rem 0', fontWeight: 600, color: '#334155' }}>Plain English: who does what</p>
+        <p style={{ margin: '0 0 0.5rem 0', color: '#475569' }}>
+          <strong>If you are an organisation admin (end user):</strong> you should only need to click{' '}
+          <strong>Link to Shifter</strong> once your organisation name matches Shifter. Nexus then tries to install the webhook
+          address and security key into Shifter for you — <strong>no manual “headers” or pasting</strong> for most people.
+        </p>
+        <p style={{ margin: '0 0 0.5rem 0', color: '#475569' }}>
+          <strong>If you run or host Nexus (once for the whole site, not per org):</strong> set a single secret named{' '}
+          <code>CRM_API_KEY</code> on the server (e.g. Fly <strong>Secrets</strong>). That is the <strong>master</strong> key:
+          one value for <em>every</em> organisation on this Nexus — not a separate key per tenant. Also set{' '}
+          <code>SHIFTER_SUPABASE_URL</code> and <code>SHIFTER_SERVICE_ROLE_KEY</code> so “Link to Shifter” can write into
+          Shifter’s database. Set a public API base (<code>OAUTH_PUBLIC_URL</code>, <code>NEXUS_PUBLIC_API_URL</code>, or{' '}
+          <code>nexus_shift_api_base_url</code> on an Admin profile) so the webhook URL is correct.
+        </p>
+        <p style={{ margin: '0 0 0.5rem 0', color: '#475569' }}>
+          <strong>Org-level data:</strong> Supabase (Shifter) stores <em>per organisation</em> row: webhook URL, API key field
+          (same master key), and Nexus tries to save <code>nexus_org_id</code> (see Shifter migration). Your worker should read
+          that id and POST{' '}
+          <code>{'{ "org_id": "<uuid>", "shifts": [ ... ] }'}</code> so Nexus knows which tenant the payload belongs to.
+        </p>
+        {!loading && (
+          <ul style={{ margin: '0.4rem 0 0 1.1rem', padding: 0, color: '#475569' }}>
+            <li>
+              <strong>CRM key on server:</strong>{' '}
+              {crmReady ? (
+                <span className="settings-success" style={{ display: 'inline', fontWeight: 600 }}>
+                  Ready — webhook requests can be authenticated.
+                </span>
+              ) : (
+                <span className="settings-error" style={{ display: 'inline', fontWeight: 600 }}>
+                  Not set — whoever hosts Nexus must add <code>CRM_API_KEY</code> (Fly secrets / env) and redeploy. Org admins
+                  cannot fix this in Settings.
+                </span>
+              )}
+            </li>
+            <li style={{ marginTop: '0.35rem' }}>
+              <strong>Auto-write into Shifter:</strong>{' '}
+              {shifterRemoteReady ? (
+                <span className="settings-success" style={{ display: 'inline', fontWeight: 600 }}>
+                  Ready — Link to Shifter can push URL + key into Shifter.
+                </span>
+              ) : (
+                <span style={{ color: '#92400e', fontWeight: 600 }}>
+                  Not configured — set Shifter Supabase URL + service role on the Nexus server, or use manual copy below.
+                </span>
+              )}
+            </li>
+          </ul>
+        )}
+      </div>
+
       <p className="settings-desc">
         <strong>Pulls from Shifter:</strong> link your Nexus Core organisation to the matching org in Shifter (same organisation
         name in both apps
@@ -646,8 +721,8 @@ function ShifterIntegrationCard() {
           </>
         ) : null}
         ). <strong>Push into Nexus:</strong> when you use <strong>Link to Shifter</strong>, Nexus tries to write the Schedule Shift
-        webhook URL (and <code>CRM_API_KEY</code> from the server, if set) straight onto that org in Shifter — you should not need
-        to copy URLs unless that step fails or your Shifter schema uses different column names.
+        webhook URL (and the server&apos;s <code>CRM_API_KEY</code>, when set) onto that org in Shifter so the app can POST shifts
+        automatically.
       </p>
 
       <div className="settings-shifter-card-layout">
@@ -660,6 +735,12 @@ function ShifterIntegrationCard() {
               <div className="settings-success">Linked to Shifter.</div>
             ) : (
               <div className="form-hint">Not linked — use Link to Shifter on the right.</div>
+            )}
+            {!loading && linkInfo?.org_id && (
+              <small className="form-hint" style={{ display: 'block', marginTop: '0.35rem' }}>
+                Nexus organisation id (include as <code>org_id</code> in webhook JSON if your app supports it):{' '}
+                <code style={{ wordBreak: 'break-all' }}>{linkInfo.org_id}</code>
+              </small>
             )}
           </div>
 
@@ -723,11 +804,13 @@ function ShifterIntegrationCard() {
             </div>
           </details>
           <small className="form-hint" style={{ display: 'block', marginTop: '0.75rem' }}>
-            <strong>Sync from Excel</strong> (Shifts page) reads the workbook from the connected OneDrive account. The file
-            location is taken from the Org Admin’s row in the <strong>Shifter</strong> Supabase <code>profiles</code> table (
-            <code>progress_notes_onedrive_path</code>, or <code>progress_notes_folder</code> +{' '}
-            <code>progress_notes_filename</code>) when Shifter is linked; otherwise the server default or{' '}
-            <code>ONEDRIVE_EXCEL_PATH</code>. You can still trigger sync from the Shifts page.
+            <strong>Sync from Excel</strong> (Shifts page) uses the connected OneDrive account when Microsoft is linked in
+            Settings. The workbook location is read from <strong>Shifter</strong> Supabase, in order:{' '}
+            <code>public.organizations</code> for that org, then Org Admin <code>profiles</code>, then any profile in the org (
+            <code>progress_notes_onedrive_path</code>, or <code>progress_notes_folder</code> + <code>progress_notes_filename</code>
+            , or <code>progress_notes_onedrive_sharing_url</code>). If OneDrive returns 404 and Shifter is configured, Nexus falls
+            back to pulling shifts from Shifter’s database. Otherwise the server uses <code>ONEDRIVE_EXCEL_PATH</code> or the
+            default path.
           </small>
         </div>
 

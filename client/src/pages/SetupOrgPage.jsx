@@ -33,7 +33,7 @@ export default function SetupOrgPage() {
     }
     const sb = getSupabaseBrowserClient();
     if (!sb) {
-      setError('Supabase is not configured in the client.');
+      setError('Sign-in is not set up in this app. Ask your administrator.');
       return;
     }
     const { data: { session } } = await sb.auth.getSession();
@@ -59,7 +59,7 @@ export default function SetupOrgPage() {
         <div className="login-card">
           <p className="login-subtitle">Sign in first</p>
           <p style={{ marginBottom: '1rem', color: '#64748b' }}>
-            You need an active Supabase session to create your organisation. Open the link from your email or sign in.
+            You need to be signed in to create your organisation. Open the link from your email or sign in again.
           </p>
           <Link to="/login" className="btn btn-primary">Back to sign in</Link>
         </div>

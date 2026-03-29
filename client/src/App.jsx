@@ -128,7 +128,7 @@ function Layout({ children }) {
               {user.email_reconnect_required
                 ? 'Your email connection needs to be renewed. Reconnect in Settings to keep sending rosters and messages.'
                 : needsEmailRelay
-                  ? 'Your inbox is connected, but this server is not set up to send mail yet (missing AZURE_EMAIL_FUNCTION_URL). An administrator must deploy the email relay and set that environment variable on the host.'
+                  ? 'Your inbox is connected, but this server is not set up to send outgoing mail yet. Ask your administrator to finish email setup.'
                   : 'Connect your email so you can send rosters and staff messages from your own address.'}
             </span>
             <Link to="/settings" className="btn btn-primary" style={{ textDecoration: 'none' }}>

@@ -256,7 +256,7 @@ export default function AdminPage() {
     }
     try {
       await auth.supabaseInviteStaff(inviteEmail.trim(), inviteName.trim() || undefined);
-      setMsg('Invite email sent (Supabase). They will join your organisation when they accept.');
+      setMsg('Invite email sent. They will join your organisation when they accept.');
       setInviteEmail('');
       setInviteName('');
     } catch (e) {
@@ -367,10 +367,10 @@ export default function AdminPage() {
             </tbody>
           </table>
 
-          <h4 style={{ marginTop: '1.5rem' }}>Invite staff (Supabase)</h4>
+          <h4 style={{ marginTop: '1.5rem' }}>Invite staff</h4>
           <p style={{ fontSize: '0.9rem', color: '#64748b', maxWidth: '42rem' }}>
-            Sends an email invite via your Nexus Core Supabase project. The user is added to the same organisation as you
-            and can sign in here after they set a password. Enable Shifter separately from the Staff page if needed.
+            Sends an email invite. The person is added to the same organisation as you and can sign in after they set a password.
+            Enable Shifter separately from the Staff page if needed.
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
             <input

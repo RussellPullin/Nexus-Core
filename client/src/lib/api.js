@@ -502,6 +502,11 @@ export const syncFromExcel = {
   run: () => fetchApi('/sync/from-excel', { method: 'POST' })
 };
 
+/** Pull shifts from Shifter Supabase (same org as your Nexus login). Requires SHIFTER_* on server. */
+export const syncFromShifter = {
+  run: () => fetchApi('/sync/from-shifter', { method: 'POST' })
+};
+
 export const coordinatorCases = {
   list: (params) => fetchApi(`/coordinator-cases?${new URLSearchParams(params || {}).toString()}`),
   get: (id) => fetchApi(`/coordinator-cases/${id}`),

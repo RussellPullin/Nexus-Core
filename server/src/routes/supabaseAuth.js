@@ -8,6 +8,7 @@ import { getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 import {
   findShifterOrganizationByName,
   getSupabaseServiceRoleClient,
+  isShifterRemoteConfigured,
   pushScheduleShiftIntegrationToShifter
 } from '../services/supabaseStaffShifter.service.js';
 import {
@@ -265,12 +266,17 @@ router.get('/shifter-org-link', requireAuth, requireAdminOrDelegate, async (req,
     }
     if (!data) return res.status(404).json({ error: 'Organisation not found in Supabase', code: 'ORG_NOT_FOUND' });
     const shiftUrls = await resolveShiftIntegrationUrls(admin, orgId);
+    const crmKeySet = Boolean(String(process.env.CRM_API_KEY || '').trim());
     return res.json({
       org_id: data.id,
       organization_name: data.name || null,
       shifter_organization_id: data.shifter_organization_id || null,
       linked: Boolean(data.shifter_organization_id),
       ...shiftUrls,
+      /** True when Fly/host has CRM_API_KEY — required for webhook auth; never exposes the key. */
+      crm_api_key_configured: crmKeySet,
+      /** True when SHIFTER_SUPABASE_URL + SHIFTER_SERVICE_ROLE_KEY set — allows Nexus to write webhook into Shifter DB. */
+      shifter_remote_configured: isShifterRemoteConfigured(),
     });
   } catch (err) {
     const code = err.code || 'SHIFTER_LINK_READ_ERROR';
@@ -325,7 +331,8 @@ router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, async (req
     } else {
       schedule_shift_push = await pushScheduleShiftIntegrationToShifter(shifterOrg.id, {
         webhookUrl: shiftUrls.webhook_url,
-        apiKey: crmKey
+        apiKey: crmKey,
+        nexusOrgId: orgId,
       });
       if (schedule_shift_push && !schedule_shift_push.ok && !schedule_shift_push.skipped) {
         console.warn('[link-shifter-org] schedule_shift_push failed:', schedule_shift_push);
@@ -339,7 +346,9 @@ router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, async (req
       source: shifterOrg.source || null,
       schedule_shift_push,
       shift_api_base_url: shiftUrls.shift_api_base_url,
-      shift_urls_source: shiftUrls.shift_urls_source
+      shift_urls_source: shiftUrls.shift_urls_source,
+      crm_api_key_configured: Boolean(String(process.env.CRM_API_KEY || '').trim()),
+      shifter_remote_configured: isShifterRemoteConfigured(),
     });
   } catch (err) {
     const code = err.code || 'SHIFTER_LINK_ERROR';

@@ -70,13 +70,12 @@ export default function FeatureFlagsAdminPage() {
     <div className="admin-page">
       <h2>Organisation feature flags</h2>
       <p style={{ color: '#64748b', maxWidth: 720 }}>
-        Toggles update <code>public.org_features</code> in Supabase. Each Nexus user&apos;s <code>org_id</code> must match the
-        same UUID in Supabase <code>organizations</code>. Set <code>NEXUS_SUPER_ADMIN_EMAILS</code> in server env for access.
+        Turn features on or off per organisation. Access to this page is limited to super-admin accounts configured by your host.
       </p>
 
       {!supabase_configured && (
         <div className="settings-error" style={{ marginBottom: '1rem' }}>
-          Supabase is not configured on the server (<code>SUPABASE_URL</code> / <code>SUPABASE_SERVICE_ROLE_KEY</code>).
+          Organisation features are not available until your administrator finishes server setup.
         </div>
       )}
 
