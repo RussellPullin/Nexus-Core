@@ -5,7 +5,11 @@ import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
-import { findShifterOrganizationByName, getSupabaseServiceRoleClient } from '../services/supabaseStaffShifter.service.js';
+import {
+  findShifterOrganizationByName,
+  getSupabaseServiceRoleClient,
+  pushScheduleShiftIntegrationToShifter
+} from '../services/supabaseStaffShifter.service.js';
 import {
   completeSupabaseSignIn,
   registerOrganizationForUser,
@@ -313,7 +317,30 @@ router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, async (req
       return res.status(400).json({ error: linkErr.message || 'Failed to save Shifter link', code: 'SUPABASE_ORG' });
     }
 
-    return res.json({ ok: true, org_id: orgId, shifter_organization_id: shifterOrg.id, source: shifterOrg.source || null });
+    const shiftUrls = await resolveShiftIntegrationUrls(admin, orgId);
+    const crmKey = process.env.CRM_API_KEY?.trim?.() || process.env.CRM_API_KEY || '';
+    let schedule_shift_push = { skipped: true, reason: 'no_webhook_url' };
+    if (!shiftUrls.webhook_url) {
+      schedule_shift_push = { skipped: true, reason: 'nexus_shift_api_base_unresolved' };
+    } else {
+      schedule_shift_push = await pushScheduleShiftIntegrationToShifter(shifterOrg.id, {
+        webhookUrl: shiftUrls.webhook_url,
+        apiKey: crmKey
+      });
+      if (schedule_shift_push && !schedule_shift_push.ok && !schedule_shift_push.skipped) {
+        console.warn('[link-shifter-org] schedule_shift_push failed:', schedule_shift_push);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      org_id: orgId,
+      shifter_organization_id: shifterOrg.id,
+      source: shifterOrg.source || null,
+      schedule_shift_push,
+      shift_api_base_url: shiftUrls.shift_api_base_url,
+      shift_urls_source: shiftUrls.shift_urls_source
+    });
   } catch (err) {
     const code = err.code || 'SHIFTER_LINK_ERROR';
     res.status(400).json({ error: err.message, code });

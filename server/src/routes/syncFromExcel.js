@@ -88,7 +88,7 @@ router.post('/from-excel', async (req, res) => {
   } catch (err) {
     console.error('[sync-from-excel]', err);
     const hint =
-      'Connect Microsoft OneDrive in Settings (file in that user’s OneDrive), or set API .env: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID (owner’s Microsoft 365 email / UPN), ONEDRIVE_EXCEL_PATH (optional). See repo root .env.example.';
+      'Connect Microsoft OneDrive in Settings (file in that user’s OneDrive), or set API .env: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID (owner’s Microsoft 365 email / UPN), ONEDRIVE_EXCEL_PATH (optional). With SHIFTER_SUPABASE_URL, set progress_notes_onedrive_path (or folder + filename) on an Org Admin profile in Shifter — see supabase/shifter-migrations.';
     res.status(500).json({
       error: err.message || 'Sync from Excel failed',
       errorDetail: hint,

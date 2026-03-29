@@ -6,6 +6,7 @@
 import ExcelJS from 'exceljs';
 import { resolveShiftExcelColumns } from './excelShiftParse.service.js';
 import { getValidAccessToken } from './orgOnedriveSync.service.js';
+import { resolveOnedriveExcelPathFromShifterForNexusOrg } from './supabaseStaffShifter.service.js';
 
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
 
@@ -44,6 +45,21 @@ function defaultExcelPath() {
   return process.env.ONEDRIVE_EXCEL_PATH?.trim() || 'Progress Notes App/master progress notes.xlsx';
 }
 
+async function resolvedExcelPathForOrg(nexusOrgId, log) {
+  const fallback = defaultExcelPath();
+  if (!nexusOrgId) return fallback;
+  try {
+    const fromShifter = await resolveOnedriveExcelPathFromShifterForNexusOrg(String(nexusOrgId).trim());
+    if (fromShifter) {
+      log('Using OneDrive Excel path from Shifter admin profile', { path: fromShifter });
+      return fromShifter;
+    }
+  } catch (e) {
+    log('Shifter Excel path lookup skipped or failed', { message: e?.message || String(e) });
+  }
+  return fallback;
+}
+
 function hasLegacyAppOnlyCredentials() {
   const adminUserId = process.env.ONEDRIVE_ADMIN_USER_ID?.trim() || process.env.ADMIN_USER_ID?.trim();
   return Boolean(
@@ -60,7 +76,7 @@ function hasLegacyAppOnlyCredentials() {
  */
 async function fetchExcelBufferCore(options = {}) {
   const log = options.log || (() => {});
-  const excelPath = defaultExcelPath();
+  const excelPath = await resolvedExcelPathForOrg(options.organizationId || null, log);
 
   if (options.organizationId) {
     const delegatedToken = await getValidAccessToken(options.organizationId);
@@ -75,7 +91,7 @@ async function fetchExcelBufferCore(options = {}) {
       } catch (e) {
         const msg = e?.message || String(e);
         throw new Error(
-          `Could not read the Progress Notes Excel file from the connected OneDrive account (${msg}). Expected path: "${excelPath}". Set ONEDRIVE_EXCEL_PATH if the file lives elsewhere.`,
+          `Could not read the Progress Notes Excel file from the connected OneDrive account (${msg}). Expected path: "${excelPath}". Set path on an Org Admin profile in Shifter (progress_notes_onedrive_path or folder + filename), or ONEDRIVE_EXCEL_PATH on the server.`,
         );
       }
     }
@@ -85,11 +101,11 @@ async function fetchExcelBufferCore(options = {}) {
   if (!hasLegacyAppOnlyCredentials()) {
     if (options.organizationId) {
       throw new Error(
-        'Connect Microsoft OneDrive in Settings for your organisation (same account as the Progress Notes Excel file), or set on the API server: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID (Microsoft 365 sign-in email / UPN of the file owner), and optionally ONEDRIVE_EXCEL_PATH. See repo root .env.example.',
+        'Connect Microsoft OneDrive in Settings for your organisation (same account as the Progress Notes Excel file), or set on the API server: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID (Microsoft 365 sign-in email / UPN of the file owner), and optionally ONEDRIVE_EXCEL_PATH. With SHIFTER_SUPABASE_URL set, the Excel path can come from Shifter profiles (Org Admin: progress_notes_onedrive_path or progress_notes_folder + progress_notes_filename). See repo root .env.example and supabase/shifter-migrations.',
       );
     }
     throw new Error(
-      'ONEDRIVE_ADMIN_USER_ID (or ADMIN_USER_ID) is required: set the OneDrive owner’s Microsoft 365 sign-in email (UPN) in .env. Also required: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET. Optional: ONEDRIVE_EXCEL_PATH (default Progress Notes App/master progress notes.xlsx). See .env.example.',
+      'ONEDRIVE_ADMIN_USER_ID (or ADMIN_USER_ID) is required: set the OneDrive owner’s Microsoft 365 sign-in email (UPN) in .env. Also required: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET. Optional: ONEDRIVE_EXCEL_PATH (default Progress Notes App/master progress notes.xlsx), or configure path on Shifter Org Admin profiles when SHIFTER_* env is set. See .env.example.',
     );
   }
 
@@ -415,6 +431,7 @@ function rowToWebhookShift(row) {
  * Uses per-organisation delegated OneDrive (Settings → Microsoft) when options.organizationId is set and linked;
  * otherwise falls back to application credentials: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
  * ONEDRIVE_ADMIN_USER_ID, optional ONEDRIVE_EXCEL_PATH.
+ * When organizationId is set and Shifter is configured, the path under OneDrive is read from Shifter Org Admin profiles first.
  * @param {object} [options] - { log, useLlm, organizationId } useLlm defaults true (Ollama refines columns when needed).
  * @returns {{ shifts: Array, llmUsed?: boolean, error?: string }}
  */

@@ -542,6 +542,7 @@ function ShifterIntegrationCard() {
   const [msg, setMsg] = useState('');
   const [copyMsg, setCopyMsg] = useState('');
   const [linkInfo, setLinkInfo] = useState(null);
+  const [manualUrlsOpen, setManualUrlsOpen] = useState(false);
 
   const clientOrigin = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : '';
   const webhookUrl =
@@ -570,9 +571,37 @@ function ShifterIntegrationCard() {
     setMsg('');
     setBusy(true);
     try {
-      await auth.linkShifterOrg();
+      const data = await auth.linkShifterOrg();
       await load();
-      setMsg('Shifter organisation linked.');
+      const push = data?.schedule_shift_push;
+      if (push?.ok) {
+        const keyPart = push.api_key_set
+          ? ' API key was saved in Shifter too.'
+          : ' If Shifter still needs an API key, set CRM_API_KEY on the Nexus server and use Link to Shifter again, or enter the key in Shifter admin.';
+        setMsg(`Shifter linked. Webhook URL was written to your Shifter organisation.${keyPart}`);
+        setManualUrlsOpen(false);
+      } else if (push?.skipped && push.reason === 'nexus_shift_api_base_unresolved') {
+        setMsg(
+          'Shifter linked, but the public Nexus API URL is unknown — set NEXUS_PUBLIC_API_URL or OAUTH_PUBLIC_URL on the server, or nexus_shift_api_base_url on an Admin profile in Supabase, then use Link to Shifter again to push the webhook into Shifter.'
+        );
+        setManualUrlsOpen(true);
+      } else if (push?.skipped && push.reason === 'no_webhook_url') {
+        setMsg('Shifter linked, but webhook URL could not be resolved. Use manual setup below or fix API base URL / Admin profile.');
+        setManualUrlsOpen(true);
+      } else if (push && !push.skipped && !push.ok) {
+        setMsg(
+          'Shifter linked, but the Shifter database has no matching webhook columns — use manual setup below, or add columns your Progress / Shifter app expects.'
+        );
+        setManualUrlsOpen(true);
+      } else if (push?.skipped && push.reason === 'shifter_not_configured_or_invalid_org_id') {
+        setMsg(
+          'Shifter linked in Nexus. To push the webhook into Shifter automatically, set SHIFTER_SUPABASE_URL and SHIFTER_SERVICE_ROLE_KEY on the server, then use Link to Shifter again — or use manual setup below.'
+        );
+        setManualUrlsOpen(true);
+      } else {
+        setMsg('Shifter organisation linked.');
+        setManualUrlsOpen(true);
+      }
     } catch (err) {
       setMsg(err.message || 'Could not link Shifter organisation');
     } finally {
@@ -616,8 +645,9 @@ function ShifterIntegrationCard() {
             — yours is <strong>{linkInfo.organization_name}</strong>
           </>
         ) : null}
-        ). <strong>Push into Nexus:</strong> use the URLs below in your schedule / Progress app. The public host comes from
-        Supabase (see below) when set; otherwise this site’s address or server environment defaults apply.
+        ). <strong>Push into Nexus:</strong> when you use <strong>Link to Shifter</strong>, Nexus tries to write the Schedule Shift
+        webhook URL (and <code>CRM_API_KEY</code> from the server, if set) straight onto that org in Shifter — you should not need
+        to copy URLs unless that step fails or your Shifter schema uses different column names.
       </p>
 
       <div className="settings-shifter-card-layout">
@@ -635,11 +665,9 @@ function ShifterIntegrationCard() {
 
           <h4 className="settings-subsection-title">Send shifts into Nexus Core</h4>
           <p className="form-hint" style={{ marginTop: 0 }}>
-            Paste these into your external app (webhook preferred; Excel sync as fallback). To pin the correct public host
-            (for example when the UI and API use different domains), open Supabase <strong>Table editor → profiles</strong>,
-            find your <strong>Org Admin</strong> row (match <code>email</code>), and set{' '}
-            <code>nexus_shift_api_base_url</code> to your Nexus API origin only — e.g.{' '}
-            <code>https://nexus-core-crm.fly.dev</code> with no trailing slash.
+            Webhook base URL is resolved from an Admin profile (<code>nexus_shift_api_base_url</code> in Supabase), then server
+            env (<code>NEXUS_PUBLIC_API_URL</code> / <code>OAUTH_PUBLIC_URL</code> / <code>FRONTEND_BASE_URL</code>), then this
+            browser origin. Wrong base breaks auto-config — fix it before linking.
           </p>
           {!loading && linkInfo?.shift_urls_source === 'supabase_profile' && linkInfo?.shift_url_profile_email && (
             <p className="settings-success" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.9rem' }}>
@@ -649,42 +677,57 @@ function ShifterIntegrationCard() {
           )}
           {!loading && linkInfo?.shift_urls_source === 'env' && (
             <p className="form-hint" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-              No Admin profile base in Supabase; using server env (<code>NEXUS_PUBLIC_API_URL</code> /{' '}
-              <code>OAUTH_PUBLIC_URL</code> / <code>FRONTEND_BASE_URL</code>).
+              Using server env (<code>NEXUS_PUBLIC_API_URL</code> / <code>OAUTH_PUBLIC_URL</code> /{' '}
+              <code>FRONTEND_BASE_URL</code>).
             </p>
           )}
           {!loading && linkInfo?.shift_urls_source === 'client_origin' && (
             <p className="form-hint" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-              No Supabase Admin base or env fallback; using this browser origin. Set{' '}
-              <code>nexus_shift_api_base_url</code> on an Admin profile if that is wrong for your shift app.
+              Using this browser origin for the webhook URL. If that is not your public API host, set{' '}
+              <code>nexus_shift_api_base_url</code> on an Admin profile or set env on the server.
             </p>
           )}
-          <div className="form-group" style={{ marginTop: '0.75rem' }}>
-            <label>Webhook endpoint (if enabled)</label>
-            <input className="form-input" value={webhookUrl} readOnly />
-            <small className="form-hint">
-              Method: <code>POST</code>. If this route is not available on your server, use the Excel sync endpoint below.
-            </small>
-          </div>
-          <div className="settings-buttons">
-            <button type="button" className="btn btn-secondary" onClick={() => copyText('Webhook URL', webhookUrl)}>
-              Copy webhook URL
-            </button>
-          </div>
-          <div className="form-group" style={{ marginTop: '1rem' }}>
-            <label>Excel sync endpoint (fallback)</label>
-            <input className="form-input" value={syncUrl} readOnly />
-            <small className="form-hint">
-              Method: <code>POST</code> with signed-in session, or header <code>x-api-key: CRM_API_KEY</code>.
-            </small>
-          </div>
-          <div className="settings-buttons">
-            <button type="button" className="btn btn-secondary" onClick={() => copyText('Sync URL', syncUrl)}>
-              Copy sync URL
-            </button>
-          </div>
-          <small className="form-hint" style={{ display: 'block', marginTop: '0.5rem' }}>
-            You can also run the fallback from the Shifts page: <strong>Sync from Excel</strong>.
+
+          <details
+            style={{ marginTop: '0.75rem' }}
+            open={manualUrlsOpen}
+            onToggle={(e) => setManualUrlsOpen(e.target.open)}
+          >
+            <summary className="form-hint" style={{ cursor: 'pointer', fontWeight: 600 }}>
+              Manual webhook / Excel sync (only if auto-config failed or you use a custom Shifter schema)
+            </summary>
+            <div className="form-group" style={{ marginTop: '0.75rem' }}>
+              <label>Webhook endpoint</label>
+              <input className="form-input" value={webhookUrl} readOnly />
+              <small className="form-hint">
+                Method: <code>POST</code>. Use the same secret as <code>CRM_API_KEY</code> in the server <code>.env</code> as the
+                API key in your app.
+              </small>
+            </div>
+            <div className="settings-buttons">
+              <button type="button" className="btn btn-secondary" onClick={() => copyText('Webhook URL', webhookUrl)}>
+                Copy webhook URL
+              </button>
+            </div>
+            <div className="form-group" style={{ marginTop: '1rem' }}>
+              <label>Excel sync endpoint (fallback)</label>
+              <input className="form-input" value={syncUrl} readOnly />
+              <small className="form-hint">
+                Method: <code>POST</code> with signed-in session, or header <code>x-api-key: CRM_API_KEY</code>.
+              </small>
+            </div>
+            <div className="settings-buttons">
+              <button type="button" className="btn btn-secondary" onClick={() => copyText('Sync URL', syncUrl)}>
+                Copy sync URL
+              </button>
+            </div>
+          </details>
+          <small className="form-hint" style={{ display: 'block', marginTop: '0.75rem' }}>
+            <strong>Sync from Excel</strong> (Shifts page) reads the workbook from the connected OneDrive account. The file
+            location is taken from the Org Admin’s row in the <strong>Shifter</strong> Supabase <code>profiles</code> table (
+            <code>progress_notes_onedrive_path</code>, or <code>progress_notes_folder</code> +{' '}
+            <code>progress_notes_filename</code>) when Shifter is linked; otherwise the server default or{' '}
+            <code>ONEDRIVE_EXCEL_PATH</code>. You can still trigger sync from the Shifts page.
           </small>
         </div>
 
