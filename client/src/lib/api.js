@@ -87,14 +87,25 @@ export const auth = {
   supabaseInviteStaff: (email, full_name) =>
     fetchApi('/auth/supabase/invite-staff', { method: 'POST', body: JSON.stringify({ email, full_name: full_name || undefined }) }),
   getShifterOrgLink: () => fetchApi('/auth/supabase/shifter-org-link'),
-  /** Omit name to link using the signed-in Nexus organisation name (must match Shifter). */
-  linkShifterOrg: (shifter_org_name) =>
-    fetchApi('/auth/supabase/link-shifter-org', {
+  /**
+   * Link Nexus org to Shifter. Pass nothing to match by Nexus organisation name, a string for Shifter name only,
+   * or { shifter_org_name?, shifter_organization_id? } (UUID from Shifter Supabase → organizations.id).
+   */
+  linkShifterOrg: (arg) => {
+    const body = {};
+    if (arg != null && typeof arg === 'object' && !Array.isArray(arg)) {
+      const name = String(arg.shifter_org_name ?? '').trim();
+      const sid = String(arg.shifter_organization_id ?? '').trim();
+      if (sid) body.shifter_organization_id = sid;
+      if (name) body.shifter_org_name = name;
+    } else if (arg != null && String(arg).trim()) {
+      body.shifter_org_name = String(arg).trim();
+    }
+    return fetchApi('/auth/supabase/link-shifter-org', {
       method: 'POST',
-      body: JSON.stringify(
-        shifter_org_name != null && String(shifter_org_name).trim() ? { shifter_org_name: String(shifter_org_name).trim() } : {}
-      )
-    }),
+      body: JSON.stringify(body)
+    });
+  },
   unlinkShifterOrg: () => fetchApi('/auth/supabase/unlink-shifter-org', { method: 'POST' })
 };
 
@@ -169,7 +180,14 @@ async function postMultipartWithSessionRetry(path, formData) {
 }
 
 export const participants = {
-  list: (search, includeArchived) => fetchApi(`/participants${search ? `?search=${encodeURIComponent(search)}` : ''}${includeArchived ? `${search ? '&' : '?'}include_archived=true` : ''}`),
+  list: (search, includeArchived, includeOrgOrphans) => {
+    const q = new URLSearchParams();
+    if (search) q.set('search', search);
+    if (includeArchived) q.set('include_archived', 'true');
+    if (includeOrgOrphans) q.set('include_org_orphans', 'true');
+    const qs = q.toString();
+    return fetchApi(`/participants${qs ? `?${qs}` : ''}`);
+  },
   get: (id) => fetchApi(`/participants/${id}`),
   create: (data) => fetchApi('/participants', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => fetchApi(`/participants/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -251,10 +269,24 @@ export const participants = {
     }
     return text ? JSON.parse(text) : null;
   },
-  parseCsv: async (file, useLlm = false) => {
+  peekCsvHeaders: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await postMultipartWithSessionRetry('/participants/peek-csv-headers', form);
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Peek failed');
+    }
+    return text ? JSON.parse(text) : { headers: [] };
+  },
+  parseCsv: async (file, useLlm = false, options = {}) => {
     const form = new FormData();
     form.append('file', file);
     if (useLlm) form.append('useLlm', 'true');
+    if (useLlm && options.llmColumnMapping && typeof options.llmColumnMapping === 'object') {
+      form.append('llm_column_mapping_json', JSON.stringify(options.llmColumnMapping));
+    }
     const res = await postMultipartWithSessionRetry('/participants/parse-csv', form);
     const text = await res.text();
     if (!res.ok) {
@@ -263,10 +295,14 @@ export const participants = {
     }
     return text ? JSON.parse(text) : null;
   },
-  importCsv: async (file, useLlm = false) => {
+  importCsv: async (file, useLlm = false, opts = {}) => {
     const form = new FormData();
     form.append('file', file);
     if (useLlm) form.append('useLlm', 'true');
+    if (useLlm && opts.llmColumnMapping && typeof opts.llmColumnMapping === 'object') {
+      form.append('llm_column_mapping_json', JSON.stringify(opts.llmColumnMapping));
+    }
+    if (opts.reassignDuplicatesToMyOrg) form.append('reassignDuplicatesToMyOrg', 'true');
     const res = await postMultipartWithSessionRetry('/participants/import-csv', form);
     const text = await res.text();
     if (!res.ok) {
@@ -469,6 +505,12 @@ export const billing = {
   get: (id) => fetchApi(`/billing/${id}`),
   pdfUrl: (id) => `${API}/billing/${id}/pdf`,
   updateStatus: (id, status) => fetchApi(`/billing/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  rebuildLines: (id) => fetchApi(`/billing/${encodeURIComponent(id)}/rebuild-lines`, { method: 'POST', body: JSON.stringify({}) }),
+  voidInvoice: (id, reason) =>
+    fetchApi(`/billing/${encodeURIComponent(id)}/void`, {
+      method: 'POST',
+      body: JSON.stringify(reason ? { reason } : {})
+    }),
   delete: (id) => fetchApi(`/billing/${id}`, { method: 'DELETE' })
 };
 

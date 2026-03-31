@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, Link } from 'react-rou
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FeatureFlagProvider } from './context/FeatureFlagContext';
 import { ai } from './lib/api';
+import { probeLocalOllama, resolveLocalOllamaBaseUrl } from './lib/localOllama.js';
 import ParticipantsPage from './pages/ParticipantsPage';
 import ParticipantProfile from './pages/ParticipantProfile';
 import DirectoryPage from './pages/DirectoryPage';
@@ -37,8 +38,31 @@ function Layout({ children }) {
     typeof sessionStorage !== 'undefined' && sessionStorage.getItem(EMAIL_BANNER_KEY) === '1'
   );
   useEffect(() => {
-    ai.status().then((s) => setOllamaOk(s?.available)).catch(() => setOllamaOk(false));
-  }, []);
+    if (!user) {
+      setOllamaOk(null);
+      return;
+    }
+    let cancel = false;
+    (async () => {
+      try {
+        const s = await ai.status();
+        if (cancel) return;
+        const serverOk = Boolean(s?.server?.available);
+        let localOk = false;
+        if (s?.orgAllowsLocalOllama) {
+          const base = s.userOllamaLocalBaseUrl || resolveLocalOllamaBaseUrl(user);
+          const p = await probeLocalOllama(base);
+          localOk = Boolean(p.ok && (p.models?.length ?? 0) > 0);
+        }
+        setOllamaOk(serverOk || localOk);
+      } catch {
+        if (!cancel) setOllamaOk(false);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [user?.id, user?.ollama_local_base_url]);
 
   const needsEmailOauth =
     Boolean(user) && (user.email_reconnect_required || !user.email_connected_address);
@@ -98,7 +122,10 @@ function Layout({ children }) {
           <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Settings
           </NavLink>
-          <span className="nav-ai-status" title={ollamaOk === true ? 'Ollama connected' : ollamaOk === false ? 'Ollama not running' : 'Checking...'}>
+          <span
+            className="nav-ai-status"
+            title={ollamaOk === true ? 'Ollama' : ollamaOk === false ? '—' : '…'}
+          >
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: ollamaOk === true ? '#22c55e' : ollamaOk === false ? '#94a3b8' : 'transparent', display: 'inline-block', marginRight: 4 }} />
             AI
           </span>

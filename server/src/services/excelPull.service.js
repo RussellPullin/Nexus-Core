@@ -5,6 +5,10 @@
  */
 import ExcelJS from 'exceljs';
 import { resolveShiftExcelColumns } from './excelShiftParse.service.js';
+import {
+  ONEDRIVE_EXCEL_APP_ONLY_REQUIRED_HINT,
+  ONEDRIVE_EXCEL_DELEGATED_OR_ENV_HINT
+} from '../lib/onedriveExcelSyncHint.js';
 import { getValidAccessToken } from './orgOnedriveSync.service.js';
 import { resolveOnedriveExcelLocationFromShifterForNexusOrg } from './supabaseStaffShifter.service.js';
 
@@ -156,13 +160,9 @@ async function fetchExcelBufferCore(options = {}) {
 
   if (!hasLegacyAppOnlyCredentials()) {
     if (options.organizationId) {
-      throw new Error(
-        'Connect Microsoft OneDrive in Settings for your organisation (same account as the Progress Notes Excel file), or set on the API server: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID (Microsoft 365 sign-in email / UPN of the file owner), and optionally ONEDRIVE_EXCEL_PATH. With SHIFTER_SUPABASE_URL set, configure per-org path or sharing link in Shifter (public.organizations or profiles). See repo root .env.example and supabase/shifter-migrations.',
-      );
+      throw new Error(ONEDRIVE_EXCEL_DELEGATED_OR_ENV_HINT);
     }
-    throw new Error(
-      'ONEDRIVE_ADMIN_USER_ID (or ADMIN_USER_ID) is required: set the OneDrive owner’s Microsoft 365 sign-in email (UPN) in .env. Also required: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET. Optional: ONEDRIVE_EXCEL_PATH (default Progress Notes App/master progress notes.xlsx), or configure path in Shifter when SHIFTER_* env is set. See .env.example.',
-    );
+    throw new Error(ONEDRIVE_EXCEL_APP_ONLY_REQUIRED_HINT);
   }
 
   const adminUserId = process.env.ONEDRIVE_ADMIN_USER_ID?.trim() || process.env.ADMIN_USER_ID?.trim();

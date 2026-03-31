@@ -51,13 +51,31 @@ function normalizeOrgName(name) {
   return String(name || '').trim();
 }
 
+/** Trim and collapse internal whitespace for name matching. */
+export function normalizeOrgNameForMatch(name) {
+  return normalizeOrgName(name).replace(/\s+/g, ' ');
+}
+
+/**
+ * Resolve a Shifter organization by primary key (UUID).
+ * Returns null when Shifter is not configured, id is invalid, or row missing.
+ */
+export async function findShifterOrganizationById(orgIdRaw) {
+  const shifterAdmin = getShifterAdminClient();
+  const id = String(orgIdRaw || '').trim();
+  if (!shifterAdmin || !isUuidString(id)) return null;
+  const { data, error } = await shifterAdmin.from('organizations').select('id').eq('id', id).maybeSingle();
+  if (error || !data?.id) return null;
+  return { id: String(data.id).trim(), source: 'organizations.id' };
+}
+
 /**
  * Resolve a Shifter organization by name (case-insensitive exact match).
  * Returns null when Shifter is not configured or no match exists.
  */
 export async function findShifterOrganizationByName(orgNameRaw) {
   const shifterAdmin = getShifterAdminClient();
-  const orgName = normalizeOrgName(orgNameRaw);
+  const orgName = normalizeOrgNameForMatch(orgNameRaw);
   if (!shifterAdmin || !orgName) return null;
 
   const namePattern = escapeIlikeLiteral(orgName);
@@ -161,7 +179,7 @@ export async function pushScheduleShiftIntegrationToShifter(shifterOrgId, { webh
         api_key_column: null,
         api_key_set: false,
         note: key
-          ? 'Server has CRM_API_KEY but no matching API key column on Shifter organisations — set the key in Shifter admin or align column names.'
+          ? 'The webhook URL was saved, but the security key could not be stored automatically in Shifter — set it in Shifter admin or ask your administrator.'
           : null,
       };
       if (nexusOrgId) {
@@ -175,7 +193,7 @@ export async function pushScheduleShiftIntegrationToShifter(shifterOrgId, { webh
     ok: false,
     skipped: false,
     reason: 'no_matching_columns',
-    detail: 'No known webhook columns on Shifter public.organizations',
+    detail: 'No matching webhook fields were found in Shifter for this organisation.',
   };
 }
 
@@ -403,7 +421,7 @@ async function findNexusProfileByEmail(nexusAdmin, emailKey) {
   let { data: rows, error: selErr } = await nexusAdmin.from('profiles').select('id').eq('email', emailKey).limit(2);
   if (selErr) throw selErr;
   if (rows?.length > 1) {
-    const err = new Error('Multiple Nexus profiles match this email; resolve duplicates in Supabase');
+    const err = new Error('Multiple account profiles match this email. Ask your administrator to merge or fix duplicates.');
     err.code = 'PROFILE_AMBIGUOUS';
     throw err;
   }
@@ -416,7 +434,7 @@ async function findNexusProfileByEmail(nexusAdmin, emailKey) {
       .limit(2);
     if (ilikeErr) throw ilikeErr;
     if (ilikeRows?.length > 1) {
-      const err = new Error('Multiple Nexus profiles match this email; resolve duplicates in Supabase');
+      const err = new Error('Multiple account profiles match this email. Ask your administrator to merge or fix duplicates.');
       err.code = 'PROFILE_AMBIGUOUS';
       throw err;
     }
@@ -494,7 +512,7 @@ async function ensureNexusProfileRowForAuthUser(nexusAdmin, userId, emailKey, ne
     if (patchErr) {
       const err = new Error(
         patchErr.message ||
-          'Could not create or update public.profiles (check triggers, NOT NULL columns, and RLS for service role).',
+          'Could not update the staff profile. Ask your administrator.',
       );
       err.code = 'NEXUS_PROFILE_UPSERT_FAILED';
       throw err;
@@ -525,7 +543,7 @@ async function ensureNexusAuthUserByEmail(nexusAdmin, emailKey, nexusOrgId) {
     const orphan = await findNexusProfileByEmail(nexusAdmin, emailKey);
     if (orphan?.id) return orphan.id;
     const err = new Error(
-      'This email is already registered in Nexus Core Auth, but no matching public.profiles row was found and the user could not be listed. Check Supabase Auth → Users or add the profile manually.',
+      'This email is already registered, but no matching staff profile was found. Ask your administrator to fix the account.',
     );
     err.code = 'NEXUS_AUTH_ORPHAN';
     throw err;
@@ -731,13 +749,13 @@ export async function setShifterEnabledForStaffEmail(email, shifter_enabled, ctx
   const { nexusOrgId, staffId, db } = ctx;
   const nexusAdmin = getAdminClient();
   if (!nexusAdmin) {
-    const err = new Error('Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
+    const err = new Error('This feature is not available until your administrator finishes server setup.');
     err.code = 'SUPABASE_NOT_CONFIGURED';
     throw err;
   }
   const key = normalizeEmail(email);
   if (!key) {
-    const err = new Error('Staff member needs an email address to link Shifter access in Supabase');
+    const err = new Error('Add an email address for this staff member to link Shifter access.');
     err.code = 'NO_EMAIL';
     throw err;
   }
@@ -770,21 +788,21 @@ export async function setShifterEnabledForStaffEmail(email, shifter_enabled, ctx
   if (shifterClient) {
     if (!nexusOrgId) {
       const err = new Error(
-        'Your account has no organisation; cannot verify this worker exists in Shifter for your org. Assign an organisation or add SHIFTER_* only after fixing org.',
+        'Your account has no organisation; Shifter cannot be verified for this worker. Assign an organisation first.',
       );
       err.code = 'NO_ORG_FOR_SHIFTER_LINK';
       throw err;
     }
     const effectiveShifterOrg = await resolveEffectiveShifterOrgId(nexusAdmin, nexusOrgId);
     if (!effectiveShifterOrg) {
-      const err = new Error('Could not resolve Shifter organisation id from Nexus Core Supabase (public.organizations).');
+      const err = new Error('Could not resolve your organisation link to Shifter. Ask your administrator.');
       err.code = 'NO_ORG_FOR_SHIFTER_LINK';
       throw err;
     }
     const match = await findShifterWorkerInOrg(shifterClient, key, effectiveShifterOrg);
     if (!match) {
       const err = new Error(
-        'No Shifter worker or staff row found for this email in your organisation. Add them in Shifter first, or align organisations (same organizations.id in both projects, or set public.organizations.shifter_organization_id in Nexus Core).',
+        'No Shifter worker was found for this email in your organisation. Add them in Shifter first, or ask your administrator to align organisation settings.',
       );
       err.code = 'SHIFTER_WORKER_NOT_FOUND';
       throw err;
@@ -817,7 +835,7 @@ export async function setShifterEnabledForStaffEmail(email, shifter_enabled, ctx
   }
   if (!profile?.id) {
     const err = new Error(
-      'No Nexus Core Supabase profile found for this email. With Shifter credentials set, the worker must exist in Shifter for your org first; otherwise ensure SUPABASE_* points at the project where public.profiles lives.',
+      'No account profile was found for this email. If Shifter is in use, add the worker in Shifter first, or ask your administrator.',
     );
     err.code = 'PROFILE_NOT_FOUND';
     throw err;
@@ -846,7 +864,7 @@ export async function setShifterEnabledForStaffEmail(email, shifter_enabled, ctx
 export async function sendShifterInvitesForStaffIds(staffIds, getStaffById, ctx = {}) {
   const nexusAdmin = getAdminClient();
   if (!nexusAdmin) {
-    const err = new Error('Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
+    const err = new Error('This feature is not available until your administrator finishes server setup.');
     err.code = 'SUPABASE_NOT_CONFIGURED';
     throw err;
   }

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { staff, learning, settings, ai, auth, microsoftDrive } from '../lib/api';
+import { probeLocalOllama, resolveLocalOllamaBaseUrl } from '../lib/localOllama.js';
 import SearchableSelect from '../components/SearchableSelect';
 import { formatDate } from '../lib/dateUtils';
 
@@ -23,6 +24,9 @@ export default function SettingsPage() {
   const [aiStatus, setAiStatus] = useState(null);
   const [aiMessage, setAiMessage] = useState('');
   const [aiChecking, setAiChecking] = useState(false);
+  const [ollamaLocalUrlDraft, setOllamaLocalUrlDraft] = useState('http://127.0.0.1:11434');
+  const [localOllamaProbe, setLocalOllamaProbe] = useState({ ok: null, error: '', models: 0 });
+  const [savingOllamaUrl, setSavingOllamaUrl] = useState(false);
   const [signatureDraft, setSignatureDraft] = useState(null);
   const [savingSignature, setSavingSignature] = useState(false);
   const [signatureMessage, setSignatureMessage] = useState('');
@@ -35,6 +39,10 @@ export default function SettingsPage() {
     setBillingIntervalMinutes(user?.billing_interval_minutes ?? 15);
     setStaffId(user?.staff_id || '');
   }, [user?.billing_interval_minutes, user?.staff_id]);
+
+  useEffect(() => {
+    setOllamaLocalUrlDraft(resolveLocalOllamaBaseUrl(user));
+  }, [user?.ollama_local_base_url, user]);
 
   useEffect(() => {
     if (searchParams.get('email_connected') === '1') {
@@ -69,8 +77,34 @@ export default function SettingsPage() {
     staff.list().then((s) => setStaffList(Array.isArray(s) ? s.map((x) => ({ id: x.id, name: x.name })) : [])).catch(() => []);
   }, []);
   useEffect(() => {
-    ai.status().then(setAiStatus).catch(() => setAiStatus({ available: false }));
-  }, []);
+    let cancel = false;
+    ai.status()
+      .then(async (s) => {
+        if (cancel) return;
+        setAiStatus(s);
+        if (s?.orgAllowsLocalOllama) {
+          const base = s.userOllamaLocalBaseUrl || resolveLocalOllamaBaseUrl(user);
+          const p = await probeLocalOllama(base);
+          if (cancel) return;
+          setLocalOllamaProbe({
+            ok: p.ok,
+            error: p.error || '',
+            models: p.models?.length ?? 0
+          });
+        } else {
+          setLocalOllamaProbe({ ok: null, error: '', models: 0 });
+        }
+      })
+      .catch(() => {
+        if (!cancel) {
+          setAiStatus(null);
+          setLocalOllamaProbe({ ok: false, error: '', models: 0 });
+        }
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [user?.id, user?.ollama_local_base_url]);
 
   const handleLinkOllama = async () => {
     setAiMessage('');
@@ -78,14 +112,26 @@ export default function SettingsPage() {
     try {
       const result = await ai.status();
       setAiStatus(result);
-      if (result?.available) {
-        setAiMessage('Ollama connected.');
+      if (result?.orgAllowsLocalOllama) {
+        const base =
+          result.userOllamaLocalBaseUrl ||
+          ollamaLocalUrlDraft.trim() ||
+          resolveLocalOllamaBaseUrl(user);
+        const p = await probeLocalOllama(base);
+        setLocalOllamaProbe({
+          ok: p.ok,
+          error: p.error || '',
+          models: p.models?.length ?? 0
+        });
+        if (!p.ok) setAiMessage('');
       } else {
-        setAiMessage(result?.error || "Ollama isn't running. Install Ollama, open it, then click Link to Ollama again.");
+        setLocalOllamaProbe({ ok: null, error: '', models: 0 });
+        setAiMessage('');
       }
     } catch {
-      setAiStatus({ available: false });
-      setAiMessage("Could not check Ollama. Open the Ollama app on this machine and try again.");
+      setAiStatus(null);
+      setLocalOllamaProbe({ ok: false, error: '', models: 0 });
+      setAiMessage('');
     } finally {
       setAiChecking(false);
     }
@@ -245,8 +291,14 @@ export default function SettingsPage() {
       <h2>Settings</h2>
 
       <div className="settings-cards-grid">
-      <div className="card">
-        <h3 className="settings-section-title">Connect your email</h3>
+      <details className="card settings-collapsible">
+        <summary className="settings-collapsible-summary">
+          <span className="settings-collapsible-summary-main">
+            <span className="settings-collapsible-title">Connect your email</span>
+            <span className="settings-collapsible-hint">Send rosters and messages from your inbox</span>
+          </span>
+        </summary>
+        <div className="settings-collapsible-body">
         <p className="settings-desc">
           Roster emails and staff messages are sent from <strong>your</strong> address. Choose your email provider and sign in once.
         </p>
@@ -317,9 +369,17 @@ export default function SettingsPage() {
             {testResult}
           </div>
         )}
-      </div>
+        </div>
+      </details>
 
-      <div className="card">
+      <details className="card settings-collapsible">
+        <summary className="settings-collapsible-summary">
+          <span className="settings-collapsible-summary-main">
+            <span className="settings-collapsible-title">Company, coordinator &amp; signature</span>
+            <span className="settings-collapsible-hint">Billing interval, default staff, document signature</span>
+          </span>
+        </summary>
+        <div className="settings-collapsible-body">
       <form onSubmit={handleSubmit} className="settings-form">
         <h3 className="settings-section-title">Company setup</h3>
         <p className="settings-desc">Company-wide settings used for billing and invoicing.</p>
@@ -407,75 +467,248 @@ export default function SettingsPage() {
           </button>
         </div>
       </form>
-      </div>
+        </div>
+      </details>
 
-      <div className="card">
-        <h3 className="settings-section-title">AI (Ollama)</h3>
-        <p className="settings-desc">Local AI for NDIS plan extraction, intake forms, and CSV mapping. Patient data never leaves this machine.</p>
-        {aiStatus?.available ? (
-          <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: '1rem' }}>
-            <strong style={{ color: '#166534' }}>Linked to Ollama</strong>
-            <span style={{ marginLeft: '0.5rem', color: '#15803d' }}>({aiStatus.model || 'default'})</span>
-            <div style={{ marginTop: '0.5rem' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleLinkOllama}
-                disabled={aiChecking}
-              >
-                {aiChecking ? 'Checking...' : 'Check again'}
-              </button>
-            </div>
-          </div>
-        ) : (
+      <details className="card settings-collapsible">
+        <summary className="settings-collapsible-summary">
+          <span className="settings-collapsible-summary-main">
+            <span className="settings-collapsible-title">Ollama</span>
+            <span className="settings-collapsible-hint">This device</span>
+          </span>
+        </summary>
+        <div className="settings-collapsible-body">
+        {aiStatus?.orgAllowsLocalOllama ? (
           <>
-            <div className="form-group">
-              <label>Status</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: '50%',
-                    background: '#ef4444'
-                  }}
-                  title="Ollama not available"
-                />
-                <span>Not connected</span>
-              </div>
+            <p className="form-hint" style={{ margin: '0 0 0.75rem 0' }}>
+              Local AI runs in <strong>Ollama on this computer</strong>, not inside Nexus. Install it once, then allow this website to talk to Ollama (below). Open Nexus in{' '}
+              <strong>Chrome or Edge</strong> for testing; Safari often blocks the connection.
+            </p>
+            <div style={{ marginBottom: '0.85rem' }}>
+              <p className="form-hint" style={{ margin: '0 0 0.35rem 0', fontWeight: 600 }}>
+                Address to use in Ollama (copy exactly)
+              </p>
+              <code
+                style={{
+                  display: 'block',
+                  padding: '0.45rem 0.55rem',
+                  background: 'var(--surface-muted, #f1f5f9)',
+                  borderRadius: 4,
+                  fontSize: '0.9rem',
+                  wordBreak: 'break-all'
+                }}
+              >
+                {typeof window !== 'undefined' ? window.location.origin : ''}
+              </code>
             </div>
-            <p className="settings-desc" style={{ marginBottom: '0.75rem' }}>Install and open the Ollama app, then click Link to Ollama below.</p>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-              <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" className="btn btn-primary">
-                Download Ollama
-              </a>
+            <details style={{ marginBottom: '0.65rem' }}>
+              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Windows — first-time setup</summary>
+              <ol className="form-hint" style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', lineHeight: 1.55 }}>
+                <li>
+                  <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer">
+                    Download and install Ollama
+                  </a>{' '}
+                  for Windows, then open the Ollama app.
+                </li>
+                <li>
+                  Download at least one model. In Command Prompt or PowerShell run, for example:{' '}
+                  <code>ollama pull llama3.2</code>
+                </li>
+                <li>
+                  <strong>Shut down Ollama completely</strong> (so it can pick up the next step):
+                  <ul style={{ margin: '0.35rem 0 0 0', paddingLeft: '1.25rem', listStyleType: 'disc' }}>
+                    <li>Look at the <strong>bottom-right</strong> of your screen, near the clock. That area is called the <strong>notification area</strong> or system tray.</li>
+                    <li>
+                      Find the <strong>small Ollama (llama) icon</strong>. If you do not see it, click the <strong>^</strong> arrow to show hidden icons.
+                    </li>
+                    <li>
+                      <strong>Right-click</strong> that icon (or click it and look for Quit) and choose <strong>Quit</strong> or <strong>Exit</strong>. Ollama should no longer be running.
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  <strong>Tell Windows to allow this website to use Ollama</strong> (one new setting — not inside the Ollama app):
+                  <ul style={{ margin: '0.35rem 0 0 0', paddingLeft: '1.25rem', listStyleType: 'disc' }}>
+                    <li>
+                      Press the <strong>Windows key</strong> on your keyboard (or open the <strong>Start</strong> menu).
+                    </li>
+                    <li>
+                      Start typing: <strong>environment variables</strong> (you can type the whole phrase or just part of it).
+                    </li>
+                    <li>
+                      Open <strong>Edit environment variables for your account</strong> if it appears. If you only see{' '}
+                      <strong>Edit the system environment variables</strong>, open that, then click <strong>Environment Variables…</strong> at the bottom — we only use the{' '}
+                      <strong>top</strong> list on that screen (<strong>User variables</strong> for your name), not the bottom “System variables” list.
+                    </li>
+                    <li>
+                      In the <strong>User variables</strong> section, click <strong>New…</strong>
+                    </li>
+                    <li>
+                      <strong>Variable name:</strong> type exactly <code>OLLAMA_ORIGINS</code> (all capitals, with the underscore).
+                    </li>
+                    <li>
+                      <strong>Variable value:</strong> click in the box, then paste the <strong>same address</strong> as in the gray box at the top of this page (select it, Ctrl+C, then Ctrl+V here). It should start with{' '}
+                      <code>https://</code> or <code>http://</code>. No spaces before or after.
+                    </li>
+                    <li>
+                      Click <strong>OK</strong>, then <strong>OK</strong> again to close the windows.
+                    </li>
+                  </ul>
+                  <p style={{ margin: '0.45rem 0 0 0' }}>
+                    If you cannot find these menus, ask <strong>IT or your admin</strong> to add a user variable named <code>OLLAMA_ORIGINS</code> with that address — only once per PC.
+                  </p>
+                </li>
+                <li>Start Ollama again from the Start menu.</li>
+                <li>
+                  Come back here: leave the URL as <code>http://127.0.0.1:11434</code> unless your IT team said otherwise, click{' '}
+                  <strong>Save</strong>, then <strong>Test</strong>.
+                </li>
+              </ol>
+            </details>
+            <details style={{ marginBottom: '0.85rem' }}>
+              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Mac — first-time setup</summary>
+              <ol className="form-hint" style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', lineHeight: 1.55 }}>
+                <li>
+                  <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer">
+                    Download and install Ollama
+                  </a>{' '}
+                  for Mac, then open the Ollama app.
+                </li>
+                <li>
+                  In Terminal, download at least one model, for example: <code>ollama pull llama3.2</code>
+                </li>
+                <li>
+                  <strong>Shut down Ollama completely</strong> before the next step:
+                  <ul style={{ margin: '0.35rem 0 0 0', paddingLeft: '1.25rem', listStyleType: 'disc' }}>
+                    <li>Look at the <strong>top</strong> of the screen (the menu bar), near the Wi‑Fi and battery icons.</li>
+                    <li>
+                      Click the <strong>small Ollama (llama) icon</strong> there.
+                    </li>
+                    <li>
+                      Choose <strong>Quit Ollama</strong>. The app should fully close.
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  <strong>Run one line in Terminal</strong> (this is not inside Ollama — it tells the Mac to allow this website to talk to Ollama):
+                  <ul style={{ margin: '0.35rem 0 0 0', paddingLeft: '1.25rem', listStyleType: 'disc' }}>
+                    <li>
+                      Open <strong>Terminal</strong>: press <strong>Command + Space</strong>, type <code>Terminal</code>, press <strong>Enter</strong>.
+                    </li>
+                    <li>
+                      Click inside the Terminal window so you see a blinking cursor.
+                    </li>
+                    <li>
+                      Copy the <strong>entire</strong> line in the gray box below (triple-click the line to select all, then <strong>Command + C</strong>).
+                    </li>
+                    <li>
+                      Click in Terminal again and paste (<strong>Command + V</strong>), then press <strong>Enter</strong>.
+                    </li>
+                    <li>
+                      If nothing scary appears and you get a new prompt line, that is normal. If you see “command not found,” install Ollama from the link in step 1 first.
+                    </li>
+                  </ul>
+                  <code
+                    style={{
+                      display: 'block',
+                      marginTop: '0.35rem',
+                      padding: '0.35rem 0.5rem',
+                      background: 'var(--surface-muted, #f1f5f9)',
+                      borderRadius: 4,
+                      fontSize: '0.85rem',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all'
+                    }}
+                  >
+                    {typeof window !== 'undefined'
+                      ? `launchctl setenv OLLAMA_ORIGINS '${window.location.origin}'`
+                      : "launchctl setenv OLLAMA_ORIGINS 'https://your-crm-address'"}
+                  </code>
+                  <p style={{ margin: '0.45rem 0 0 0' }}>
+                    If Terminal feels unfamiliar, ask <strong>IT or your admin</strong> to run that one line for you — only once per Mac (you may need it again after a full restart).
+                  </p>
+                </li>
+                <li>Open the Ollama app again.</li>
+                <li>
+                  After you log out or restart the Mac, you may need to run the <code>launchctl setenv</code> line again, then open Ollama.
+                </li>
+                <li>
+                  Come back here: leave the URL as <code>http://127.0.0.1:11434</code> unless your IT team said otherwise, click <strong>Save</strong>, then{' '}
+                  <strong>Test</strong> (use Chrome or Edge).
+                </li>
+              </ol>
+            </details>
+            <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+              <label>URL</label>
+              <input
+                type="url"
+                className="form-control"
+                value={ollamaLocalUrlDraft}
+                onChange={(e) => setOllamaLocalUrlDraft(e.target.value)}
+                placeholder="http://127.0.0.1:11434"
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={handleLinkOllama}
-                disabled={aiChecking}
+                disabled={savingOllamaUrl}
+                onClick={async () => {
+                  setSavingOllamaUrl(true);
+                  setAiMessage('');
+                  try {
+                    await updateSettings({
+                      ollama_local_base_url: ollamaLocalUrlDraft.trim() || null
+                    });
+                    await refreshUser();
+                    setAiMessage('Saved.');
+                  } catch {
+                    setAiMessage('Error');
+                  } finally {
+                    setSavingOllamaUrl(false);
+                  }
+                }}
               >
-                {aiChecking ? 'Checking...' : 'Link to Ollama'}
+                {savingOllamaUrl ? 'Saving...' : 'Save'}
+              </button>
+              <button type="button" className="btn btn-primary" onClick={handleLinkOllama} disabled={aiChecking}>
+                {aiChecking ? '…' : 'Test'}
               </button>
             </div>
-            {aiMessage && !aiStatus?.available && (
-              <div className={aiMessage.includes('connected') ? 'settings-success' : 'settings-error'} style={{ marginTop: '0.25rem' }}>
-                {aiMessage}
-              </div>
+            {localOllamaProbe.ok === true && (
+              <p className="settings-success" style={{ margin: '0.65rem 0 0 0' }}>
+                {localOllamaProbe.models ? 'Connected' : 'Connected (no models)'}
+              </p>
             )}
-            {aiMessage && !aiStatus?.available && !aiMessage.includes('connected') && (
-              <p className="form-hint" style={{ marginTop: '0.5rem' }}>
-                1. Download and install Ollama · 2. Open the Ollama app · 3. Click Link to Ollama again.
+            {localOllamaProbe.ok === false && localOllamaProbe.error && (
+              <p className="settings-error" style={{ margin: '0.65rem 0 0 0' }}>{localOllamaProbe.error}</p>
+            )}
+            {aiMessage && (
+              <p
+                className={aiMessage === 'Saved.' || aiMessage.includes('Connected') ? 'settings-success' : 'settings-error'}
+                style={{ margin: '0.5rem 0 0 0' }}
+              >
+                {aiMessage}
               </p>
             )}
           </>
+        ) : (
+          <p className="form-hint" style={{ margin: 0 }}>
+            Off
+          </p>
         )}
-        <small className="form-hint" style={{ display: 'block', marginTop: '0.5rem' }}>Your administrator can choose a different AI model or server address if needed.</small>
-      </div>
+        </div>
+      </details>
 
       {isAdmin && (
-        <div className="settings-section" style={{ marginBottom: '1.5rem' }}>
-          <h3>Document archive (Microsoft 365)</h3>
+        <details className="card settings-collapsible">
+          <summary className="settings-collapsible-summary">
+            <span className="settings-collapsible-summary-main">
+              <span className="settings-collapsible-title">Document archive (Microsoft 365)</span>
+              <span className="settings-collapsible-hint">OneDrive folder for participant and staff documents</span>
+            </span>
+          </summary>
+          <div className="settings-collapsible-body">
           <p className="settings-desc">
             Connect a Microsoft work account (typically the practice admin). The app creates a <strong>Nexus Core</strong> folder on that user&apos;s OneDrive
             and copies new participant and staff documents there. Files are never deleted by Nexus; each upload gets a new timestamped name.
@@ -525,7 +758,8 @@ export default function SettingsPage() {
             If connection fails, your IT administrator may need to allow this app in Microsoft 365 and register the redirect address{' '}
             <code>{`${window.location.origin}/api/integrations/microsoft-drive/callback`}</code>.
           </p>
-        </div>
+          </div>
+        </details>
       )}
 
       {canManageUsers && <ShifterIntegrationCard />}
@@ -543,6 +777,10 @@ function ShifterIntegrationCard() {
   const [copyMsg, setCopyMsg] = useState('');
   const [linkInfo, setLinkInfo] = useState(null);
   const [manualUrlsOpen, setManualUrlsOpen] = useState(false);
+  /** When Shifter organisations.name differs from Nexus, enter it here (optional). */
+  const [shifterNameOverride, setShifterNameOverride] = useState('');
+  /** Shifter public.organizations.id — link by UUID when names do not match (optional). */
+  const [shifterOrgIdOverride, setShifterOrgIdOverride] = useState('');
 
   const clientOrigin = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : '';
   const webhookUrl =
@@ -571,7 +809,11 @@ function ShifterIntegrationCard() {
     setMsg('');
     setBusy(true);
     try {
-      const data = await auth.linkShifterOrg();
+      const sid = shifterOrgIdOverride.trim();
+      const sn = shifterNameOverride.trim();
+      const data = await auth.linkShifterOrg(
+        sid ? { shifter_organization_id: sid, shifter_org_name: sn || undefined } : sn ? { shifter_org_name: sn } : undefined
+      );
       await load();
       const push = data?.schedule_shift_push;
       if (push?.ok) {
@@ -646,8 +888,14 @@ function ShifterIntegrationCard() {
   const shifterRemoteReady = linkInfo?.shifter_remote_configured === true;
 
   return (
-    <div className="card">
-      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Shifter and shift schedule</h3>
+    <details className="card settings-collapsible">
+      <summary className="settings-collapsible-summary">
+        <span className="settings-collapsible-summary-main">
+          <span className="settings-collapsible-title">Shifter and shift schedule</span>
+          <span className="settings-collapsible-hint">Link Nexus to Shifter, webhooks, shift sync</span>
+        </span>
+      </summary>
+      <div className="settings-collapsible-body">
 
       <div
         style={{
@@ -660,50 +908,40 @@ function ShifterIntegrationCard() {
           lineHeight: 1.55,
         }}
       >
-        <p style={{ margin: '0 0 0.6rem 0', fontWeight: 600, color: '#334155' }}>Plain English: who does what</p>
+        <p style={{ margin: '0 0 0.6rem 0', fontWeight: 600, color: '#334155' }}>How linking works</p>
         <p style={{ margin: '0 0 0.5rem 0', color: '#475569' }}>
-          <strong>If you are an organisation admin (end user):</strong> you should only need to click{' '}
-          <strong>Link to Shifter</strong> once your organisation name matches Shifter. Nexus then tries to install the webhook
-          address and security key into Shifter for you — <strong>no manual “headers” or pasting</strong> for most people.
+          By default, Nexus looks up Shifter using your <strong>Nexus organisation name</strong> against{' '}
+          <code>organizations.name</code> in the Shifter database (same spelling, any case). If they differ — for example Shifter still
+          says <code>Shifter</code> — use the fields beside the button to enter the Shifter name or paste the Shifter organisation UUID.
         </p>
         <p style={{ margin: '0 0 0.5rem 0', color: '#475569' }}>
-          <strong>If you run or host Nexus (once for the whole site, not per org):</strong> set a single secret named{' '}
-          <code>CRM_API_KEY</code> on the server (e.g. Fly <strong>Secrets</strong>). That is the <strong>master</strong> key:
-          one value for <em>every</em> organisation on this Nexus — not a separate key per tenant. Also set{' '}
-          <code>SHIFTER_SUPABASE_URL</code> and <code>SHIFTER_SERVICE_ROLE_KEY</code> so “Link to Shifter” can write into
-          Shifter’s database. Set a public API base (<code>OAUTH_PUBLIC_URL</code>, <code>NEXUS_PUBLIC_API_URL</code>, or{' '}
-          <code>nexus_shift_api_base_url</code> on an Admin profile) so the webhook URL is correct.
-        </p>
-        <p style={{ margin: '0 0 0.5rem 0', color: '#475569' }}>
-          <strong>Org-level data:</strong> Supabase (Shifter) stores <em>per organisation</em> row: webhook URL, API key field
-          (same master key), and Nexus tries to save <code>nexus_org_id</code> (see Shifter migration). Your worker should read
-          that id and POST{' '}
-          <code>{'{ "org_id": "<uuid>", "shifts": [ ... ] }'}</code> so Nexus knows which tenant the payload belongs to.
+          If something still fails, your administrator may need to finish server setup, or you can copy the URLs below into Shifter manually.
         </p>
         {!loading && (
           <ul style={{ margin: '0.4rem 0 0 1.1rem', padding: 0, color: '#475569' }}>
             <li>
-              <strong>CRM key on server:</strong>{' '}
+              <strong>Server security key:</strong>{' '}
               {crmReady ? (
                 <span className="settings-success" style={{ display: 'inline', fontWeight: 600 }}>
                   Ready — webhook requests can be authenticated.
                 </span>
               ) : (
                 <span className="settings-error" style={{ display: 'inline', fontWeight: 600 }}>
-                  Not set — whoever hosts Nexus must add <code>CRM_API_KEY</code> (Fly secrets / env) and redeploy. Org admins
-                  cannot fix this in Settings.
+                  Not set — your administrator must configure the server. Organisation admins cannot fix this here.
                 </span>
               )}
             </li>
             <li style={{ marginTop: '0.35rem' }}>
-              <strong>Auto-write into Shifter:</strong>{' '}
+              <strong>Shifter database access (Nexus server):</strong>{' '}
               {shifterRemoteReady ? (
                 <span className="settings-success" style={{ display: 'inline', fontWeight: 600 }}>
-                  Ready — Link to Shifter can push URL + key into Shifter.
+                  Ready — Nexus can find your Shifter organisation by name and write webhook settings.
                 </span>
               ) : (
                 <span style={{ color: '#92400e', fontWeight: 600 }}>
-                  Not configured — set Shifter Supabase URL + service role on the Nexus server, or use manual copy below.
+                  Not configured — set <code>SHIFTER_SUPABASE_URL</code> and <code>SHIFTER_SERVICE_ROLE_KEY</code> on the{' '}
+                  <strong>same Fly app as Nexus Core</strong> (not the Shifter Functions app), then restart. Without this,{' '}
+                  <strong>Link to Shifter</strong> cannot run; you can still copy URLs below into Shifter admin by hand.
                 </span>
               )}
             </li>
@@ -720,9 +958,8 @@ function ShifterIntegrationCard() {
             — yours is <strong>{linkInfo.organization_name}</strong>
           </>
         ) : null}
-        ). <strong>Push into Nexus:</strong> when you use <strong>Link to Shifter</strong>, Nexus tries to write the Schedule Shift
-        webhook URL (and the server&apos;s <code>CRM_API_KEY</code>, when set) onto that org in Shifter so the app can POST shifts
-        automatically.
+        ). <strong>Push into Nexus:</strong> when you use <strong>Link to Shifter</strong>, Nexus tries to save the webhook URL and server
+        security key in Shifter so shifts can flow in automatically.
       </p>
 
       <div className="settings-shifter-card-layout">
@@ -746,26 +983,22 @@ function ShifterIntegrationCard() {
 
           <h4 className="settings-subsection-title">Send shifts into Nexus Core</h4>
           <p className="form-hint" style={{ marginTop: 0 }}>
-            Webhook base URL is resolved from an Admin profile (<code>nexus_shift_api_base_url</code> in Supabase), then server
-            env (<code>NEXUS_PUBLIC_API_URL</code> / <code>OAUTH_PUBLIC_URL</code> / <code>FRONTEND_BASE_URL</code>), then this
-            browser origin. Wrong base breaks auto-config — fix it before linking.
+            Webhook links use the public web address your administrator configured (admin profile or server settings), or this browser
+            if nothing else is set. If the address looks wrong, ask your administrator before linking.
           </p>
           {!loading && linkInfo?.shift_urls_source === 'supabase_profile' && linkInfo?.shift_url_profile_email && (
             <p className="settings-success" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.9rem' }}>
-              URLs use <code>nexus_shift_api_base_url</code> from the Admin profile{' '}
-              <strong>{linkInfo.shift_url_profile_email}</strong> in Supabase.
+              URLs use the base address from the admin account <strong>{linkInfo.shift_url_profile_email}</strong>.
             </p>
           )}
           {!loading && linkInfo?.shift_urls_source === 'env' && (
             <p className="form-hint" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-              Using server env (<code>NEXUS_PUBLIC_API_URL</code> / <code>OAUTH_PUBLIC_URL</code> /{' '}
-              <code>FRONTEND_BASE_URL</code>).
+              Using the public address set on the server.
             </p>
           )}
           {!loading && linkInfo?.shift_urls_source === 'client_origin' && (
             <p className="form-hint" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-              Using this browser origin for the webhook URL. If that is not your public API host, set{' '}
-              <code>nexus_shift_api_base_url</code> on an Admin profile or set env on the server.
+              Using this browser&apos;s address. If that is not your real Nexus web address, ask your administrator to set the correct one.
             </p>
           )}
 
@@ -781,8 +1014,7 @@ function ShifterIntegrationCard() {
               <label>Webhook endpoint</label>
               <input className="form-input" value={webhookUrl} readOnly />
               <small className="form-hint">
-                Method: <code>POST</code>. Use the same secret as <code>CRM_API_KEY</code> in the server <code>.env</code> as the
-                API key in your app.
+                Method: <code>POST</code>. Use the same API key your administrator configured for Nexus in your app.
               </small>
             </div>
             <div className="settings-buttons">
@@ -794,7 +1026,7 @@ function ShifterIntegrationCard() {
               <label>Excel sync endpoint (fallback)</label>
               <input className="form-input" value={syncUrl} readOnly />
               <small className="form-hint">
-                Method: <code>POST</code> with signed-in session, or header <code>x-api-key: CRM_API_KEY</code>.
+                Method: <code>POST</code> while signed in, or with the same API key header your administrator uses for Nexus.
               </small>
             </div>
             <div className="settings-buttons">
@@ -804,22 +1036,52 @@ function ShifterIntegrationCard() {
             </div>
           </details>
           <small className="form-hint" style={{ display: 'block', marginTop: '0.75rem' }}>
-            <strong>Sync from Excel</strong> (Shifts page) uses the connected OneDrive account when Microsoft is linked in
-            Settings. The workbook location is read from <strong>Shifter</strong> Supabase, in order:{' '}
-            <code>public.organizations</code> for that org, then Org Admin <code>profiles</code>, then any profile in the org (
-            <code>progress_notes_onedrive_path</code>, or <code>progress_notes_folder</code> + <code>progress_notes_filename</code>
-            , or <code>progress_notes_onedrive_sharing_url</code>). If OneDrive returns 404 and Shifter is configured, Nexus falls
-            back to pulling shifts from Shifter’s database. Otherwise the server uses <code>ONEDRIVE_EXCEL_PATH</code> or the
-            default path.
+            <strong>Pull from OneDrive Excel</strong> (Shifts page) uses your connected Microsoft account and the workbook path stored in
+            Shifter for your organisation. If the file is missing there, Nexus may pull shifts from Shifter directly when that is set up.
           </small>
         </div>
 
-        <div className="settings-shifter-card-actions">
+        <div className="settings-shifter-card-actions" style={{ minWidth: 0 }}>
+          <div className="form-group" style={{ marginBottom: '0.65rem', width: '100%' }}>
+            <label htmlFor="shifter-name-override">Shifter organisation name (optional)</label>
+            <input
+              id="shifter-name-override"
+              className="form-input"
+              placeholder={
+                linkInfo?.organization_name
+                  ? `Default: Nexus name “${linkInfo.organization_name}”`
+                  : 'Leave blank to use Nexus organisation name'
+              }
+              value={shifterNameOverride}
+              onChange={(e) => setShifterNameOverride(e.target.value)}
+              disabled={busy || loading || Boolean(linkInfo?.linked)}
+              autoComplete="off"
+            />
+            <small className="form-hint">Must match <code>organizations.name</code> in Shifter Supabase exactly (spaces count).</small>
+          </div>
+          <div className="form-group" style={{ marginBottom: '0.65rem', width: '100%' }}>
+            <label htmlFor="shifter-org-uuid">Or Shifter organisation id (optional)</label>
+            <input
+              id="shifter-org-uuid"
+              className="form-input"
+              placeholder="e.g. 00000000-0000-0000-0000-000000000001"
+              value={shifterOrgIdOverride}
+              onChange={(e) => setShifterOrgIdOverride(e.target.value)}
+              disabled={busy || loading || Boolean(linkInfo?.linked)}
+              autoComplete="off"
+            />
+            <small className="form-hint">From Shifter project → Table Editor → organizations → id. If set, the name field is ignored.</small>
+          </div>
           <button
             type="button"
             className="btn btn-primary"
             onClick={onLink}
-            disabled={busy || loading || linkInfo?.linked}
+            disabled={
+              busy ||
+              loading ||
+              Boolean(linkInfo?.linked) ||
+              (!loading && linkInfo != null && !shifterRemoteReady)
+            }
           >
             {busy ? 'Linking…' : 'Link to Shifter'}
           </button>
@@ -846,7 +1108,8 @@ function ShifterIntegrationCard() {
           {copyMsg}
         </div>
       )}
-    </div>
+      </div>
+    </details>
   );
 }
 
@@ -959,8 +1222,14 @@ function BusinessSetup() {
   if (!biz) return null;
 
   return (
-    <div className="card">
-      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Business setup</h3>
+    <details className="card settings-collapsible">
+      <summary className="settings-collapsible-summary">
+        <span className="settings-collapsible-summary-main">
+          <span className="settings-collapsible-title">Business setup</span>
+          <span className="settings-collapsible-hint">Company details, logo, bank details, Xero</span>
+        </span>
+      </summary>
+      <div className="settings-collapsible-body">
       <p className="settings-desc">Company details and payment info shown on invoices.</p>
 
       <h4 className="settings-subsection-title">Business details</h4>
@@ -1127,14 +1396,13 @@ function BusinessSetup() {
         }}
       >
         <strong>One Xero company for this Nexus organisation.</strong> The link is not per staff member: you connect once, and everyone in this
-        organisation uses the same Xero tenant for billing (for example <strong>Financial → Invoice Batches → Send batch to Xero</strong>). An
+        organisation uses the same Xero tenant for billing (for example <strong>Financial → Invoice Batches → Send invoices</strong>, which syncs invoices to Xero for reconciliation). An
         admin or delegate runs the connection flow and signs in to Xero; if that account can access several Xero organisations, the one Nexus
         attaches is determined during that login (you can disconnect and reconnect to change it).
       </div>
       <p className="settings-desc">
-        Authorised sales invoices are posted for payment and reconciliation. Set server env <code>XERO_SALES_ACCOUNT_CODE</code> (and tax type
-        overrides if needed) to match your chart of accounts. Use <strong>Connect to Xero</strong> below and sign in to authorise Nexus for this
-        organisation.
+        Authorised sales invoices are posted for payment and reconciliation. Your administrator can align account codes on the server with your
+        Xero chart of accounts. Use <strong>Connect to Xero</strong> below and sign in to authorise Nexus for this organisation.
       </p>
       {biz.xero_linked ? (
         <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: '1rem' }}>
@@ -1182,11 +1450,7 @@ function BusinessSetup() {
         <div style={{ marginBottom: '1rem' }}>
           {!biz.xero_oauth_via_env && (
             <p className="settings-desc" style={{ marginBottom: '0.75rem', color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', padding: '0.75rem 1rem', borderRadius: 8 }}>
-              Xero is not enabled on this server yet. The <strong>API server</strong> needs <code>XERO_CLIENT_ID</code>, <code>XERO_CLIENT_SECRET</code>, and either{' '}
-              <code>XERO_REDIRECT_URI</code> or <code>OAUTH_PUBLIC_URL</code> (if you use the latter, the callback URL is{' '}
-              <code>OAUTH_PUBLIC_URL</code> + <code>/api/settings/xero-callback</code>). Put these in the repo root <code>.env</code> next to{' '}
-              <code>package.json</code>, not in <code>client/.env</code>. Restart the API and check the server console for{' '}
-              <code>[nexus] Xero OAuth (server env)</code>. Register the exact callback URL in the{' '}
+              Xero is not enabled on this server yet. Ask your administrator to turn on Xero integration. They can register the app in the{' '}
               <a href="https://developer.xero.com/app/manage" target="_blank" rel="noopener noreferrer">Xero developer portal</a>.
             </p>
           )}
@@ -1216,7 +1480,8 @@ function BusinessSetup() {
           {saving ? 'Saving...' : 'Save business settings'}
         </button>
       </div>
-    </div>
+      </div>
+    </details>
   );
 }
 
@@ -1260,8 +1525,14 @@ function LearningSettings() {
   const acc = metrics?.suggestions;
 
   return (
-    <div className="card">
-      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Learning Layer</h3>
+    <details className="card settings-collapsible">
+      <summary className="settings-collapsible-summary">
+        <span className="settings-collapsible-summary-main">
+          <span className="settings-collapsible-title">Learning Layer</span>
+          <span className="settings-collapsible-hint">Shift-pattern suggestions and retention</span>
+        </span>
+      </summary>
+      <div className="settings-collapsible-body">
       <p className="settings-desc">
         The CRM learns from shift patterns and usage to make suggestions. All suggestions require your confirmation before applying.
       </p>
@@ -1368,6 +1639,7 @@ function LearningSettings() {
           </button>
         </div>
       )}
-    </div>
+      </div>
+    </details>
   );
 }

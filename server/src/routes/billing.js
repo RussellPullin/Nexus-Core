@@ -5,10 +5,7 @@
  */
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { join } from 'path';
-import { existsSync } from 'fs';
 import { db } from '../db/index.js';
-import PDFDocument from 'pdfkit';
 import {
   tryPushParticipantBinaryCategory,
   resolveOrgIdForBillingParticipant,
@@ -17,11 +14,20 @@ import {
 import { getOnedriveLinkRow } from '../services/orgOnedriveTokens.service.js';
 import { getDefaultLineItemForParticipant } from '../services/progressNoteMatcher.js';
 import { syncShiftLineItemsWithProgressNote } from '../services/shiftLineItems.service.js';
-import { getBusinessSettings, mergeWithEnv, uploadsDir } from './settings.js';
 import { isNf2fTask, NF2F_TASK_TYPES } from '../lib/billingConstants.js';
 import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
-import { sanitizePdfText } from '../lib/pdfInvoiceText.js';
-import { sendBillingBatchToXero } from '../services/xeroBillingPush.service.js';
+import { sendBillingBatch } from '../services/billingBatchSend.service.js';
+import { generateBillingInvoicePdfBuffer } from '../services/billingInvoicePdf.service.js';
+import { rebuildBillingInvoiceLineItems } from '../services/billingInvoiceRepair.service.js';
+import { voidXeroInvoiceById } from '../services/xeroBillingPush.service.js';
+import { getProviderOrgIdForUser } from '../middleware/roles.js';
+import {
+  isCoordinatorTaskInRequesterTenant,
+  isParticipantInRequesterTenant,
+  isShiftInRequesterTenant,
+  tenantParticipantAndStaffClause,
+  tenantParticipantClause,
+} from '../lib/orgScopeSql.js';
 
 const router = Router();
 
@@ -39,7 +45,8 @@ function parseShiftSelectionId(id) {
 function billingLineSubtotal(dbConn, invoiceId) {
   const r = dbConn
     .prepare(
-      'SELECT COALESCE(SUM(quantity * unit_price), 0) as s FROM billing_invoice_line_items WHERE billing_invoice_id = ?'
+      `SELECT COALESCE(SUM(CAST(quantity AS REAL) * CAST(unit_price AS REAL)), 0) as s
+       FROM billing_invoice_line_items WHERE billing_invoice_id = ?`
     )
     .get(invoiceId);
   return roundMoney(r?.s || 0);
@@ -58,19 +65,21 @@ function billingInvoicePaidSum(dbConn, invoiceId) {
 }
 
 /** Split one batch-level payment across invoices in that batch (proportional to totals incl. GST). */
-function recordBatchPaymentProportional(batchRef, paidPool, paidAt, note) {
+function recordBatchPaymentProportional(batchRef, paidPool, paidAt, note, userId) {
   const pool = roundMoney(Number(paidPool) || 0);
   if (pool <= 0) return [];
+  const pc = userId ? tenantParticipantClause(userId, 'p') : { sql: '1=1', params: [], orgId: true };
+  if (userId && !pc.orgId) return [];
   const invRows = db
     .prepare(
       `
       SELECT bi.id, p.invoice_includes_gst
       FROM billing_invoices bi
       JOIN participants p ON p.id = bi.participant_id
-      WHERE bi.invoice_number LIKE ?
+      WHERE bi.invoice_number LIKE ? AND bi.status != 'void' AND (${pc.sql})
     `
     )
-    .all(`BINV-${batchRef}-%`);
+    .all(`BINV-${batchRef}-%`, ...pc.params);
   const totals = [];
   for (const inv of invRows) {
     const tincl = billingInvoiceTotalInclGst(db, inv.id, inv.invoice_includes_gst);
@@ -118,6 +127,18 @@ router.get('/draft-batch', (req, res) => {
       return res.status(400).json({ error: 'from_date and to_date required (YYYY-MM-DD)' });
     }
 
+    const userId = req.session?.user?.id;
+    const pc = tenantParticipantClause(userId, 'p');
+    const shiftScope = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    if (!pc.orgId) {
+      return res.json({
+        from_date,
+        to_date,
+        participants: [],
+        total_items: 0
+      });
+    }
+
     const tasks = db.prepare(`
       SELECT ct.id, ct.participant_id, ct.activity_date, ct.description, ct.task_type,
              ct.quantity, ct.unit_price, ct.ndis_line_item_id, ct.duration_minutes,
@@ -126,22 +147,25 @@ router.get('/draft-batch', (req, res) => {
       FROM coordinator_tasks ct
       JOIN participants p ON p.id = ct.participant_id
       LEFT JOIN ndis_line_items nli ON nli.id = ct.ndis_line_item_id
-      WHERE ct.activity_date >= ? AND ct.activity_date <= ?
+      WHERE (${pc.sql})
+        AND ct.activity_date >= ? AND ct.activity_date <= ?
         AND ct.task_invoice_id IS NULL AND ct.billing_invoice_id IS NULL
       ORDER BY ct.participant_id, ct.activity_date
-    `).all(from_date, to_date);
+    `).all(...pc.params, from_date, to_date);
 
     const shifts = db.prepare(`
       SELECT s.id as shift_id, s.participant_id, s.start_time, s.end_time,
              p.name as participant_name, p.ndis_number
       FROM shifts s
       JOIN participants p ON p.id = s.participant_id
-      WHERE s.status IN ('completed', 'completed_by_admin')
+      JOIN staff st ON st.id = s.staff_id
+      WHERE (${shiftScope.sql})
+        AND s.status IN ('completed', 'completed_by_admin')
         AND s.billing_invoice_id IS NULL
         AND s.start_time >= ? AND s.start_time <= ?
         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id)
       ORDER BY s.participant_id, s.start_time
-    `).all(`${from_date}T00:00:00`, `${to_date}T23:59:59`);
+    `).all(...shiftScope.params, `${from_date}T00:00:00`, `${to_date}T23:59:59`);
 
     const lineItems = [];
     const TASK_TYPE_LABELS = { email: 'Email', meeting_f2f: 'Meeting f2f', meeting_non_f2f: 'Meeting', phone: 'Phone', other: 'Other' };
@@ -278,6 +302,11 @@ router.get('/draft-batch', (req, res) => {
 // One invoice per participant per batch; each invoice contains all selected line items for that participant.
 router.post('/create-batch', (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    if (!getProviderOrgIdForUser(userId)) {
+      return res.status(403).json({ error: 'No organisation on your account.' });
+    }
+
     const { from_date, to_date, selected_ids } = req.body;
     if (!from_date || !to_date || !Array.isArray(selected_ids) || selected_ids.length === 0) {
       return res.status(400).json({ error: 'from_date, to_date, and selected_ids (array) required' });
@@ -295,6 +324,24 @@ router.post('/create-batch', (req, res) => {
       .filter(Boolean);
 
     const shiftIds = [...new Set(shiftLineKeys.map((k) => k.shift_id))];
+
+    for (const tid of singleTaskIds) {
+      if (!isCoordinatorTaskInRequesterTenant(tid, userId)) {
+        return res.status(403).json({ error: 'One or more selected tasks are not in your organisation.' });
+      }
+    }
+    for (const sid of shiftIds) {
+      if (!isShiftInRequesterTenant(sid, userId)) {
+        return res.status(403).json({ error: 'One or more selected shifts are not in your organisation.' });
+      }
+    }
+    for (const id of nf2fSelectedIds) {
+      const rest = id.replace('task-nf2f-', '');
+      const participantId = rest.slice(0, -11);
+      if (participantId && !isParticipantInRequesterTenant(participantId, userId)) {
+        return res.status(403).json({ error: 'One or more selected items are not in your organisation.' });
+      }
+    }
 
     const participants = new Set();
     nf2fSelectedIds.forEach((id) => {
@@ -484,6 +531,9 @@ router.post('/create-batch', (req, res) => {
 // List billing invoices
 router.get('/', (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    const pc = tenantParticipantClause(userId, 'p');
+    if (!pc.orgId) return res.json([]);
     const rows = db.prepare(`
       SELECT bi.*, p.name as participant_name, p.ndis_number, p.invoice_emails, p.invoice_includes_gst,
              COALESCE(li_sum.line_sub, 0) as line_sub,
@@ -491,7 +541,8 @@ router.get('/', (req, res) => {
       FROM billing_invoices bi
       JOIN participants p ON p.id = bi.participant_id
       LEFT JOIN (
-        SELECT billing_invoice_id, SUM(quantity * unit_price) as line_sub
+        SELECT billing_invoice_id,
+               SUM(CAST(quantity AS REAL) * CAST(unit_price AS REAL)) as line_sub
         FROM billing_invoice_line_items
         GROUP BY billing_invoice_id
       ) li_sum ON li_sum.billing_invoice_id = bi.id
@@ -500,8 +551,9 @@ router.get('/', (req, res) => {
         FROM billing_invoice_payments
         GROUP BY billing_invoice_id
       ) pay ON pay.billing_invoice_id = bi.id
+      WHERE (${pc.sql})
       ORDER BY bi.created_at DESC
-    `).all();
+    `).all(...pc.params);
     const list = rows.map((inv) => {
       let emails = [];
       try { emails = JSON.parse(inv.invoice_emails || '[]'); } catch { emails = []; }
@@ -532,12 +584,16 @@ router.get('/', (req, res) => {
 // invoice_number format: BINV-{batchRef}-{index}
 router.get('/batches', (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    const pc = tenantParticipantClause(userId, 'p');
+    if (!pc.orgId) return res.json([]);
     const invoices = db.prepare(`
       SELECT bi.id, bi.invoice_number, bi.status, bi.created_at, p.invoice_includes_gst
       FROM billing_invoices bi
       JOIN participants p ON p.id = bi.participant_id
+      WHERE (${pc.sql})
       ORDER BY bi.created_at DESC
-    `).all();
+    `).all(...pc.params);
 
     const batchMap = new Map();
     for (const inv of invoices) {
@@ -555,14 +611,15 @@ router.get('/batches', (req, res) => {
         });
       }
       const row = batchMap.get(batchRef);
+      row.invoice_ids.push(inv.id);
+      if (inv.created_at && (!row.created || inv.created_at < row.created)) row.created = inv.created_at;
+      if (inv.status === 'draft') row.status = 'draft';
+      if (inv.status === 'void') continue;
       const invTotal = billingInvoiceTotalInclGst(db, inv.id, inv.invoice_includes_gst);
       const invPaid = billingInvoicePaidSum(db, inv.id);
       const invOut = Math.max(0, roundMoney(invTotal - invPaid));
       row.total = roundMoney(row.total + invTotal);
       row.outstanding = roundMoney(row.outstanding + invOut);
-      if (inv.created_at && (!row.created || inv.created_at < row.created)) row.created = inv.created_at;
-      if (inv.status === 'draft') row.status = 'draft';
-      row.invoice_ids.push(inv.id);
     }
 
     const batches = Array.from(batchMap.values())
@@ -584,13 +641,13 @@ router.get('/batches', (req, res) => {
   }
 });
 
-// Create AUTHORISED sales invoices in Xero for every draft in the batch, then mark sent and store xero_invoice_id.
+// Email invoice PDFs to billing contacts; when Xero is linked, also create ACCREC invoices for reconciliation.
 router.post('/batches/:batchRef/send', async (req, res) => {
   try {
     const { batchRef } = req.params;
     if (!batchRef) return res.status(400).json({ error: 'batch_ref required' });
     const requester = db.prepare('SELECT org_id FROM users WHERE id = ?').get(req.session?.user?.id);
-    const result = await sendBillingBatchToXero(batchRef, requester?.org_id || null);
+    const result = await sendBillingBatch(batchRef, requester?.org_id || null, req.session?.user?.id || null);
     const status =
       result.failed > 0 && result.sent === 0 ? 502 : result.failed > 0 ? 207 : 200;
     res.status(status).json({
@@ -598,6 +655,7 @@ router.post('/batches/:batchRef/send', async (req, res) => {
       failed: result.failed,
       invoices: result.invoices,
       errors: result.errors,
+      xero_warnings: result.xero_warnings,
       message: result.message
     });
   } catch (err) {
@@ -605,8 +663,11 @@ router.post('/batches/:batchRef/send', async (req, res) => {
     if (err.code === 'ORG_MISMATCH') {
       return res.status(403).json({ error: err.message, code: err.code });
     }
-    if (err.code === 'XERO_NOT_LINKED') {
+    if (err.code === 'EMAIL_NOT_CONNECTED') {
       return res.status(400).json({ error: err.message, code: err.code });
+    }
+    if (err.code === 'USER_REQUIRED') {
+      return res.status(401).json({ error: err.message, code: err.code });
     }
     if (err.code === 'BATCH_NOT_FOUND') {
       return res.status(404).json({ error: err.message, code: err.code });
@@ -625,7 +686,13 @@ router.post('/batches/:batchRef/payments', (req, res) => {
       return res.status(400).json({ error: 'batch_ref and positive amount required' });
     }
     const paidAt = paid_at || new Date().toISOString().slice(0, 10);
-    const created = recordBatchPaymentProportional(batchRef, amt, paidAt, note || null);
+    const created = recordBatchPaymentProportional(
+      batchRef,
+      amt,
+      paidAt,
+      note || null,
+      req.session?.user?.id || null
+    );
     if (created.length === 0) {
       return res.status(400).json({ error: 'No invoices found for this batch, or all invoice totals are zero' });
     }
@@ -636,7 +703,91 @@ router.post('/batches/:batchRef/payments', (req, res) => {
   }
 });
 
-// Record a payment against one billing invoice (amount ≤ outstanding)
+/** Void invoice: unlink shifts/tasks so work is billable again; remove lines and Xero link on record. */
+router.post('/:id/void', (req, res) => {
+  try {
+    const id = req.params.id;
+    const inv = db
+      .prepare(
+        `
+      SELECT bi.id, bi.status, p.provider_org_id, bi.participant_id
+      FROM billing_invoices bi
+      JOIN participants p ON p.id = bi.participant_id
+      WHERE bi.id = ?
+    `
+      )
+      .get(id);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+      return res.status(403).json({ error: 'Invoice does not belong to your organisation' });
+    }
+    if (inv.status === 'void') {
+      return res.status(400).json({ error: 'Invoice is already void' });
+    }
+    const paid = billingInvoicePaidSum(db, id);
+    if (paid > 0.005) {
+      return res.status(400).json({
+        error:
+          'Cannot void an invoice that has recorded payments. Adjust or remove payment records first if appropriate.'
+      });
+    }
+    const reason =
+      typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 2000) : null;
+
+    db.transaction(() => {
+      db.prepare('UPDATE shifts SET billing_invoice_id = NULL WHERE billing_invoice_id = ?').run(id);
+      db.prepare('UPDATE coordinator_tasks SET billing_invoice_id = NULL WHERE billing_invoice_id = ?').run(id);
+      db.prepare('DELETE FROM billing_invoice_payments WHERE billing_invoice_id = ?').run(id);
+      db.prepare('DELETE FROM billing_invoice_line_items WHERE billing_invoice_id = ?').run(id);
+      db.prepare(
+        `UPDATE billing_invoices
+         SET status = 'void', xero_invoice_id = NULL, voided_at = datetime('now'), void_reason = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      ).run(reason || null, id);
+    })();
+
+    res.json({
+      id,
+      status: 'void',
+      message:
+        'Invoice voided. Linked shifts and tasks are available to bill again in a new batch for that period. If this invoice was sent to Xero, void or credit it there separately.'
+    });
+  } catch (err) {
+    console.error('[billing void]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Rebuild line items from tasks/shifts still linked to this invoice (recovery when line rows were lost). */
+router.post('/:id/rebuild-lines', (req, res) => {
+  try {
+    const invRow = db
+      .prepare('SELECT participant_id FROM billing_invoices WHERE id = ?')
+      .get(req.params.id);
+    if (!invRow || !isParticipantInRequesterTenant(invRow.participant_id, req.session?.user?.id)) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    const result = rebuildBillingInvoiceLineItems(req.params.id);
+    if (!result.ok) {
+      return res.status(404).json({ error: result.error || 'Not found' });
+    }
+    if (result.line_items === 0) {
+      return res.status(400).json({
+        error:
+          'No line items could be rebuilt. Tasks and shifts are no longer linked to this invoice. Delete the invoice (if appropriate) and create a new batch from Batch invoices, or restore from backup.',
+        line_items: 0
+      });
+    }
+    res.json({
+      message: `Rebuilt ${result.line_items} line item row(s). Refresh the list; totals and PDF should match the linked tasks and shifts.`,
+      line_items: result.line_items
+    });
+  } catch (err) {
+    console.error('[billing rebuild-lines]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/:id/payments', (req, res) => {
   try {
     const inv = db
@@ -650,6 +801,12 @@ router.post('/:id/payments', (req, res) => {
       )
       .get(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    if (inv.status === 'void') {
+      return res.status(400).json({ error: 'Cannot record payments on a void invoice.' });
+    }
     const { amount, paid_at, note } = req.body;
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt <= 0) {
@@ -704,6 +861,9 @@ router.get('/:id', (req, res) => {
       WHERE bi.id = ?
     `).get(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
 
     const items = db.prepare(`
       SELECT * FROM billing_invoice_line_items WHERE billing_invoice_id = ? ORDER BY line_date, created_at
@@ -749,209 +909,35 @@ router.get('/:id', (req, res) => {
 
 router.get('/:id/pdf', async (req, res) => {
   try {
-    const inv = db.prepare(`
-      SELECT bi.*, p.name as participant_name, p.ndis_number, p.address as participant_address,
-             p.management_type, p.invoice_emails, p.invoice_includes_gst,
-             o.name as plan_manager_name, o.abn as plan_manager_abn, o.email as plan_manager_email
-      FROM billing_invoices bi
-      JOIN participants p ON p.id = bi.participant_id
-      LEFT JOIN organisations o ON p.plan_manager_id = o.id
-      WHERE bi.id = ?
-    `).get(req.params.id);
+    const inv = db
+      .prepare(
+        'SELECT id, invoice_number, participant_id FROM billing_invoices WHERE id = ?'
+      )
+      .get(req.params.id);
     if (!inv) return res.status(404).send('Invoice not found');
-
-    let invoiceEmails = [];
-    try { invoiceEmails = JSON.parse(inv.invoice_emails || '[]'); } catch { invoiceEmails = []; }
-    if (!Array.isArray(invoiceEmails)) invoiceEmails = [];
-
-    const items = db.prepare('SELECT * FROM billing_invoice_line_items WHERE billing_invoice_id = ? ORDER BY line_date, created_at').all(req.params.id);
-    const includesGst = participantInvoiceIncludesGst(inv.invoice_includes_gst);
-    let subtotal = 0;
-    items.forEach((li) => { subtotal += (li.quantity || 0) * (li.unit_price || 0); });
-    subtotal = roundMoney(subtotal);
-    const { gst_amount: totalGst, total_incl_gst: grandTotal } = gstBreakdownFromSubtotal(subtotal, includesGst);
-
-    const doc = new PDFDocument({ margin: 50 });
-    doc.font('Helvetica');
-    const chunks = [];
-    doc.on('data', (chunk) => chunks.push(chunk));
-    doc.on('end', () => {
-      const buf = Buffer.concat(chunks);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="invoice-${inv.invoice_number}.pdf"`);
-      res.send(buf);
-      const orgId = resolveOrgIdForBillingParticipant(inv.participant_id);
-      if (
-        orgId &&
-        getOnedriveLinkRow(orgId) &&
-        !billingInvoicePdfAlreadyInRegister(orgId, inv.id)
-      ) {
-        void tryPushParticipantBinaryCategory({
-          participantId: inv.participant_id,
-          registerCategory: 'Invoice',
-          folderSegment: 'Financial',
-          buffer: buf,
-          originalFilename: `invoice-${inv.invoice_number}.pdf`,
-          mimeType: 'application/pdf',
-          notes: `billing_invoice:${inv.id}`
-        });
-      }
-    });
-    doc.on('error', (err) => res.status(500).json({ error: err.message }));
-
-    const billingOrgId = resolveOrgIdForBillingParticipant(inv.participant_id);
-    const bizRow = getBusinessSettings(billingOrgId);
-    const biz = mergeWithEnv(bizRow, { noOrgRowYet: Boolean(billingOrgId) && !bizRow });
-    const companyName = sanitizePdfText(biz.company_name || 'Provider');
-    const companyEmail = sanitizePdfText(biz.company_email || '');
-    const companyAbn = sanitizePdfText(biz.company_abn || '');
-    const companyAcn = sanitizePdfText(biz.company_acn || '');
-    const ndisProviderNumber = sanitizePdfText(biz.ndis_provider_number || '');
-    const companyRegistration = sanitizePdfText(process.env.COMPANY_REGISTRATION || '');
-    const paymentTermsDays = String(biz.payment_terms_days || 7);
-    const companyBsb = sanitizePdfText(biz.bsb || '');
-    const companyAccount = sanitizePdfText(biz.account_number || '');
-    const accountName = sanitizePdfText(biz.account_name || companyName);
-    const logoPath = biz.logo_path ? join(uploadsDir, biz.logo_path) : null;
-
-    const invDate = new Date(inv.created_at);
-    const dueDate = new Date(invDate);
-    dueDate.setDate(dueDate.getDate() + parseInt(paymentTermsDays, 10) || 7);
-    const formatDate = (d) => d.toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const participantType = (inv.management_type === 'plan' || inv.plan_manager_id)
-      ? 'Plan Managed'
-      : 'Self Managed';
-
-    // Logo (top-left)
-    let startY = 50;
-    if (logoPath && existsSync(logoPath)) {
-      try {
-        doc.image(logoPath, 50, 50, { width: 120 });
-        startY = 50 + 80;
-      } catch (e) {
-        console.warn('[billing pdf] logo load failed:', e?.message);
-      }
-    }
-    doc.y = startY;
-
-    // Title (Tax Invoice only when GST is charged)
-    doc.fontSize(18).text(includesGst ? 'Tax Invoice' : 'Invoice', { align: 'center' });
-    doc.moveDown();
-
-    // Top-right: Invoice meta
-    const metaY = doc.y;
-    doc.fontSize(10);
-    doc.text(`Invoice Number ${sanitizePdfText(inv.invoice_number)}`, 350, metaY);
-    doc.text(`Invoice Date ${formatDate(invDate)}`, 350, metaY + 14);
-    doc.text(`Due Date ${formatDate(dueDate)}`, 350, metaY + 28);
-    doc.text(`Total $${grandTotal.toFixed(2)}`, 350, metaY + 42);
-    doc.text(`Amount Due $${grandTotal.toFixed(2)}`, 350, metaY + 56);
-    doc.y = metaY + 70;
-
-    // From block
-    doc.text('From', { continued: false });
-    doc.moveDown(0.3);
-    doc.text(companyName);
-    if (companyEmail) doc.text(companyEmail);
-    if (companyAbn) doc.text(`ABN ${companyAbn}`);
-    if (companyAcn) doc.text(`ACN ${companyAcn}`);
-    if (ndisProviderNumber) doc.text(`NDIS Provider # ${ndisProviderNumber}`);
-    if (companyRegistration) doc.text(`Registration # ${companyRegistration}`);
-    doc.moveDown();
-
-    // To block
-    doc.text('To');
-    doc.moveDown(0.3);
-    const pName = sanitizePdfText(inv.participant_name);
-    const pNdis = sanitizePdfText(inv.ndis_number || 'N/A');
-    const pAddr = inv.participant_address ? sanitizePdfText(inv.participant_address) : '';
-    const pmName = inv.plan_manager_name ? sanitizePdfText(inv.plan_manager_name) : '';
-    const emailsJoined = sanitizePdfText(invoiceEmails.map((e) => sanitizePdfText(e)).join(', '));
-
-    doc.text(pName);
-    doc.text(`Participant ${pName}`);
-    doc.text(`NDIS Number ${pNdis}`);
-    doc.text(`Type ${participantType}`);
-    if (pAddr) doc.text(`Address ${pAddr}`);
-    if (pmName) doc.text(`Plan Manager ${pmName}`);
-    if (invoiceEmails.length > 0) doc.text(`Invoice To ${emailsJoined}`);
-    doc.moveDown();
-
-    // Table header
-    const tableTop = doc.y;
-    doc.fontSize(9);
-    doc.text('Item', 50, tableTop);
-    doc.text('Details', 120, tableTop);
-    doc.text('Quantity', 380, tableTop);
-    doc.text('Price', 430, tableTop);
-    doc.text('GST', 480, tableTop);
-    doc.text('Total', 520, tableTop);
-    doc.moveDown(0.5);
-
-    let rowY = doc.y;
-    items.forEach((li) => {
-      const lineTotal = roundMoney((li.quantity || 0) * (li.unit_price || 0));
-      const lineGst = includesGst ? roundMoney(lineTotal * 0.1) : 0;
-      const lineDate = li.line_date ? new Date(li.line_date).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
-      const claimType = li.source_task_ids ? 'Non-Face-to-Face' : 'Direct Service';
-      const itemCell = sanitizePdfText(`${li.support_item_number || '-'} ${lineDate}`.trim());
-      const descBlock = `${sanitizePdfText(li.description || 'Support')}\nClaim Type: ${claimType}`;
-
-      doc.fontSize(9);
-      const hLeft = doc.heightOfString(itemCell, { width: 65 });
-      const hDetail = doc.heightOfString(descBlock, { width: 250 });
-      const rowH = Math.max(hLeft, hDetail, 14);
-
-      doc.text(itemCell, 50, rowY, { width: 65 });
-      doc.text(descBlock, 120, rowY, { width: 250 });
-      doc.text(String(li.quantity ?? ''), 380, rowY, { width: 45, align: 'right' });
-      doc.text((li.unit_price ?? 0).toFixed(2), 430, rowY, { width: 45, align: 'right' });
-      doc.text(includesGst ? lineGst.toFixed(2) : '0.00', 480, rowY, { width: 35, align: 'right' });
-      doc.text(lineTotal.toFixed(2), 520, rowY, { width: 45, align: 'right' });
-
-      rowY += rowH + 6;
-    });
-    doc.y = rowY + 8;
-
-    // GST and Total
-    const summaryY = doc.y;
-    if (includesGst) {
-      doc.text(`Subtotal (ex GST) ${subtotal.toFixed(2)}`, 380, summaryY, { width: 170, align: 'right' });
-      doc.text(`GST (10%) ${totalGst.toFixed(2)}`, 380, summaryY + 14, { width: 170, align: 'right' });
-      doc.text(`Total ${grandTotal.toFixed(2)}`, 380, summaryY + 28, { width: 170, align: 'right' });
-      doc.text(`Amount Due $${grandTotal.toFixed(2)}`, 380, summaryY + 42, { width: 170, align: 'right' });
-      doc.y = summaryY + 58;
-    } else {
-      doc.text('GST 0.00', 380, summaryY, { width: 170, align: 'right' });
-      doc.text(`Total ${grandTotal.toFixed(2)}`, 380, summaryY + 14, { width: 170, align: 'right' });
-      doc.text(`Amount Due $${grandTotal.toFixed(2)}`, 380, summaryY + 28, { width: 170, align: 'right' });
-      doc.y = summaryY + 50;
+    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+      return res.status(404).send('Invoice not found');
     }
 
-    doc.moveDown(0.5);
-    doc.fontSize(8).text(
-      includesGst
-        ? `Amounts are ex GST unless noted. Total includes GST of $${totalGst.toFixed(2)}.`
-        : 'GST does not apply to these supports (GST-free).',
-      50,
-      doc.y,
-      { width: 500 }
-    );
-    doc.moveDown(1.2);
+    const buf = await generateBillingInvoicePdfBuffer(req.params.id);
+    if (!buf) return res.status(404).send('Invoice not found');
 
-    // Payment Details
-    doc.fontSize(9);
-    const payY = doc.y;
-    doc.text('Payment Details', 50, payY);
-    doc.text(`Payment Terms: ${paymentTermsDays} days`, 50, payY + 18);
-    doc.text(`Account Name: ${accountName}`, 50, payY + 32);
-    doc.text(`BSB ${companyBsb || '-'}`, 50, payY + 46);
-    doc.text(`Account ${companyAccount || '-'}`, 50, payY + 60);
-    doc.text(`Reference ${sanitizePdfText(inv.invoice_number)}`, 50, payY + 74);
-    doc.y = payY + 90;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice-${inv.invoice_number}.pdf"`);
+    res.send(buf);
 
-    doc.fontSize(8).text('Page 1 of 1', { align: 'center' });
-    doc.end();
+    const orgId = resolveOrgIdForBillingParticipant(inv.participant_id);
+    if (orgId && getOnedriveLinkRow(orgId) && !billingInvoicePdfAlreadyInRegister(orgId, inv.id)) {
+      void tryPushParticipantBinaryCategory({
+        participantId: inv.participant_id,
+        registerCategory: 'Invoice',
+        folderSegment: 'Financial',
+        buffer: buf,
+        originalFilename: `invoice-${inv.invoice_number}.pdf`,
+        mimeType: 'application/pdf',
+        notes: `billing_invoice:${inv.id}`
+      });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -959,6 +945,16 @@ router.get('/:id/pdf', async (req, res) => {
 
 router.put('/:id/status', (req, res) => {
   try {
+    const existing = db
+      .prepare('SELECT status, participant_id FROM billing_invoices WHERE id = ?')
+      .get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+    if (!isParticipantInRequesterTenant(existing.participant_id, req.session?.user?.id)) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    if (existing.status === 'void') {
+      return res.status(400).json({ error: 'Cannot change status of a void invoice.' });
+    }
     const { status } = req.body;
     db.prepare('UPDATE billing_invoices SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, req.params.id);
     res.json({ id: req.params.id, status });
@@ -969,8 +965,11 @@ router.put('/:id/status', (req, res) => {
 
 router.delete('/:id', (req, res) => {
   try {
-    const inv = db.prepare('SELECT id FROM billing_invoices WHERE id = ?').get(req.params.id);
+    const inv = db.prepare('SELECT id, participant_id FROM billing_invoices WHERE id = ?').get(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
     const id = req.params.id;
     const run = db.transaction(() => {
       db.prepare('UPDATE shifts SET billing_invoice_id = NULL WHERE billing_invoice_id = ?').run(id);

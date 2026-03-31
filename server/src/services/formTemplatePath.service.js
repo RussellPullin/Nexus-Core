@@ -1,7 +1,10 @@
 /**
- * Form Template Path Service - single place to resolve which empty template file
- * to use for each form type. Templates live under data/forms/templates/<form-type>/.
- * User can update forms by adding or replacing files in those folders.
+ * Form Template Path Service - resolves empty template files per form type.
+ * Core types (privacy_consent, service_agreement, support_plan) resolve under:
+ *   data/forms/templates/by-org/<organisationId>/<subdir>/  (when organisationId is set)
+ * then fall back to legacy:
+ *   data/forms/templates/<subdir>/
+ * Custom templates stay under templates/custom/ (unique template id per row).
  */
 
 import { existsSync, readdirSync } from 'fs';
@@ -19,56 +22,78 @@ const FORM_TYPE_DIR = {
   support_plan: 'support-plan'
 };
 
-/**
- * Get the template directory path for a form type (may not exist).
- */
-export function getTemplateDir(formType) {
-  const dirName = FORM_TYPE_DIR[formType];
-  return dirName ? join(TEMPLATES_DIR, dirName) : null;
+function safeOrgSegment(orgId) {
+  if (orgId == null || typeof orgId !== 'string') return null;
+  const t = orgId.trim();
+  if (!t || /[./\\]/.test(t)) return null;
+  return t;
 }
 
 /**
- * Discover the single template file to use for a form type.
- * If options.templateFilename is set (from form_templates after a Forms UI upload), use that file when it exists.
- * Otherwise: list allowed extensions, sort by filename (deterministic), use first file.
- * @param {string} formType - one of privacy_consent, service_agreement, support_plan
- * @param {{ templateFilename?: string|null }} [options]
- * @returns {{ path: string, type: 'pdf'|'docx' } | null} path and type, or null if none found
+ * Get the template directory path for a form type (may not exist).
+ * @param {string} formType
+ * @param {string|null} [organisationId] - when set, org-specific folder under by-org/
+ */
+export function getTemplateDir(formType, organisationId = null) {
+  const dirName = FORM_TYPE_DIR[formType];
+  if (!dirName) return null;
+  const seg = safeOrgSegment(organisationId);
+  if (seg) return join(TEMPLATES_DIR, 'by-org', seg, dirName);
+  return join(TEMPLATES_DIR, dirName);
+}
+
+/**
+ * Discover the template file for a form type.
+ * Tries org-specific dir first (if organisationId), then legacy global dir.
+ * @param {string} formType - privacy_consent | service_agreement | support_plan
+ * @param {{ organisationId?: string|null, templateFilename?: string|null }} [options]
+ * @returns {{ path: string, type: 'pdf'|'docx' } | null}
  */
 export function getTemplatePath(formType, options = {}) {
-  const dir = getTemplateDir(formType);
-  if (!dir || !existsSync(dir)) return null;
+  const templateFilename = options.templateFilename != null ? String(options.templateFilename).trim() : '';
+  const dirName = FORM_TYPE_DIR[formType];
+  if (!dirName) return null;
+
+  const dirsToTry = [];
+  const seg = safeOrgSegment(options.organisationId);
+  if (seg) dirsToTry.push(join(TEMPLATES_DIR, 'by-org', seg, dirName));
+  const legacy = join(TEMPLATES_DIR, dirName);
+  if (!dirsToTry.length || dirsToTry[0] !== legacy) dirsToTry.push(legacy);
 
   const extensions = formType === 'privacy_consent'
     ? ['.docx']
     : ['.pdf', '.docx'];
 
-  const templateFilename = options.templateFilename != null ? String(options.templateFilename).trim() : '';
-  if (templateFilename) {
-    const safeName = templateFilename.replace(/[/\\]/g, '');
-    const candidate = join(dir, safeName);
-    if (existsSync(candidate)) {
-      const lower = safeName.toLowerCase();
-      const ok = extensions.some((ext) => lower.endsWith(ext));
-      if (ok) {
-        const type = lower.endsWith('.docx') ? 'docx' : 'pdf';
-        return { path: candidate, type };
+  for (const dir of dirsToTry) {
+    if (!dir || !existsSync(dir)) continue;
+
+    if (templateFilename) {
+      const safeName = templateFilename.replace(/[/\\]/g, '');
+      const candidate = join(dir, safeName);
+      if (existsSync(candidate)) {
+        const lower = safeName.toLowerCase();
+        const ok = extensions.some((ext) => lower.endsWith(ext));
+        if (ok) {
+          const type = lower.endsWith('.docx') ? 'docx' : 'pdf';
+          return { path: candidate, type };
+        }
       }
     }
+
+    const files = readdirSync(dir)
+      .filter((f) => !f.startsWith('.') && extensions.some((ext) => f.toLowerCase().endsWith(ext)))
+      .sort((a, b) => a.localeCompare(b, 'en'));
+
+    if (files.length > 0) {
+      const chosen = files[0];
+      const type = chosen.toLowerCase().endsWith('.docx') ? 'docx' : 'pdf';
+      return { path: join(dir, chosen), type };
+    }
   }
-
-  const files = readdirSync(dir)
-    .filter((f) => !f.startsWith('.') && extensions.some((ext) => f.toLowerCase().endsWith(ext)))
-    .sort((a, b) => a.localeCompare(b, 'en'));
-
-  if (files.length === 0) return null;
-  const chosen = files[0];
-  const type = chosen.toLowerCase().endsWith('.docx') ? 'docx' : 'pdf';
-  return { path: join(dir, chosen), type };
+  return null;
 }
 
 /**
- * Convenience: path only for privacy consent (for callers that only need path).
  * @returns {string|null}
  */
 export function getConsentFormPath(options = {}) {
@@ -77,7 +102,6 @@ export function getConsentFormPath(options = {}) {
 }
 
 /**
- * Convenience: same as getTemplatePath('service_agreement') for drop-in replacement.
  * @returns {{ path: string, type: 'pdf'|'docx' } | null}
  */
 export function getServiceAgreementTemplatePath(options = {}) {
@@ -85,7 +109,6 @@ export function getServiceAgreementTemplatePath(options = {}) {
 }
 
 /**
- * Convenience: same as getTemplatePath('support_plan') for drop-in replacement.
  * @returns {{ path: string, type: 'pdf'|'docx' } | null}
  */
 export function getSupportPlanTemplatePath(options = {}) {
@@ -94,14 +117,12 @@ export function getSupportPlanTemplatePath(options = {}) {
 
 /** Directory for custom form templates (by template id or filename). */
 export function getCustomTemplateDir() {
-  const dir = join(TEMPLATES_DIR, 'custom');
-  return dir;
+  return join(TEMPLATES_DIR, 'custom');
 }
 
 /**
- * Get path for a custom form template by id (reads template_filename from DB if needed).
  * @param {string} templateId - form_templates.id
- * @param {string} [templateFilename] - optional filename (e.g. from form_templates.template_filename)
+ * @param {string} [templateFilename]
  * @returns {{ path: string, type: 'pdf'|'docx' } | null}
  */
 export function getCustomTemplatePath(templateId, templateFilename) {

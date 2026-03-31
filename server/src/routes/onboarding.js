@@ -132,7 +132,7 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
     if (!participant) return res.status(404).json({ error: 'Participant not found' });
 
     const form = db.prepare(`
-      SELECT pfi.*, ft.form_type, ft.display_name
+      SELECT pfi.*, ft.form_type, ft.display_name, ft.template_filename
       FROM participant_form_instances pfi
       JOIN form_templates ft ON ft.id = pfi.form_template_id
       WHERE pfi.id = ? AND pfi.participant_onboarding_id = ?
@@ -156,7 +156,9 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
     /** @type {{ buffer: Buffer, originalFilename: string, mimeType: string, category: string } | null} */
     let oneDriveCopy = null;
 
-    if (form.form_type === 'privacy_consent' && getConsentFormPath()) {
+    const organisationId = onboarding.organisation_id || null;
+    const consentPathOpts = { organisationId, templateFilename: form.template_filename || null };
+    if (form.form_type === 'privacy_consent' && getConsentFormPath(consentPathOpts)) {
       const intakeRows = db.prepare(`
         SELECT field_key, field_value FROM participant_intake_fields
         WHERE participant_onboarding_id = ?
@@ -165,7 +167,13 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
       const coordinatorSignatureDataUrl = req.session?.user?.id
         ? (db.prepare('SELECT signature_data FROM users WHERE id = ?').get(req.session.user.id)?.signature_data || null)
         : null;
-      const docBuffer = fillConsentForm(participant, intake, coordinatorSignatureDataUrl ? { coordinatorSignatureDataUrl } : {});
+      const docBuffer = fillConsentForm(
+        participant,
+        intake,
+        coordinatorSignatureDataUrl
+          ? { coordinatorSignatureDataUrl, ...consentPathOpts }
+          : { ...consentPathOpts }
+      );
       const pdfBuffer = convertDocxToPdf(docBuffer);
       const consentFilename = pdfBuffer ? 'FM-Consent-NDIS-information.pdf' : 'FM-Consent-NDIS-information.docx';
       const uploadBuf = pdfBuffer || docBuffer;
@@ -414,7 +422,12 @@ router.post('/participants/:id/renewals/run', (req, res) => {
 
 router.get('/providers/:organisationId/compliance', (req, res) => {
   try {
-    const dashboard = getProviderComplianceDashboard(req.params.organisationId);
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const oid = req.params.organisationId;
+    if (!req.session.user.org_id || req.session.user.org_id !== oid) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const dashboard = getProviderComplianceDashboard(oid);
     res.json(dashboard);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -423,7 +436,12 @@ router.get('/providers/:organisationId/compliance', (req, res) => {
 
 router.put('/providers/:organisationId/settings', (req, res) => {
   try {
-    const profile = ensureProviderProfile(req.params.organisationId);
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const oid = req.params.organisationId;
+    if (!req.session.user.org_id || req.session.user.org_id !== oid) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const profile = ensureProviderProfile(oid);
     const {
       onboarding_enabled,
       onboarding_pilot,
@@ -465,7 +483,12 @@ router.put('/providers/:organisationId/settings', (req, res) => {
 
 router.get('/providers/:organisationId/templates', (req, res) => {
   try {
-    const profile = ensureProviderProfile(req.params.organisationId);
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const oid = req.params.organisationId;
+    if (!req.session.user.org_id || req.session.user.org_id !== oid) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const profile = ensureProviderProfile(oid);
     seedCoreTemplates(profile.id);
     const coverage = getTemplateCoverage(profile.id);
     res.json(coverage);
@@ -494,11 +517,12 @@ router.get('/participants/:id/forms/:formId/document', (req, res) => {
     if (!form) return res.status(404).json({ error: 'Form not found' });
     let buf;
     let ext = 'pdf';
-    if (form.form_type === 'privacy_consent' && getConsentFormPath()) {
+    const consentPathOpts = { organisationId: onboarding.organisation_id || null, templateFilename: form.template_filename || null };
+    if (form.form_type === 'privacy_consent' && getConsentFormPath(consentPathOpts)) {
       const participant = db.prepare('SELECT * FROM participants WHERE id = ?').get(req.params.id);
       const intakeRows = db.prepare('SELECT field_key, field_value FROM participant_intake_fields WHERE participant_onboarding_id = ?').all(onboarding.id);
       const intake = Object.fromEntries((intakeRows || []).map((r) => [r.field_key, r.field_value]));
-      buf = fillConsentForm(participant, intake);
+      buf = fillConsentForm(participant, intake, consentPathOpts);
       ext = 'docx';
     } else if (form.draft_document_path && existsSync(form.draft_document_path)) {
       const lower = form.draft_document_path.toLowerCase();
@@ -562,7 +586,7 @@ router.delete('/participants/:id/forms/:formInstanceId', (req, res) => {
     const onboarding = getOnboardingByParticipant(req.params.id);
     if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
     const form = db.prepare(`
-      SELECT pfi.*, ft.form_type, ft.display_name
+      SELECT pfi.*, ft.form_type, ft.display_name, ft.template_filename
       FROM participant_form_instances pfi
       JOIN form_templates ft ON ft.id = pfi.form_template_id
       WHERE pfi.id = ? AND pfi.participant_onboarding_id = ?

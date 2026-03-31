@@ -3,6 +3,7 @@ import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } f
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { getAssignedParticipantIds, canAccessParticipant } from '../middleware/roles.js';
+import { tenantParticipantAndStaffClause } from '../lib/orgScopeSql.js';
 import {
   getSupportCoordLineItem,
   roundToBillableUnits
@@ -22,6 +23,10 @@ router.get('/', (req, res) => {
     const { participant_id, staff_id, from_date, to_date } = req.query;
     const userId = req.session?.user?.id;
     const assignedIds = userId ? getAssignedParticipantIds(userId) : null;
+    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    if (!c.orgId) {
+      return res.json([]);
+    }
 
     let tasks = db.prepare(`
       SELECT ct.*, p.name as participant_name, p.ndis_number, st.name as staff_name,
@@ -30,8 +35,9 @@ router.get('/', (req, res) => {
       JOIN participants p ON p.id = ct.participant_id
       JOIN staff st ON st.id = ct.staff_id
       LEFT JOIN ndis_line_items nli ON nli.id = ct.ndis_line_item_id
+      WHERE (${c.sql})
       ORDER BY ct.activity_date DESC, ct.created_at DESC
-    `).all();
+    `).all(...c.params);
 
     if (assignedIds !== null) {
       const idSet = new Set(assignedIds);
@@ -56,6 +62,10 @@ router.get('/default-line-item', (req, res) => {
   try {
     const { participant_id, activity_date } = req.query;
     if (!participant_id) return res.status(400).json({ error: 'participant_id required' });
+    const userId = req.session?.user?.id;
+    if (userId && !canAccessParticipant(userId, participant_id)) {
+      return res.status(403).json({ error: 'Access denied to this participant' });
+    }
     const item = getSupportCoordLineItem(participant_id, activity_date);
     if (!item) return res.status(404).json({ error: 'No support coordination line item found' });
     res.json(item);
@@ -149,13 +159,19 @@ router.post('/', (req, res) => {
 // Task invoice routes must come before /:id
 router.get('/task-invoices', (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    if (!c.orgId) {
+      return res.json([]);
+    }
     const invoices = db.prepare(`
       SELECT ti.*, p.name as participant_name, p.ndis_number, st.name as staff_name
       FROM task_invoices ti
       JOIN participants p ON p.id = ti.participant_id
       JOIN staff st ON st.id = ti.staff_id
+      WHERE (${c.sql})
       ORDER BY ti.created_at DESC
-    `).all();
+    `).all(...c.params);
     res.json(invoices);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -167,6 +183,11 @@ router.post('/create-invoice', (req, res) => {
     const { participant_id, staff_id, from_date, to_date } = req.body;
     if (!participant_id || !staff_id) {
       return res.status(400).json({ error: 'participant_id and staff_id required' });
+    }
+
+    const userId = req.session?.user?.id;
+    if (userId && !canAccessParticipant(userId, participant_id)) {
+      return res.status(403).json({ error: 'Access denied to this participant' });
     }
 
     const tasks = db.prepare(`
@@ -345,6 +366,10 @@ router.get('/task-invoices/:id', (req, res) => {
       WHERE ti.id = ?
     `).get(req.params.id);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    const userIdInv = req.session?.user?.id;
+    if (userIdInv && !canAccessParticipant(userIdInv, invoice.participant_id)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
     const tasks = db.prepare(`
       SELECT ct.*, nli.support_item_number, nli.description as ndis_description, nli.unit
@@ -416,6 +441,10 @@ router.get('/task-invoices/:id/pdf', async (req, res) => {
       WHERE ti.id = ?
     `).get(req.params.id);
     if (!invoice) return res.status(404).send('Invoice not found');
+    const userIdPdf = req.session?.user?.id;
+    if (userIdPdf && !canAccessParticipant(userIdPdf, invoice.participant_id)) {
+      return res.status(403).send('Access denied');
+    }
 
     const tasks = db.prepare(`
       SELECT ct.*, nli.support_item_number, nli.description as ndis_description, nli.unit

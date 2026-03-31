@@ -3,6 +3,7 @@
  * Used when receiving progress notes from the Progress Notes App for invoicing and payroll.
  */
 import { db } from '../db/index.js';
+import { tenantParticipantClause } from '../lib/orgScopeSql.js';
 import { getShiftDayType, getShiftTimeBand } from '../lib/ndisDay.js';
 
 /**
@@ -40,12 +41,25 @@ function normalizeName(name) {
 /**
  * Resolve client name to participant_id. Uses case-insensitive fuzzy match.
  * @param {string} clientName
+ * @param {string | null} [userId] When set, only participants in that user's provider org are considered.
+ * @param {string | null} [restrictToProviderOrgId] When set without userId (e.g. webhook/excel org scope), only this provider_org_id.
  * @returns {{ id: string } | null}
  */
-export function resolveParticipantByName(clientName) {
+export function resolveParticipantByName(clientName, userId = null, restrictToProviderOrgId = null) {
   const norm = normalizeName(clientName);
   if (!norm) return null;
-  const participants = db.prepare('SELECT id, name FROM participants').all();
+  let participants;
+  if (userId) {
+    const c = tenantParticipantClause(userId, 'p');
+    if (!c.orgId) return null;
+    participants = db.prepare(`SELECT id, name FROM participants p WHERE (${c.sql})`).all(...c.params);
+  } else if (restrictToProviderOrgId) {
+    participants = db
+      .prepare('SELECT id, name FROM participants WHERE provider_org_id = ?')
+      .all(restrictToProviderOrgId);
+  } else {
+    participants = db.prepare('SELECT id, name FROM participants').all();
+  }
   const match = participants.find((p) => normalizeName(p.name) === norm);
   if (match) return { id: match.id };
   // Fallback: partial match (e.g. "Kruise cupra" matches "Kruise Cupra")
@@ -56,12 +70,23 @@ export function resolveParticipantByName(clientName) {
 /**
  * Resolve staff name to staff_id. Uses case-insensitive fuzzy match.
  * @param {string} staffName
+ * @param {string | null} [userId] When set, only staff in that user's org are considered.
+ * @param {string | null} [restrictToOrgId] When set without userId, only staff in this org_id.
  * @returns {{ id: string } | null}
  */
-export function resolveStaffByName(staffName) {
+export function resolveStaffByName(staffName, userId = null, restrictToOrgId = null) {
   const norm = normalizeName(staffName);
   if (!norm) return null;
-  const staff = db.prepare('SELECT id, name FROM staff').all();
+  let staff;
+  if (userId) {
+    const orgId = db.prepare('SELECT org_id FROM users WHERE id = ?').get(userId)?.org_id;
+    if (!orgId) return null;
+    staff = db.prepare('SELECT id, name FROM staff WHERE org_id = ?').all(orgId);
+  } else if (restrictToOrgId) {
+    staff = db.prepare('SELECT id, name FROM staff WHERE org_id = ?').all(restrictToOrgId);
+  } else {
+    staff = db.prepare('SELECT id, name FROM staff').all();
+  }
   const match = staff.find((s) => normalizeName(s.name) === norm);
   if (match) return { id: match.id };
   const partial = staff.find((s) => normalizeName(s.name).includes(norm) || norm.includes(normalizeName(s.name)));

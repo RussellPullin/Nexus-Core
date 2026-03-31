@@ -75,15 +75,25 @@ export default function ShiftsPage() {
     }
   };
 
+  const getDisplayedWeekRange = () => {
+    const start = formatDateLocal(weekStart);
+    const end = new Date(weekStart);
+    end.setDate(end.getDate() + 6);
+    const endStr = formatDateLocal(end);
+    return { start, endStr, apiStart: `${start}T00:00:00`, apiEnd: `${endStr}T23:59:59` };
+  };
+
+  const shiftDetailPeriodQuery = () => {
+    const { start, endStr } = getDisplayedWeekRange();
+    return `periodStart=${encodeURIComponent(start)}&periodEnd=${encodeURIComponent(endStr)}`;
+  };
+
   const load = async (opts = {}) => {
     if (!opts.silent) setLoading(true);
     try {
-      const start = formatDateLocal(weekStart);
-      const end = new Date(weekStart);
-      end.setDate(end.getDate() + 6);
-      const endStr = formatDateLocal(end);
+      const { apiStart, apiEnd } = getDisplayedWeekRange();
       const [s, p, st] = await Promise.all([
-        shifts.list({ start: `${start}T00:00:00`, end: `${endStr}T23:59:59` }),
+        shifts.list({ start: apiStart, end: apiEnd }),
         participants.list(),
         staff.list()
       ]);
@@ -737,6 +747,7 @@ export default function ShiftsPage() {
                     <th>Participant</th>
                     <th>Staff</th>
                     <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Charges</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -748,9 +759,12 @@ export default function ShiftsPage() {
                       <td>{s.participant_name}</td>
                       <td>{s.staff_name}</td>
                       <td><span className={`badge badge-${s.status}`}>{s.status}</span></td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                        ${Number(s.charges_total ?? 0).toFixed(2)}
+                      </td>
                       <td>
                         {s.roster_sent_at && <span className="badge badge-completed" style={{ marginRight: '0.25rem' }} title="Roster sent">Sent</span>}
-                        <button className="btn btn-primary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} onClick={() => navigate(`/shifts/${s.id}`)}>View / Charges</button>
+                        <button className="btn btn-primary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} onClick={() => navigate(`/shifts/${s.id}?${shiftDetailPeriodQuery()}`)}>View / Charges</button>
                         <a href={shifts.icsUrl(s.id)} download className="btn btn-secondary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} title="Download ICS">ICS</a>
                         <button className="btn btn-secondary" style={{ fontSize: '0.75rem' }} onClick={() => handleEditShift(s)}>Edit</button>
                       </td>
@@ -872,7 +886,7 @@ export default function ShiftsPage() {
                   {editingShift ? 'Save & send to staff' : 'Create & send to staff'}
                 </button>
                 {editingShift && (
-                  <button type="button" className="btn btn-primary" onClick={() => { setShowModal(false); setEditingShift(null); navigate(`/shifts/${editingShift.id}`); }}>
+                  <button type="button" className="btn btn-primary" onClick={() => { setShowModal(false); setEditingShift(null); navigate(`/shifts/${editingShift.id}?${shiftDetailPeriodQuery()}`); }}>
                     View / Charges
                   </button>
                 )}

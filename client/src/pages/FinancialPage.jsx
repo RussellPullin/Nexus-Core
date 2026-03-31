@@ -249,7 +249,8 @@ export default function FinancialPage() {
           <div className="card" style={{ marginBottom: '1.5rem' }}>
             <h3 style={{ marginTop: 0 }}>Batch invoices</h3>
             <p style={{ color: '#64748b', marginBottom: '1rem' }}>
-              Choose a period (e.g. one week). You&apos;ll see one draft invoice per participant. Click an invoice to view its line items, then confirm the batch when you&apos;re happy.
+              Choose a period (e.g. one week). You&apos;ll see one draft invoice per participant. Click an invoice to view its line items, then <strong>Confirm batch</strong> to save drafts in Nexus only.
+              Open the <strong>Invoice Batches</strong> tab and click <strong>Send invoices</strong> to email PDFs from your connected mailbox (Settings → email). If Xero is linked, Nexus also creates invoices there for payment tracking and reconciliation.
             </p>
             <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -390,7 +391,8 @@ export default function FinancialPage() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Invoice Batches</h3>
           <p style={{ color: '#64748b', marginBottom: '1rem' }}>
-            Draft batches: <strong>Send batch to Xero</strong> creates an <em>authorised</em> accounts-receivable invoice in Xero for each participant (using your chart of accounts). Link Xero under Settings first. Nexus then marks each invoice sent and stores the Xero ID. Record payments in Nexus or reconcile in Xero.
+            <strong>Send invoices</strong> emails the PDF to each participant&apos;s billing addresses: <strong>Invoice email(s)</strong> on the participant, or the plan manager organisation email (plan-managed), or the participant&apos;s main email (self-managed). You must connect your email under Settings (same as roster mail).
+            When Xero is linked, Nexus also creates an <em>authorised</em> invoice per participant for reconciliation and to see when they are paid; email delivery always comes from Nexus, not from Xero.
           </p>
           {batchesLoading ? (
             <p>Loading...</p>
@@ -448,22 +450,32 @@ export default function FinancialPage() {
                                 try {
                                   const r = await billing.sendBatch(batch.batch_ref);
                                   await Promise.all([loadBatches(), loadBillingInvoices()]);
+                                  const lines = [];
+                                  if (r?.message) lines.push(r.message);
                                   if (r?.errors?.length) {
-                                    const detail = r.errors
-                                      .map((e) => `${e.invoice_number || e.billing_invoice_id}: ${e.error}`)
-                                      .join('\n');
-                                    alert(`${r.message || 'Some invoices failed in Xero.'}\n\n${detail}`);
-                                  } else if (r?.message) {
-                                    alert(r.message);
+                                    lines.push(
+                                      r.errors
+                                        .map((e) => `${e.invoice_number || e.billing_invoice_id}: ${e.error}`)
+                                        .join('\n')
+                                    );
                                   }
+                                  if (r?.xero_warnings?.length) {
+                                    lines.push(
+                                      'Xero:',
+                                      ...r.xero_warnings.map(
+                                        (w) => `${w.invoice_number || w.billing_invoice_id}: ${w.error}`
+                                      )
+                                    );
+                                  }
+                                  if (lines.length) alert(lines.join('\n\n'));
                                 } catch (e) {
-                                  alert(e.message || 'Failed to send batch to Xero');
+                                  alert(e.message || 'Failed to send invoices');
                                 } finally {
                                   setSendingBatchRef(null);
                                 }
                               }}
                             >
-                              {sendingBatchRef === batch.batch_ref ? 'Sending to Xero…' : 'Send batch to Xero'}
+                              {sendingBatchRef === batch.batch_ref ? 'Sending…' : 'Send invoices'}
                             </button>
                           )}
                         </td>
@@ -523,6 +535,7 @@ export default function FinancialPage() {
           <h3 style={{ marginTop: 0 }}>Invoices</h3>
           <p style={{ color: '#64748b', marginBottom: '1rem' }}>
             Batch invoices show total (GST-inclusive), paid, and outstanding per invoice. Use Record payment to match remittances; when fully paid, status becomes paid.
+            <strong> Void</strong> cancels an invoice (no payments recorded), unlinks its shifts and tasks so they appear again in a new batch for that period, and clears the Nexus copy of line items. Void or credit the invoice in Xero separately if it was synced.
           </p>
           {invoicesLoading ? (
             <p>Loading...</p>
@@ -562,9 +575,62 @@ export default function FinancialPage() {
                           ? `$${outstanding.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                           : '–'}
                       </td>
-                      <td><span className={`badge badge-${inv.status === 'paid' ? 'paid' : inv.status}`}>{inv.status}</span></td>
+                      <td>
+                        <span
+                          className={`badge ${inv.status === 'paid' ? 'badge-paid' : inv.status === 'void' ? 'badge-secondary' : `badge-${inv.status}`}`}
+                        >
+                          {inv.status}
+                        </span>
+                      </td>
                       <td>
                         <a href={billing.pdfUrl(inv.id)} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ fontSize: '0.8rem', marginRight: '0.25rem' }}>PDF</a>
+                        {inv.status !== 'void' && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.8rem', marginRight: '0.25rem', color: '#b45309' }}
+                            title="Unlink shifts/tasks so they can be batched again"
+                            onClick={async () => {
+                              if (
+                                !window.confirm(
+                                  'Void this invoice? Shifts and tasks will be unlinked so you can include them in a new batch. You cannot void if payments are recorded. Continue?'
+                                )
+                              ) {
+                                return;
+                              }
+                              const reason = window.prompt('Optional note (stored on the invoice):', '') || undefined;
+                              try {
+                                const r = await billing.voidInvoice(inv.id, reason);
+                                alert(r?.message || 'Voided.');
+                                loadAllInvoices();
+                              } catch (e) {
+                                alert(e.message || 'Void failed');
+                              }
+                            }}
+                          >
+                            Void
+                          </button>
+                        )}
+                        {total <= 0 && inv.status !== 'void' && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.8rem', marginRight: '0.25rem' }}
+                            title="Recreate line items from tasks and shifts still linked to this invoice"
+                            onClick={async () => {
+                              if (!window.confirm('Rebuild line items from linked tasks and shifts? Use this if totals show $0 but the invoice should have charges.')) return;
+                              try {
+                                const r = await billing.rebuildLines(inv.id);
+                                alert(r?.message || 'Done.');
+                                loadAllInvoices();
+                              } catch (e) {
+                                alert(e.message || 'Rebuild failed');
+                              }
+                            }}
+                          >
+                            Rebuild lines
+                          </button>
+                        )}
                         {outstanding > 0 && (
                           <button
                             type="button"

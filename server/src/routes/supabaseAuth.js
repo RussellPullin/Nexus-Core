@@ -6,9 +6,11 @@ import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 import {
+  findShifterOrganizationById,
   findShifterOrganizationByName,
   getSupabaseServiceRoleClient,
   isShifterRemoteConfigured,
+  normalizeOrgNameForMatch,
   pushScheduleShiftIntegrationToShifter
 } from '../services/supabaseStaffShifter.service.js';
 import {
@@ -111,7 +113,7 @@ router.get('/public-config', (req, res) => {
 router.post('/session', async (req, res) => {
   try {
     if (!isSupabaseJwtConfigured()) {
-      return res.status(503).json({ error: 'Supabase auth is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
+      return res.status(503).json({ error: 'Cloud sign-in is not available on this server. Contact your administrator.', code: 'AUTH_NOT_CONFIGURED' });
     }
     const accessToken = req.body?.access_token;
     if (!accessToken) return res.status(400).json({ error: 'access_token required' });
@@ -128,6 +130,7 @@ router.post('/session', async (req, res) => {
     const u = db
       .prepare(
         `SELECT id, email, name, role, org_id, billing_interval_minutes, staff_id, signature_data,
+         ollama_local_base_url,
          email_provider, email_connected_address, email_reconnect_required, auth_uid
          FROM users WHERE id = ?`
       )
@@ -152,7 +155,7 @@ router.post('/session', async (req, res) => {
 router.post('/register-org', async (req, res) => {
   try {
     if (!isSupabaseJwtConfigured()) {
-      return res.status(503).json({ error: 'Supabase auth is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
+      return res.status(503).json({ error: 'Cloud sign-in is not available on this server. Contact your administrator.', code: 'AUTH_NOT_CONFIGURED' });
     }
     const { access_token, organization_name } = req.body || {};
     if (!access_token) return res.status(400).json({ error: 'access_token required' });
@@ -171,6 +174,7 @@ router.post('/register-org', async (req, res) => {
       ? db
           .prepare(
             `SELECT id, email, name, role, org_id, billing_interval_minutes, staff_id, signature_data,
+           ollama_local_base_url,
            email_provider, email_connected_address, email_reconnect_required, auth_uid
            FROM users WHERE id = ?`
           )
@@ -254,7 +258,7 @@ router.get('/shifter-org-link', requireAuth, requireAdminOrDelegate, async (req,
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account.', code: 'NO_ORG' });
     const admin = getSupabaseServiceRoleClient();
     if (!admin) {
-      return res.status(503).json({ error: 'Supabase is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
+      return res.status(503).json({ error: 'This feature is not available until your administrator finishes server setup.', code: 'AUTH_NOT_CONFIGURED' });
     }
     const { data, error } = await admin
       .from('organizations')
@@ -264,7 +268,7 @@ router.get('/shifter-org-link', requireAuth, requireAdminOrDelegate, async (req,
     if (error) {
       return res.status(400).json({ error: error.message || 'Failed to read organisation link', code: 'SUPABASE_ORG' });
     }
-    if (!data) return res.status(404).json({ error: 'Organisation not found in Supabase', code: 'ORG_NOT_FOUND' });
+    if (!data) return res.status(404).json({ error: 'Organisation record could not be found.', code: 'ORG_NOT_FOUND' });
     const shiftUrls = await resolveShiftIntegrationUrls(admin, orgId);
     const crmKeySet = Boolean(String(process.env.CRM_API_KEY || '').trim());
     return res.json({
@@ -290,11 +294,29 @@ router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, async (req
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account.', code: 'NO_ORG' });
     const admin = getSupabaseServiceRoleClient();
     if (!admin) {
-      return res.status(503).json({ error: 'Supabase is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
+      return res.status(503).json({ error: 'This feature is not available until your administrator finishes server setup.', code: 'AUTH_NOT_CONFIGURED' });
+    }
+    if (!isShifterRemoteConfigured()) {
+      return res.status(503).json({
+        error:
+          'The Nexus API cannot reach Shifter yet. On the Nexus Core host (e.g. Fly app for this CRM), set secrets SHIFTER_SUPABASE_URL and SHIFTER_SERVICE_ROLE_KEY (Shifter project URL + service role key), deploy or restart, then try again. CRM_API_KEY alone is not enough to look up your Shifter organisation.',
+        code: 'SHIFTER_REMOTE_NOT_CONFIGURED',
+      });
     }
 
-    let rawName = String(req.body?.shifter_org_name ?? '').trim();
-    if (!rawName) {
+    const idFromBody = String(req.body?.shifter_organization_id ?? '').trim();
+    let shifterOrg = null;
+    if (idFromBody) {
+      shifterOrg = await findShifterOrganizationById(idFromBody);
+      if (!shifterOrg?.id) {
+        return res.status(404).json({
+          error:
+            'No row in Shifter public.organizations with that id. In Supabase (Shifter project) open Table Editor → organizations and copy the correct UUID.',
+          code: 'SHIFTER_ORG_ID_NOT_FOUND',
+        });
+      }
+    } else {
+      let rawName = String(req.body?.shifter_org_name ?? '').trim();
       const { data: orgRow, error: orgReadErr } = await admin
         .from('organizations')
         .select('name')
@@ -303,19 +325,28 @@ router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, async (req
       if (orgReadErr) {
         return res.status(400).json({ error: orgReadErr.message || 'Failed to read organisation', code: 'SUPABASE_ORG' });
       }
-      rawName = String(orgRow?.name ?? '').trim();
-    }
-    if (!rawName) {
-      return res.status(400).json({
-        error:
-          'Your Nexus Core organisation has no name yet. Add a name to your organisation, then use Link to Shifter again.',
-        code: 'NO_ORG_NAME'
-      });
-    }
+      const nexusNameDisplay = String(orgRow?.name ?? '').trim();
+      if (!rawName) {
+        rawName = nexusNameDisplay;
+      }
+      rawName = normalizeOrgNameForMatch(rawName);
+      if (!rawName) {
+        return res.status(400).json({
+          error:
+            'Your Nexus Core organisation has no name yet. Add a name, or paste the Shifter organisation UUID and link again.',
+          code: 'NO_ORG_NAME',
+        });
+      }
 
-    const shifterOrg = await findShifterOrganizationByName(rawName);
-    if (!shifterOrg?.id) {
-      return res.status(404).json({ error: 'No matching Shifter organisation found for that name', code: 'SHIFTER_ORG_NOT_FOUND' });
+      shifterOrg = await findShifterOrganizationByName(rawName);
+      if (!shifterOrg?.id) {
+        return res.status(404).json({
+          error: `No Shifter organisation matched the name "${rawName}" (exact match, case-insensitive). In Shifter Supabase, check organizations.name — it must be the same, or rename either side. You can also paste the Shifter organisation id (UUID) in Settings and link without matching names.`,
+          code: 'SHIFTER_ORG_NOT_FOUND',
+          searched_name: rawName,
+          nexus_organization_name: nexusNameDisplay || null,
+        });
+      }
     }
 
     const { error: linkErr } = await persistOrgShifterLink(admin, orgId, shifterOrg.id);
@@ -362,7 +393,7 @@ router.post('/unlink-shifter-org', requireAuth, requireAdminOrDelegate, async (r
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account.', code: 'NO_ORG' });
     const admin = getSupabaseServiceRoleClient();
     if (!admin) {
-      return res.status(503).json({ error: 'Supabase is not configured on the server', code: 'AUTH_NOT_CONFIGURED' });
+      return res.status(503).json({ error: 'This feature is not available until your administrator finishes server setup.', code: 'AUTH_NOT_CONFIGURED' });
     }
 
     const { error: unlinkErr } = await persistOrgShifterLink(admin, orgId, null);

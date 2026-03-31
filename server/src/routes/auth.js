@@ -9,8 +9,33 @@ import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 
 const USER_SELECT = `id, email, name, role, org_id, auth_uid, billing_interval_minutes, staff_id, signature_data,
+  ollama_local_base_url,
   email_provider, email_connected_address, email_reconnect_required`;
 const SUPABASE_PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
+
+/** @param {unknown} raw */
+function normalizeOllamaLocalBaseUrl(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === '') return null;
+  const s = String(raw).trim().slice(0, 512);
+  if (!s) return null;
+  let u;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  const host = u.hostname.toLowerCase();
+  const allowed =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '[::1]' ||
+    host === '::1' ||
+    host === 'host.docker.internal';
+  if (!allowed) return null;
+  return u.toString().replace(/\/$/, '');
+}
 
 function secureEquals(a, b) {
   const left = Buffer.from(String(a || ''), 'utf8');
@@ -26,6 +51,7 @@ function shapeUser(row) {
     role: normalizeAppRole(row.role),
     billing_interval_minutes: row.billing_interval_minutes ?? 15,
     signature_data: row.signature_data || null,
+    ollama_local_base_url: row.ollama_local_base_url || null,
     email_reconnect_required: !!row.email_reconnect_required,
     is_super_admin: isSuperAdminEmail(row.email)
   };
@@ -65,7 +91,7 @@ router.post('/login', (req, res) => {
     }
     if (isSupabaseOnlyAccount) {
       return res.status(401).json({
-        error: 'This account uses Supabase sign-in. Use the same email on the login page with Supabase enabled.',
+        error: 'This account uses cloud sign-in. Use organisation cloud sign-in on the login page with the same email.',
         code: 'USE_SUPABASE_AUTH'
       });
     }
@@ -229,7 +255,7 @@ router.post('/test-email', requireAuth, async (req, res) => {
         ok: false,
         code: 'EMAIL_RELAY_NOT_CONFIGURED',
         error:
-          'Your inbox is connected, but the server is not configured to send mail yet. Set AZURE_EMAIL_FUNCTION_URL (your Azure email function URL) on the server, or ask your administrator.'
+          'Your inbox is connected, but the server is not set up to send outgoing mail yet. Ask your administrator to finish email setup.'
       });
     }
     const u = db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
@@ -265,7 +291,7 @@ router.post('/test-email', requireAuth, async (req, res) => {
 
 router.put('/settings', requireAuth, (req, res) => {
   try {
-    const { billing_interval_minutes, staff_id, signature_data } = req.body;
+    const { billing_interval_minutes, staff_id, signature_data, ollama_local_base_url } = req.body;
     const userId = req.session.user.id;
 
     const updates = [];
@@ -282,6 +308,16 @@ router.put('/settings', requireAuth, (req, res) => {
       updates.push('signature_data = ?');
       const val = signature_data === null || signature_data === '' ? null : String(signature_data).slice(0, 500000);
       values.push(val);
+    }
+    if (ollama_local_base_url !== undefined) {
+      const norm = normalizeOllamaLocalBaseUrl(ollama_local_base_url);
+      if (norm === null && ollama_local_base_url !== null && String(ollama_local_base_url).trim() !== '') {
+        return res.status(400).json({
+          error: 'Invalid Ollama URL. Use http://127.0.0.1:11434 or http://localhost:11434 (or host.docker.internal in Docker).'
+        });
+      }
+      updates.push('ollama_local_base_url = ?');
+      values.push(norm === undefined ? null : norm);
     }
     if (updates.length === 0) {
       const user = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(userId);

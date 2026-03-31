@@ -362,6 +362,21 @@ try {
     if (!e.message?.includes('already exists')) console.warn('users migration:', e.message);
   }
 
+  // case_notes.shift_id: mirror completed shift session notes into case notes (quarterly reporting / CRM)
+  try {
+    const cnCols = db.prepare('PRAGMA table_info(case_notes)').all();
+    if (cnCols.length && !cnCols.some((c) => c.name === 'shift_id')) {
+      db.exec('ALTER TABLE case_notes ADD COLUMN shift_id TEXT');
+    }
+    if (cnCols.length) {
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_case_notes_shift_id ON case_notes(shift_id) WHERE shift_id IS NOT NULL'
+      );
+    }
+  } catch (e) {
+    if (!e.message?.includes('duplicate column')) console.warn('case_notes.shift_id migration:', e.message);
+  }
+
   // progress_notes: evidence of actual delivery, links to shifts for invoicing/payroll
   try {
     db.exec(`
@@ -997,6 +1012,19 @@ try {
   }
 
   try {
+    let biVoidCols = db.prepare('PRAGMA table_info(billing_invoices)').all();
+    if (!biVoidCols.some((c) => c.name === 'voided_at')) {
+      db.exec('ALTER TABLE billing_invoices ADD COLUMN voided_at TEXT');
+    }
+    biVoidCols = db.prepare('PRAGMA table_info(billing_invoices)').all();
+    if (!biVoidCols.some((c) => c.name === 'void_reason')) {
+      db.exec('ALTER TABLE billing_invoices ADD COLUMN void_reason TEXT');
+    }
+  } catch (e) {
+    if (!e.message?.includes('duplicate column')) console.warn('billing_invoices void columns migration:', e.message);
+  }
+
+  try {
     const shiftCols = db.prepare("PRAGMA table_info(shifts)").all();
     if (!shiftCols.some(c => c.name === 'billing_invoice_id')) {
       db.exec('ALTER TABLE shifts ADD COLUMN billing_invoice_id TEXT REFERENCES billing_invoices(id) ON DELETE SET NULL');
@@ -1390,6 +1418,9 @@ try {
     }
     if (!userCols.some(c => c.name === 'signature_data')) {
       db.exec('ALTER TABLE users ADD COLUMN signature_data TEXT');
+    }
+    if (!userCols.some((c) => c.name === 'ollama_local_base_url')) {
+      db.exec('ALTER TABLE users ADD COLUMN ollama_local_base_url TEXT');
     }
   } catch (e) {
     if (!e.message?.includes('duplicate column')) console.warn('users coordinator migration:', e.message);

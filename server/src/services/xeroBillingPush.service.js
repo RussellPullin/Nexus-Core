@@ -67,13 +67,39 @@ async function findContactByAccountNumber(accessToken, tenantId, accountNumber) 
   return Array.isArray(list) && list[0]?.ContactID ? list[0].ContactID : null;
 }
 
-async function createXeroContact(accessToken, tenantId, { participantId, name, email }) {
+/** Stable Nexus id stored in Xero ContactNumber (not shown as “Account number” on invoices). */
+async function findContactByContactNumber(accessToken, tenantId, contactNumber) {
+  const safe = String(contactNumber || '').replace(/"/g, '');
+  if (!safe) return null;
+  const where = encodeURIComponent(`ContactNumber=="${safe}"`);
+  const res = await fetch(`${XERO_API_BASE}/Contacts?where=${where}`, {
+    headers: xeroHeaders(accessToken, tenantId),
+  });
+  const text = await res.text();
+  if (!res.ok) return null;
+  let data;
+  try {
+    data = parseXeroApiBodyOrThrow(text, 'Xero Contacts lookup (ContactNumber)', res.status);
+  } catch {
+    return null;
+  }
+  const list = data?.Contacts;
+  return Array.isArray(list) && list[0]?.ContactID ? list[0].ContactID : null;
+}
+
+async function createXeroContact(accessToken, tenantId, { participantId, name, email, ndisNumber }) {
   const displayName = (name || 'Participant').slice(0, 500);
+  const ndis = (ndisNumber && String(ndisNumber).trim()) ? String(ndisNumber).trim().slice(0, 500) : '';
+  const addresses =
+    ndis.length > 0
+      ? [{ AddressType: 'STREET', AddressLine1: `NDIS ${ndis}`.slice(0, 500) }]
+      : undefined;
   const body = {
     Contacts: [
       {
         Name: displayName,
-        AccountNumber: participantId,
+        ContactNumber: participantId.slice(0, 50),
+        ...(addresses ? { Addresses: addresses } : {}),
         ...(email ? { EmailAddress: email.slice(0, 255) } : {}),
       },
     ],
@@ -94,11 +120,32 @@ async function createXeroContact(accessToken, tenantId, { participantId, name, e
   return id;
 }
 
-async function ensureXeroContact(accessToken, tenantId, participantId, participantName, invoiceEmails) {
-  const existing = await findContactByAccountNumber(accessToken, tenantId, participantId);
+async function ensureXeroContact(accessToken, tenantId, participantId, participantName, invoiceEmails, ndisNumber) {
+  const existing =
+    (await findContactByContactNumber(accessToken, tenantId, participantId)) ||
+    (await findContactByAccountNumber(accessToken, tenantId, participantId));
   if (existing) return existing;
   const email = Array.isArray(invoiceEmails) && invoiceEmails.length > 0 ? String(invoiceEmails[0]) : null;
-  return createXeroContact(accessToken, tenantId, { participantId, name: participantName, email });
+  return createXeroContact(accessToken, tenantId, {
+    participantId,
+    name: participantName,
+    email,
+    ndisNumber,
+  });
+}
+
+/** Same order as Nexus PDFs: participant invoice_emails, else plan manager org email, else participant email (self-managed). */
+export function resolveInvoiceEmailsForXero(parsedEmails, managementType, planManagerEmail, participantEmail) {
+  const list = Array.isArray(parsedEmails)
+    ? parsedEmails.map((e) => String(e).trim()).filter((e) => e.includes('@'))
+    : [];
+  if (list.length > 0) return list;
+  const mt = (managementType || 'self').toLowerCase();
+  const pm = String(planManagerEmail || '').trim();
+  if (mt === 'plan' && pm.includes('@')) return [pm];
+  const pe = String(participantEmail || '').trim();
+  if (mt === 'self' && pe.includes('@')) return [pe];
+  return [];
 }
 
 /**
@@ -109,9 +156,11 @@ export async function pushBillingInvoiceToXero(billingInvoiceId, orgId = null) {
   const inv = db
     .prepare(
       `
-    SELECT bi.*, p.name as participant_name, p.ndis_number, p.invoice_emails, p.invoice_includes_gst, p.provider_org_id
+    SELECT bi.*, p.name as participant_name, p.ndis_number, p.invoice_emails, p.invoice_includes_gst, p.provider_org_id,
+           p.management_type, p.email as participant_email, o.email as plan_manager_org_email
     FROM billing_invoices bi
     JOIN participants p ON p.id = bi.participant_id
+    LEFT JOIN organisations o ON p.plan_manager_id = o.id
     WHERE bi.id = ?
   `
     )
@@ -138,6 +187,13 @@ export async function pushBillingInvoiceToXero(billingInvoiceId, orgId = null) {
   }
   if (!Array.isArray(invoiceEmails)) invoiceEmails = [];
 
+  const invoiceEmailsResolved = resolveInvoiceEmailsForXero(
+    invoiceEmails,
+    inv.management_type,
+    inv.plan_manager_org_email,
+    inv.participant_email
+  );
+
   const includesGst = participantInvoiceIncludesGst(inv.invoice_includes_gst);
   const taxType = includesGst ? TAX_GST : TAX_EXEMPT;
 
@@ -163,7 +219,8 @@ export async function pushBillingInvoiceToXero(billingInvoiceId, orgId = null) {
     tenantId,
     inv.participant_id,
     inv.participant_name,
-    invoiceEmails
+    invoiceEmailsResolved,
+    inv.ndis_number
   );
 
   const invoiceDate = inv.period_to?.slice(0, 10) || inv.period_from?.slice(0, 10) || new Date().toISOString().slice(0, 10);
@@ -205,103 +262,49 @@ export async function pushBillingInvoiceToXero(billingInvoiceId, orgId = null) {
 }
 
 /**
- * For each draft invoice in the batch: create in Xero (if needed), set status sent and store xero_invoice_id.
+ * Void an ACCREC invoice in Xero (Status VOIDED). No-op if no id or Xero not linked for org.
+ * @throws {Error} When Xero is linked and the void request fails.
  */
-export async function sendBillingBatchToXero(batchRef, orgId = null) {
-  if (!isXeroLinked(orgId)) {
-    const err = new Error('Connect Xero in Settings (Accounting software) before sending invoices.');
-    err.code = 'XERO_NOT_LINKED';
-    throw err;
-  }
+export async function voidXeroInvoiceById(xeroInvoiceUuid, orgId = null) {
+  const id = String(xeroInvoiceUuid || '').trim();
+  if (!id) return { skipped: true, reason: 'no_xero_id' };
+  if (!isXeroLinked(orgId)) return { skipped: true, reason: 'xero_not_linked' };
 
-  const pattern = `BINV-${batchRef}-%`;
-  const rows = db
-    .prepare(
-      `
-    SELECT bi.id, bi.invoice_number, bi.xero_invoice_id
-    FROM billing_invoices bi
-    JOIN participants p ON p.id = bi.participant_id
-    WHERE bi.invoice_number LIKE ? AND bi.status = 'draft'
-      ${orgId ? 'AND p.provider_org_id = ?' : ''}
-    ORDER BY invoice_number
-  `
-    )
-    .all(...(orgId ? [pattern, orgId] : [pattern]));
-
-  const anyBatch = orgId
-    ? db
-        .prepare(`
-          SELECT 1
-          FROM billing_invoices bi
-          JOIN participants p ON p.id = bi.participant_id
-          WHERE bi.invoice_number LIKE ? AND p.provider_org_id = ?
-          LIMIT 1
-        `)
-        .get(pattern, orgId)
-    : db.prepare('SELECT 1 FROM billing_invoices WHERE invoice_number LIKE ? LIMIT 1').get(pattern);
-  if (!anyBatch) {
-    const err = new Error('No invoices found for this batch');
-    err.code = 'BATCH_NOT_FOUND';
-    throw err;
-  }
-
-  if (rows.length === 0) {
-    return {
-      sent: 0,
-      failed: 0,
-      invoices: [],
-      errors: [],
-      message: 'No draft invoices to send (already sent or paid).',
-    };
-  }
-
-  const invoices = [];
-  const errors = [];
-
-  for (const row of rows) {
-    try {
-      let xeroInvoiceId = row.xero_invoice_id || null;
-      let xeroInvoiceNumber = null;
-
-      if (!xeroInvoiceId) {
-        const r = await pushBillingInvoiceToXero(row.id, orgId);
-        xeroInvoiceId = r.xeroInvoiceId;
-        xeroInvoiceNumber = r.xeroInvoiceNumber;
-      }
-
-      db.prepare(
-        `
-        UPDATE billing_invoices
-        SET status = 'sent', xero_invoice_id = ?, updated_at = datetime('now')
-        WHERE id = ?
-      `
-      ).run(xeroInvoiceId, row.id);
-
-      invoices.push({
-        billing_invoice_id: row.id,
-        invoice_number: row.invoice_number,
-        xero_invoice_id: xeroInvoiceId,
-        xero_invoice_number: xeroInvoiceNumber,
-      });
-    } catch (e) {
-      errors.push({
-        billing_invoice_id: row.id,
-        invoice_number: row.invoice_number,
-        error: e.message || String(e),
-      });
-    }
-  }
-
-  return {
-    sent: invoices.length,
-    failed: errors.length,
-    invoices,
-    errors,
-    message:
-      errors.length === 0
-        ? `Sent ${invoices.length} invoice(s) to Xero.`
-        : `Sent ${invoices.length} invoice(s); ${errors.length} failed. Check errors for details.`,
+  const { accessToken, tenantId } = await getXeroAccessToken(orgId);
+  const payload = {
+    Invoices: [
+      {
+        InvoiceID: id,
+        Type: 'ACCREC',
+        Status: 'VOIDED',
+      },
+    ],
   };
+
+  const res = await fetch(`${XERO_API_BASE}/Invoices`, {
+    method: 'POST',
+    headers: xeroHeaders(accessToken, tenantId),
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  let data;
+  try {
+    data = parseXeroApiBodyOrThrow(text, 'Xero void invoice', res.status);
+  } catch (e) {
+    throw new Error(e.message || 'Xero void invoice: invalid response');
+  }
+
+  const invOut = data?.Invoices?.[0];
+  if (!res.ok) {
+    const msg = extractXeroValidationMessage(data) || text.slice(0, 800);
+    throw new Error(msg || `Xero void invoice failed (HTTP ${res.status})`);
+  }
+  if (invOut?.HasErrors && invOut?.ValidationErrors?.length) {
+    const msg = invOut.ValidationErrors.map((v) => v.Message).filter(Boolean).join('; ');
+    throw new Error(msg || 'Xero rejected voiding this invoice');
+  }
+
+  return { ok: true, xero_status: invOut?.Status || 'VOIDED' };
 }
 
 export { isXeroLinked };

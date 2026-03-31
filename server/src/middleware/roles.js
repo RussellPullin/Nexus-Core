@@ -1,6 +1,5 @@
 import { normalizeAppRole } from '../../../shared/appRoles.js';
 import { db } from '../db/index.js';
-import { isSuperAdminEmail } from '../lib/superAdmin.js';
 
 /** Provider tenant org for new participants / scoping (SQLite organisations.id, same UUID as Supabase public.organizations). */
 export function getProviderOrgIdForUser(userId) {
@@ -122,10 +121,14 @@ export function canAccessParticipant(userId, participantId) {
 
   const participant = db.prepare('SELECT provider_org_id FROM participants WHERE id = ?').get(participantId);
   if (!participant) return false;
-  if (user.org_id && !isSuperAdminEmail(user.email)) {
+  const enforceOrgMatch = Boolean(user.org_id);
+  if (enforceOrgMatch) {
     const po = participant.provider_org_id;
-    if (po && po !== user.org_id) return false;
-    if (!po && !includeNullProviderParticipantsForUser(user)) return false;
+    const poEmpty = po == null || String(po).trim() === '';
+    if (!poEmpty && po !== user.org_id) return false;
+    if (poEmpty && !includeNullProviderParticipantsForUser(user) && normalizeAppRole(user.role) !== 'admin') {
+      return false;
+    }
   }
 
   const effectiveRole = normalizeAppRole(user.role);
@@ -150,14 +153,15 @@ export function canAccessParticipant(userId, participantId) {
  * Returns null when the caller should not filter by this list (non-org-scoped admin/delegate).
  * Org-scoped admin/delegate: IDs in this org, plus legacy rows with NULL provider_org_id when single-tenant.
  * Support coordinators: assigned IDs that belong to this org (or legacy NULL when single-tenant).
+ * @param {{ includeOrgOrphans?: boolean }} [opts] — org-scoped admin only: also include NULL/empty provider_org_id rows (list query param include_org_orphans).
  */
-export function getAssignedParticipantIds(userId) {
+export function getAssignedParticipantIds(userId, opts = {}) {
   const user = db.prepare('SELECT role, org_id, email FROM users WHERE id = ?').get(userId);
   if (!user) return [];
 
-  const superAdmin = isSuperAdminEmail(user.email);
-  const orgScoped = Boolean(user.org_id) && !superAdmin;
+  const orgScoped = Boolean(user.org_id);
   const legacyNull = includeNullProviderParticipantsForUser(user);
+  const includeOrgOrphans = Boolean(opts.includeOrgOrphans);
 
   const now = new Date().toISOString().slice(0, 10);
   const effectiveRole = normalizeAppRole(user.role);
@@ -174,6 +178,10 @@ export function getAssignedParticipantIds(userId) {
 
   if (effectiveRole === 'admin' || (effectiveRole === 'delegate' && delegateGrant)) {
     if (!orgScoped) return null;
+    if (includeOrgOrphans && effectiveRole === 'admin') {
+      const sql = `SELECT id FROM participants WHERE provider_org_id = ? OR provider_org_id IS NULL OR TRIM(COALESCE(provider_org_id, '')) = ''`;
+      return db.prepare(sql).all(user.org_id).map((r) => r.id);
+    }
     const sql = legacyNull
       ? 'SELECT id FROM participants WHERE provider_org_id = ? OR provider_org_id IS NULL'
       : 'SELECT id FROM participants WHERE provider_org_id = ?';

@@ -2,6 +2,22 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 
 /**
+ * participants.provider_org_id FK → organisations(id). Auth may set users.org_id to a Supabase
+ * org UUID before that id exists locally — inserts/updates on participants then fail.
+ */
+export function ensureOrganisationExistsById(orgId, opts = {}) {
+  if (!orgId || String(orgId).trim() === '') return;
+  const id = String(orgId).trim();
+  if (db.prepare('SELECT 1 FROM organisations WHERE id = ?').get(id)) return;
+  const name = (opts.name && String(opts.name).trim()) || 'Provider organisation';
+  const type = (opts.type && String(opts.type).trim()) || 'provider';
+  db.prepare(`
+    INSERT INTO organisations (id, owner_org_id, name, type, email, created_at, updated_at)
+    VALUES (?, NULL, ?, ?, NULL, datetime('now'), datetime('now'))
+  `).run(id, name, type);
+}
+
+/**
  * Find or create a plan manager organisation by name/email.
  * Returns org id or null. Mutates orgByName and orgByEmail with new entries.
  */

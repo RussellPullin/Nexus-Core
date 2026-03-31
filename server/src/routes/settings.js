@@ -9,7 +9,6 @@ import { writeFileSync, unlinkSync, existsSync, mkdirSync, createReadStream } fr
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
-import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { frontendBaseUrl } from '../lib/frontendBaseUrl.js';
 import { oauthPublicApiOriginFromEnv } from '../lib/oauthPublicOrigin.js';
 
@@ -27,21 +26,11 @@ const upload = multer({
   limits: { fileSize: MAX_SIZE },
 });
 
-function currentUserScope(req) {
-  const uid = req.session?.user?.id;
-  if (!uid) return { orgId: null, superAdmin: false };
-  const u = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(uid);
-  return {
-    orgId: u?.org_id || null,
-    superAdmin: isSuperAdminEmail(u?.email),
-  };
-}
-
 function resolveTargetOrgId(req) {
-  const { orgId, superAdmin } = currentUserScope(req);
-  if (superAdmin && req.query?.org_id) return String(req.query.org_id);
-  if (superAdmin && req.body?.org_id) return String(req.body.org_id);
-  return orgId || null;
+  const uid = req.session?.user?.id;
+  if (!uid) return null;
+  const u = db.prepare('SELECT org_id FROM users WHERE id = ?').get(uid);
+  return u?.org_id || null;
 }
 
 /** True if a business_settings row exists for this org (avoids INSERT ... ON CONFLICT(org_id), which needs a matching UNIQUE index). */

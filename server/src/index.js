@@ -95,6 +95,8 @@ import emailOAuthRouter from './routes/emailOAuth.js';
 import participantsRouter from './routes/participants.js';
 import organisationsRouter from './routes/organisations.js';
 import * as llm from './services/llm.service.js';
+import { db } from './db/index.js';
+import { fetchFlagsForOrg } from './services/orgFeatures.service.js';
 import staffRouter, { handleSetStaffShifterEnabled } from './routes/staff.js';
 import shiftsRouter from './routes/shifts.js';
 import ndisRouter from './routes/ndis.js';
@@ -184,9 +186,37 @@ app.get('/api/ai/status', requireAuth, async (req, res) => {
     const status = await llm.getConnectionStatus?.();
     const available = status?.available ?? await llm.isAvailable();
     const config = llm.getConfig?.() || {};
-    res.json({ available, model: config.model, enabled: config.enabled, error: status?.error });
-  } catch {
-    res.json({ available: false });
+    const orgId = req.session?.user?.org_id || null;
+    const { flags } = await fetchFlagsForOrg(orgId);
+    const orgAllowsLocalOllama = Boolean(flags.ai_staff_local_ollama);
+    const u = db.prepare('SELECT ollama_local_base_url FROM users WHERE id = ?').get(req.session.user.id);
+    res.json({
+      server: {
+        available,
+        model: config.model,
+        enabled: config.enabled,
+        error: status?.error,
+        warning: status?.warning,
+        baseUrl: config.baseUrl
+      },
+      orgAllowsLocalOllama,
+      userOllamaLocalBaseUrl: u?.ollama_local_base_url || null
+    });
+  } catch (err) {
+    console.error('[api/ai/status]', err?.message || err);
+    const cfgOnErr = llm.getConfig?.() || {};
+    res.json({
+      server: {
+        available: false,
+        error: err?.message ? `Server error: ${err.message}` : 'Server error while checking Ollama.',
+        baseUrl: cfgOnErr.baseUrl,
+        model: null,
+        enabled: true,
+        warning: undefined
+      },
+      orgAllowsLocalOllama: false,
+      userOllamaLocalBaseUrl: null
+    });
   }
 });
 // Also on the root app (in addition to staffRouter) so POST matches even if nested router fails to update.

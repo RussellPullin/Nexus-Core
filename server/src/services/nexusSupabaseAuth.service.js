@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { verifySupabaseAccessToken } from '../lib/supabaseJwt.js';
 import { getSupabaseServiceRoleClient } from './supabaseStaffShifter.service.js';
+import { ensureOrganisationExistsById } from './organisations.service.js';
 
 const PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
 
@@ -107,6 +108,7 @@ export function upsertSqliteUserFromSupabase({ sub, email, profile }) {
       WHERE id = ?
     `).run(sub, nextOrgId, emailNorm, displayName, nextRole, hash, row.id);
 
+    if (nextOrgId) ensureOrganisationExistsById(nextOrgId);
     return db.prepare('SELECT * FROM users WHERE id = ?').get(row.id);
   }
 
@@ -115,6 +117,7 @@ export function upsertSqliteUserFromSupabase({ sub, email, profile }) {
     INSERT INTO users (id, email, password_hash, name, role, org_id, auth_uid)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(id, emailNorm, hash, displayName, sqliteRole, orgFromProfile, sub);
+  if (orgFromProfile) ensureOrganisationExistsById(orgFromProfile);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
@@ -128,7 +131,7 @@ export async function completeSupabaseSignIn(accessToken) {
   let email = String(payload.email || '').trim().toLowerCase();
   const admin = getSupabaseServiceRoleClient();
   if (!admin) {
-    const err = new Error('Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
+    const err = new Error('Sign-in service is not configured on the server.');
     err.code = 'SUPABASE_NOT_CONFIGURED';
     throw err;
   }
@@ -147,7 +150,7 @@ export async function completeSupabaseSignIn(accessToken) {
     .maybeSingle();
   if (errById) {
     console.error('[nexusSupabaseAuth] profile by id', sub, errById.message);
-    const err = new Error(`Supabase profiles query failed: ${errById.message}`);
+    const err = new Error(`Could not load your account profile: ${errById.message}`);
     err.code = 'PROFILE_QUERY_ERROR';
     throw err;
   }
@@ -161,7 +164,7 @@ export async function completeSupabaseSignIn(accessToken) {
       .maybeSingle();
     if (errByEmail) {
       console.error('[nexusSupabaseAuth] profile by email', email, errByEmail.message);
-      const err = new Error(`Supabase profiles query failed: ${errByEmail.message}`);
+      const err = new Error(`Could not load your account profile: ${errByEmail.message}`);
       err.code = 'PROFILE_QUERY_ERROR';
       throw err;
     }
@@ -217,12 +220,7 @@ export async function completeSupabaseSignIn(accessToken) {
   if (!profile) {
     console.warn('[nexusSupabaseAuth] NO_PROFILE sub=', sub, 'email_used=', email || '(empty)');
     const err = new Error(
-      [
-        'No matching row in public.profiles for this login.',
-        'Check: (1) Nexus server SUPABASE_URL is the same Supabase project as this dashboard,',
-        '(2) profiles.id equals the user UUID under Authentication → Users for this account.',
-        'Apply repo supabase migrations (including backfill) if the table is empty or out of date.',
-      ].join(' ')
+      'No organisation profile was found for this account. Ask your administrator to check your user setup.'
     );
     err.code = 'NO_PROFILE';
     throw err;
@@ -257,14 +255,14 @@ export async function registerOrganizationForUser({ accessToken, organizationNam
   const sub = normalizeSupabaseUserId(payload.sub);
   const admin = getSupabaseServiceRoleClient();
   if (!admin) {
-    const err = new Error('Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
+    const err = new Error('Sign-in service is not configured on the server.');
     err.code = 'SUPABASE_NOT_CONFIGURED';
     throw err;
   }
 
   const actorUserId = String(sub || payload?.user_id || '').trim().toLowerCase();
   if (!actorUserId) {
-    const err = new Error('Authenticated Supabase user id is missing in token; please sign in again.');
+    const err = new Error('Your account id is missing from the sign-in token; please sign in again.');
     err.code = 'AUTH_INVALID';
     throw err;
   }
@@ -348,7 +346,7 @@ export async function registerOrganizationForUser({ accessToken, organizationNam
 export async function inviteStaffToOrg({ orgId, email, fullName }) {
   const admin = getSupabaseServiceRoleClient();
   if (!admin) {
-    const err = new Error('Supabase is not configured');
+    const err = new Error('Invites are not available until your administrator finishes server setup.');
     err.code = 'SUPABASE_NOT_CONFIGURED';
     throw err;
   }

@@ -10,19 +10,37 @@ import {
   scheduleMirrorShiftToNexusSupabase,
   scheduleRemoveShiftFromNexusSupabase,
 } from '../services/nexusPublicShiftsSync.service.js';
+import { syncCaseNoteFromShift } from '../services/shiftCaseNoteSync.service.js';
+import { getProviderOrgIdForUser } from '../middleware/roles.js';
+import {
+  isParticipantInRequesterTenant,
+  isShiftInRequesterTenant,
+  tenantParticipantAndStaffClause,
+} from '../lib/orgScopeSql.js';
 
 const router = Router();
 
 router.get('/', (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    if (!c.orgId) {
+      return res.json([]);
+    }
     const { start, end, participant_id, staff_id, recurring_group_id } = req.query;
     let shifts = db.prepare(`
-      SELECT s.*, p.name as participant_name, p.ndis_number, st.name as staff_name, st.email as staff_email, st.phone as staff_phone, st.notify_email, st.notify_sms
+      SELECT s.*, p.name as participant_name, p.ndis_number, st.name as staff_name, st.email as staff_email, st.phone as staff_phone, st.notify_email, st.notify_sms,
+        COALESCE((
+          SELECT SUM(sli.quantity * sli.unit_price)
+          FROM shift_line_items sli
+          WHERE sli.shift_id = s.id
+        ), 0) AS charges_total
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
+      WHERE (${c.sql})
       ORDER BY s.start_time
-    `).all();
+    `).all(...c.params);
 
     if (start) {
       shifts = shifts.filter(s => s.start_time >= start);
@@ -54,6 +72,10 @@ router.post('/send-roster', async (req, res) => {
     if (!userId) {
       return res.status(401).json({ error: 'Not logged in', errorDetail: 'Please log in again.' });
     }
+    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    if (!c.orgId) {
+      return res.status(400).json({ error: 'No organisation on your account.' });
+    }
     if (!isEmailConfiguredForUser(userId)) {
       return res.status(400).json({
         error: 'Connect your email in Settings to send rosters.',
@@ -67,9 +89,10 @@ router.post('/send-roster', async (req, res) => {
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
-      WHERE s.start_time >= ? AND s.start_time <= ? AND s.roster_sent_at IS NULL
+      WHERE (${c.sql})
+        AND s.start_time >= ? AND s.start_time <= ? AND s.roster_sent_at IS NULL
       ORDER BY st.id, s.start_time
-    `).all(`${start}T00:00:00`, `${end}T23:59:59`);
+    `).all(...c.params, `${start}T00:00:00`, `${end}T23:59:59`);
     const byStaff = {};
     for (const s of shifts) {
       if (!byStaff[s.staff_id]) byStaff[s.staff_id] = { staff: { name: s.staff_name, email: s.staff_email }, shifts: [] };
@@ -78,8 +101,11 @@ router.post('/send-roster', async (req, res) => {
     if (Object.keys(byStaff).length === 0) {
       const anyShifts = db.prepare(`
         SELECT 1 FROM shifts s
-        WHERE s.start_time >= ? AND s.start_time <= ?
-      `).get(`${start}T00:00:00`, `${end}T23:59:59`);
+        JOIN participants p ON s.participant_id = p.id
+        JOIN staff st ON s.staff_id = st.id
+        WHERE (${c.sql})
+          AND s.start_time >= ? AND s.start_time <= ?
+      `).get(...c.params, `${start}T00:00:00`, `${end}T23:59:59`);
       return res.status(400).json({
         error: anyShifts ? 'No unsent shifts in this date range.' : 'No staff with shifts in this date range.',
         errorDetail: anyShifts ? 'All shifts have already been sent. Move or edit a shift to send again.' : ''
@@ -123,33 +149,57 @@ router.post('/send-roster', async (req, res) => {
  */
 router.get('/duplicates', (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    if (!c.orgId) {
+      return res.json({ bySameSlot: [], byShifterId: [], summary: { duplicateGroupsBySameSlot: 0, duplicateGroupsByShifterId: 0, totalDuplicateShifts: 0 } });
+    }
     const { staff_id } = req.query;
+    const tenantWhere = `WHERE (${c.sql})`;
     const baseSql = `
       SELECT s.id, s.participant_id, s.staff_id, s.start_time, s.end_time, s.shifter_shift_id, s.status,
              p.name as participant_name, st.name as staff_name
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
+      ${tenantWhere}
     `;
-    const staffFilter = staff_id ? ' WHERE s.staff_id = ?' : '';
-    const params = staff_id ? [staff_id] : [];
+    const staffFilter = staff_id ? ' AND s.staff_id = ?' : '';
+    const baseParams = [...c.params];
+    const params = staff_id ? [...baseParams, staff_id] : baseParams;
 
     // 1) Same shifter_shift_id in more than one row (imported twice)
-    const duplicateShifterIds = db.prepare(`
-      SELECT shifter_shift_id FROM shifts
-      WHERE shifter_shift_id IS NOT NULL AND TRIM(shifter_shift_id) != ''
-      GROUP BY shifter_shift_id HAVING COUNT(*) > 1
-    `).all().map((r) => r.shifter_shift_id);
-    const byShifterIdRows = duplicateShifterIds.length === 0 ? [] : db.prepare(`
+    const duplicateShifterIds = db
+      .prepare(
+        `
+      SELECT s.shifter_shift_id FROM shifts s
+      JOIN participants p ON s.participant_id = p.id
+      JOIN staff st ON s.staff_id = st.id
+      WHERE (${c.sql}) AND s.shifter_shift_id IS NOT NULL AND TRIM(s.shifter_shift_id) != ''
+      GROUP BY s.shifter_shift_id HAVING COUNT(*) > 1
+    `
+      )
+      .all(...c.params)
+      .map((r) => r.shifter_shift_id);
+    const byShifterIdRows =
+      duplicateShifterIds.length === 0
+        ? []
+        : db
+            .prepare(
+              `
       SELECT s.id, s.participant_id, s.staff_id, s.start_time, s.end_time, s.shifter_shift_id, s.status,
              p.name as participant_name, st.name as staff_name
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
-      WHERE s.shifter_shift_id IN (${duplicateShifterIds.map(() => '?').join(',')})
+      WHERE (${c.sql}) AND s.shifter_shift_id IN (${duplicateShifterIds.map(() => '?').join(',')})
       ${staff_id ? ' AND s.staff_id = ?' : ''}
       ORDER BY s.shifter_shift_id, s.start_time
-    `).all(...(staff_id ? [...duplicateShifterIds, staff_id] : duplicateShifterIds));
+    `
+            )
+            .all(
+              ...(staff_id ? [...c.params, ...duplicateShifterIds, staff_id] : [...c.params, ...duplicateShifterIds])
+            );
 
     const byShifterId = [];
     const seen = new Set();
@@ -196,6 +246,9 @@ router.get('/duplicates', (req, res) => {
 
 router.get('/:id', (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    if (!c.orgId) return res.status(404).json({ error: 'Shift not found' });
     const shift = db.prepare(`
       SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
              p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
@@ -203,8 +256,8 @@ router.get('/:id', (req, res) => {
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
-      WHERE s.id = ?
-    `).get(req.params.id);
+      WHERE s.id = ? AND (${c.sql})
+    `).get(req.params.id, ...c.params);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
     res.json(shift);
   } catch (err) {
@@ -214,6 +267,9 @@ router.get('/:id', (req, res) => {
 
 router.get('/:id/refresh-expense', async (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    if (!c.orgId) return res.status(404).json({ error: 'Shift not found' });
     const shift = db.prepare(`
       SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
              p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
@@ -221,8 +277,8 @@ router.get('/:id/refresh-expense', async (req, res) => {
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
-      WHERE s.id = ?
-    `).get(req.params.id);
+      WHERE s.id = ? AND (${c.sql})
+    `).get(req.params.id, ...c.params);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
     if (!shift.shifter_shift_id) {
       return res.json(shift);
@@ -244,8 +300,8 @@ router.get('/:id/refresh-expense', async (req, res) => {
         FROM shifts s
         JOIN participants p ON s.participant_id = p.id
         JOIN staff st ON s.staff_id = st.id
-        WHERE s.id = ?
-      `).get(req.params.id);
+        WHERE s.id = ? AND (${c.sql})
+      `).get(req.params.id, ...c.params);
       return res.json(updated);
     }
     res.json(shift);
@@ -256,6 +312,10 @@ router.get('/:id/refresh-expense', async (req, res) => {
 
 router.get('/:id/receipts', (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    if (!isShiftInRequesterTenant(req.params.id, userId)) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
     const shift = db.prepare('SELECT participant_id, shifter_shift_id FROM shifts WHERE id = ?').get(req.params.id);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
     const docCols = db.prepare("PRAGMA table_info(participant_documents)").all();
@@ -279,8 +339,20 @@ router.get('/:id/receipts', (req, res) => {
 // NO emails on create – only via "Send roster" or "Send to staff" button
 router.post('/', async (req, res) => {
   try {
-    const id = uuidv4();
+    const userId = req.session?.user?.id;
+    const orgId = getProviderOrgIdForUser(userId);
+    if (!orgId) {
+      return res.status(403).json({ error: 'No organisation on your account.' });
+    }
     const { participant_id, staff_id, start_time, end_time, notes, recurring_group_id } = req.body;
+    if (!isParticipantInRequesterTenant(participant_id, userId)) {
+      return res.status(404).json({ error: 'Participant not found' });
+    }
+    const staffRow = db.prepare('SELECT id FROM staff WHERE id = ? AND org_id = ?').get(staff_id, orgId);
+    if (!staffRow) {
+      return res.status(404).json({ error: 'Staff not found' });
+    }
+    const id = uuidv4();
     db.prepare(`
       INSERT INTO shifts (id, participant_id, staff_id, start_time, end_time, notes, status, recurring_group_id)
       VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?)
@@ -312,9 +384,27 @@ router.post('/', async (req, res) => {
 // NO emails on update/move – only via "Send roster" or "Send to staff" button
 router.put('/:id', async (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    const orgId = getProviderOrgIdForUser(userId);
+    if (!orgId) {
+      return res.status(403).json({ error: 'No organisation on your account.' });
+    }
+    if (!isShiftInRequesterTenant(req.params.id, userId)) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
     const { participant_id, staff_id, start_time, end_time, status, notes, recurring_group_id } = req.body;
     const existing = db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Shift not found' });
+
+    const nextParticipantId = participant_id ?? existing.participant_id;
+    const nextStaffId = staff_id ?? existing.staff_id;
+    if (!isParticipantInRequesterTenant(nextParticipantId, userId)) {
+      return res.status(404).json({ error: 'Participant not found' });
+    }
+    const staffRow = db.prepare('SELECT id FROM staff WHERE id = ? AND org_id = ?').get(nextStaffId, orgId);
+    if (!staffRow) {
+      return res.status(404).json({ error: 'Staff not found' });
+    }
 
     const rgId = recurring_group_id !== undefined ? recurring_group_id : existing.recurring_group_id;
 
@@ -363,6 +453,7 @@ router.put('/:id', async (req, res) => {
     } catch (e) { console.warn('[shifts] learning event error:', e.message); }
 
     scheduleMirrorShiftToNexusSupabase(req.params.id);
+    syncCaseNoteFromShift(req.params.id);
     res.json(shift);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -371,6 +462,9 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', (req, res) => {
   const id = req.params.id;
+  if (!isShiftInRequesterTenant(id, req.session?.user?.id)) {
+    return res.status(404).json({ error: 'Shift not found' });
+  }
   // Remove dependent rows so FK constraint doesn't block shift delete
   try {
     db.prepare('DELETE FROM billing_invoice_line_items WHERE source_shift_id = ?').run(id);
@@ -381,6 +475,9 @@ router.delete('/:id', (req, res) => {
   try {
     db.prepare('UPDATE progress_notes SET shift_id = NULL WHERE shift_id = ?').run(id);
   } catch (e) { /* table may not exist */ }
+  try {
+    db.prepare('DELETE FROM case_notes WHERE shift_id = ?').run(id);
+  } catch (e) { /* column may not exist on old DB */ }
   db.prepare('DELETE FROM shift_line_items WHERE shift_id = ?').run(id);
   db.prepare('DELETE FROM shifts WHERE id = ?').run(id);
   scheduleRemoveShiftFromNexusSupabase(id);
@@ -390,6 +487,9 @@ router.delete('/:id', (req, res) => {
 // Shift line items (charges)
 router.get('/:id/line-items', (req, res) => {
   try {
+    if (!isShiftInRequesterTenant(req.params.id, req.session?.user?.id)) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
     const shift = db.prepare('SELECT id FROM shifts WHERE id = ?').get(req.params.id);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
     const items = db.prepare(`
@@ -407,6 +507,9 @@ router.get('/:id/line-items', (req, res) => {
 
 router.post('/:id/line-items', (req, res) => {
   try {
+    if (!isShiftInRequesterTenant(req.params.id, req.session?.user?.id)) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
     const shift = db.prepare('SELECT id, participant_id, start_time FROM shifts WHERE id = ?').get(req.params.id);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
     const { ndis_line_item_id, quantity, unit_price, claim_type } = req.body;
@@ -458,6 +561,9 @@ router.post('/:id/line-items', (req, res) => {
 
 router.put('/:id/line-items/:lineItemId', (req, res) => {
   try {
+    if (!isShiftInRequesterTenant(req.params.id, req.session?.user?.id)) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
     const existing = db.prepare(`
       SELECT sli.* FROM shift_line_items sli
       WHERE sli.id = ? AND sli.shift_id = ?
@@ -484,6 +590,9 @@ router.put('/:id/line-items/:lineItemId', (req, res) => {
 });
 
 router.delete('/:id/line-items/:lineItemId', (req, res) => {
+  if (!isShiftInRequesterTenant(req.params.id, req.session?.user?.id)) {
+    return res.status(404).json({ error: 'Shift not found' });
+  }
   const result = db.prepare(`
     DELETE FROM shift_line_items WHERE id = ? AND shift_id = ?
   `).run(req.params.lineItemId, req.params.id);
@@ -492,13 +601,16 @@ router.delete('/:id/line-items/:lineItemId', (req, res) => {
 });
 
 router.get('/:id/ics', (req, res) => {
+  const userId = req.session?.user?.id;
+  const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+  if (!c.orgId) return res.status(404).json({ error: 'Shift not found' });
   const shift = db.prepare(`
     SELECT s.*, p.name as participant_name, st.name as staff_name
     FROM shifts s
     JOIN participants p ON s.participant_id = p.id
     JOIN staff st ON s.staff_id = st.id
-    WHERE s.id = ?
-  `).get(req.params.id);
+    WHERE s.id = ? AND (${c.sql})
+  `).get(req.params.id, ...c.params);
   if (!shift) return res.status(404).json({ error: 'Shift not found' });
   const ics = generateICS(shift, shift.participant_name, shift.staff_name);
   res.setHeader('Content-Type', 'text/calendar');
@@ -508,13 +620,16 @@ router.get('/:id/ics', (req, res) => {
 
 router.post('/:id/send-ics', async (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    if (!c.orgId) return res.status(404).json({ error: 'Shift not found' });
     const shift = db.prepare(`
       SELECT s.*, p.name as participant_name, st.name as staff_name, st.email as staff_email
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
-      WHERE s.id = ?
-    `).get(req.params.id);
+      WHERE s.id = ? AND (${c.sql})
+    `).get(req.params.id, ...c.params);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
     if (!shift.staff_email) return res.status(400).json({ error: 'Staff member has no email address' });
     if (shift.roster_sent_at) {
@@ -523,7 +638,6 @@ router.post('/:id/send-ics', async (req, res) => {
         errorDetail: 'This shift has already been sent. Move or edit the shift to send again.'
       });
     }
-    const userId = req.session?.user?.id;
     if (!isEmailConfiguredForUser(userId)) {
       return res.status(400).json({
         error: 'Connect your email in Settings to send rosters.',

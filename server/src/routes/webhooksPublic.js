@@ -28,7 +28,7 @@ router.post('/progress-app', (req, res) => {
   try {
     if (!process.env.CRM_API_KEY?.trim?.() && !process.env.CRM_API_KEY) {
       return res.status(503).json({
-        error: 'CRM_API_KEY is not configured on this server',
+        error: 'Webhooks are not configured on this server yet.',
         code: 'WEBHOOK_NOT_CONFIGURED',
       });
     }
@@ -36,7 +36,7 @@ router.post('/progress-app', (req, res) => {
       return res.status(401).json({
         error: 'Invalid or missing API key',
         code: 'UNAUTHORIZED',
-        errorDetail: 'Send header x-api-key or Authorization: Bearer with the same value as CRM_API_KEY.',
+        errorDetail: 'Send header x-api-key or Authorization: Bearer with the API key your administrator configured for Nexus.',
       });
     }
 

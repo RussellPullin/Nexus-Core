@@ -11,19 +11,21 @@ import {
   canAccessParticipant,
   requireCoordinatorOrAdmin,
   getProviderOrgIdForUser,
-  includeNullProviderParticipantsForUser,
-  getSingleDistinctUserOrgId
+  includeNullProviderParticipantsForUser
 } from '../middleware/roles.js';
-import { isSuperAdminEmail } from '../lib/superAdmin.js';
+import { shouldApplyOrgDataScopeForUser } from '../lib/superAdmin.js';
 import { recordBudgetLineItemSelection } from '../services/preferenceLearning.service.js';
 import * as llm from '../services/llm.service.js';
+import { fetchFlagsForOrg } from '../services/orgFeatures.service.js';
+import { buildParticipantsCsvColumnMapPrompt } from '../../../shared/participantsCsvColumnMapPrompt.js';
 import { extractPlanFromText } from '../services/ai/planExtractor.js';
 import { reconcilePlanExtraction } from '../services/ai/planReconciler.js';
 import { parseIntakeFormText } from '../services/intakeFormParser.service.js';
 import { initializeParticipantOnboarding, upsertIntakeFields } from '../services/onboarding.service.js';
 import { recordMapping } from '../services/csvMappingLearner.service.js';
-import { ensurePlanManagerOrg, buildOrgLookupMaps } from '../services/organisations.service.js';
+import { ensurePlanManagerOrg, buildOrgLookupMaps, ensureOrganisationExistsById } from '../services/organisations.service.js';
 import { tryPushParticipantDocument, resolveOrgIdForParticipant } from '../services/orgOnedriveSync.service.js';
+import { normalizeAppRole } from '../../../shared/appRoles.js';
 import {
   scheduleRemoveShiftFromNexusSupabase,
   scheduleMirrorShiftsForParticipantId,
@@ -865,23 +867,32 @@ function normalizeParsedAmount(raw) {
 // List all participants (scoped by assignment for support coordinators)
 router.get('/', (req, res) => {
   try {
-    const { search, include_archived } = req.query;
+    const { search, include_archived, include_org_orphans } = req.query;
     const userId = req.session?.user?.id;
-    const assignedIds = userId ? getAssignedParticipantIds(userId) : null;
-
     const dbUser = userId ? db.prepare('SELECT role, org_id, email FROM users WHERE id = ?').get(userId) : null;
-    const orgScoped = Boolean(dbUser?.org_id) && !isSuperAdminEmail(dbUser?.email);
+    if (!shouldApplyOrgDataScopeForUser(dbUser)) {
+      return res.json([]);
+    }
+    const wishOrphans =
+      (include_org_orphans === 'true' || include_org_orphans === '1') &&
+      normalizeAppRole(dbUser?.role) === 'admin';
+
+    const assignedIds = userId ? getAssignedParticipantIds(userId, { includeOrgOrphans: wishOrphans }) : null;
 
     let sql = `
       SELECT p.*, o.name as plan_manager_name
       FROM participants p
       LEFT JOIN organisations o ON p.plan_manager_id = o.id`;
     const params = [];
-    if (orgScoped) {
-      const legacyNull = includeNullProviderParticipantsForUser(dbUser);
-      sql += legacyNull
-        ? ' WHERE (p.provider_org_id = ? OR p.provider_org_id IS NULL)'
-        : ' WHERE p.provider_org_id = ?';
+    const legacyNull = includeNullProviderParticipantsForUser(dbUser);
+    if (wishOrphans) {
+      sql += ` WHERE (p.provider_org_id = ? OR p.provider_org_id IS NULL OR TRIM(COALESCE(p.provider_org_id, '')) = '')`;
+      params.push(dbUser.org_id);
+    } else if (legacyNull) {
+      sql += ' WHERE (p.provider_org_id = ? OR p.provider_org_id IS NULL)';
+      params.push(dbUser.org_id);
+    } else {
+      sql += ' WHERE p.provider_org_id = ?';
       params.push(dbUser.org_id);
     }
     sql += ' ORDER BY p.name';
@@ -1080,6 +1091,7 @@ router.post('/', requireCoordinatorOrAdmin, (req, res) => {
     const planJson = typeof plan_managed_services === 'string' ? plan_managed_services : (Array.isArray(plan_managed_services) ? JSON.stringify(plan_managed_services) : null);
     const invoiceEmailsJson = typeof invoice_emails === 'string' ? invoice_emails : (Array.isArray(invoice_emails) ? JSON.stringify(invoice_emails) : null);
     const providerOrgId = getProviderOrgIdForUser(req.session?.user?.id);
+    if (providerOrgId) ensureOrganisationExistsById(providerOrgId);
     const includesGst = invoice_includes_gst === true || invoice_includes_gst === 1 || invoice_includes_gst === '1' ? 1 : 0;
     db.prepare(`
       INSERT INTO participants (id, name, ndis_number, email, phone, address, date_of_birth, plan_manager_id, remoteness, notes, parent_guardian_phone, parent_guardian_email, diagnosis, services_required, management_type, ndia_managed_services, plan_managed_services, invoice_emails, invoice_includes_gst, provider_org_id)
@@ -1234,6 +1246,7 @@ function createParticipantFromIntakeData({
   invoiceEmails = null,
   providerOrgId = null
 }) {
+  if (providerOrgId) ensureOrganisationExistsById(providerOrgId);
   const participantId = uuidv4();
   const managementType = normalizeFundingManagement(intake?.funding_management_type);
   const diagnosis = [intake?.medical_conditions, intake?.mental_health_summary].filter(Boolean).join('; ') || null;
@@ -1660,14 +1673,102 @@ function parseParticipantsCsv(buffer) {
   return { rows, headers: headerLower, columnMapping };
 }
 
-/** LLM-assisted CSV parse: ask Ollama to map non-standard headers to our schema, then parse. Falls back to deterministic parse if LLM unavailable. */
-async function parseParticipantsCsvWithLlm(buffer) {
+const PARTICIPANT_CSV_LLM_FIELD_SET = new Set([
+  'name',
+  'first_name',
+  'last_name',
+  'middle_name',
+  'preferred_name',
+  'ndis_number',
+  'email',
+  'phone',
+  'address',
+  'date_of_birth',
+  'management_type',
+  'plan_manager_name',
+  'plan_manager_email',
+  'invoice_email',
+  'additional_invoice_emails',
+  'plan_start_date',
+  'plan_end_date',
+  'diagnosis',
+  'medical_conditions',
+  'medications',
+  'allergies',
+  'goals',
+  'support_category',
+  'notes',
+  'primary_contact_name',
+  'primary_contact_email',
+  'primary_contact_phone',
+  'parent_guardian_phone',
+  'parent_guardian_email',
+  'emergency_contact_name',
+  'emergency_contact_phone',
+  'emergency_contact_email'
+]);
+
+/** @param {unknown} obj */
+function sanitizeClientCsvHeaderMapping(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v == null || v === 'null') continue;
+    const field = String(v).trim();
+    if (!field || !PARTICIPANT_CSV_LLM_FIELD_SET.has(field)) continue;
+    const header = String(k).trim().replace(/\u00A0/g, ' ');
+    if (header) out[header] = field;
+  }
+  return out;
+}
+
+function extractCsvHeadersFromBuffer(buffer) {
+  const text = buffer.toString('utf-8').replace(/^\uFEFF/, '');
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) return { headers: [], error: 'Empty file' };
+  const delimiter = lines[0].includes(';') ? ';' : lines[0].includes('\t') ? '\t' : ',';
+  const parseLine = (line) => {
+    const result = [];
+    let cell = '';
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] === '"') {
+        i++;
+        while (i < line.length) {
+          if (line[i] === '"') {
+            if (line[i + 1] === '"') {
+              cell += '"';
+              i += 2;
+            } else {
+              i++;
+              break;
+            }
+          } else {
+            cell += line[i];
+            i++;
+          }
+        }
+      } else if (line[i] === delimiter) {
+        result.push(cell.trim());
+        cell = '';
+        i++;
+      } else {
+        cell += line[i];
+        i++;
+      }
+    }
+    result.push(cell.trim());
+    return result;
+  };
+  const headers = parseLine(lines[0]).map((h) => String(h || '').trim().replace(/\u00A0/g, ' '));
+  return { headers };
+}
+
+/** LLM-assisted CSV parse: ask Ollama (server or precomputed client mapping) to map headers, then parse. Falls back to deterministic parse if LLM unavailable. */
+async function parseParticipantsCsvWithLlm(buffer, options = {}) {
+  const { clientHeaderMapping } = options;
   const baseResult = parseParticipantsCsv(buffer);
   if (baseResult.error && baseResult.rows.length === 0) return baseResult;
-  if (!(await llm.isAvailable())) {
-    console.warn('[participants] Ollama not available, using rule-based CSV mapping');
-    return { ...baseResult, llmUsed: false };
-  }
 
   const text = buffer.toString('utf-8').replace(/^\uFEFF/, '');
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
@@ -1708,12 +1809,22 @@ async function parseParticipantsCsvWithLlm(buffer) {
     return result;
   };
   const headers = parseLine(lines[0]).map((h) => String(h || '').trim().replace(/\u00A0/g, ' '));
-  const prompt = `You are mapping CSV column headers to participant intake fields. Given these headers: ${JSON.stringify(headers)}
+  const prompt = buildParticipantsCsvColumnMapPrompt(headers);
 
-Return a JSON object mapping each header (exact string) to one of: name, first_name, last_name, middle_name, preferred_name, ndis_number, email, phone, address, date_of_birth, management_type, plan_manager_name, plan_manager_email, invoice_email, additional_invoice_emails, plan_start_date, plan_end_date, diagnosis, medical_conditions, medications, allergies, goals, support_category, notes, primary_contact_name, primary_contact_email, primary_contact_phone, parent_guardian_phone, parent_guardian_email, emergency_contact_name, emergency_contact_phone, emergency_contact_email. Use null for headers that don't map. IMPORTANT: Map "Family Name", "Surname", "Last Name" to last_name. Example: {"Client Name":"name","First Name":"first_name","Family Name":"last_name","NDIS #":"ndis_number","Guardian":"primary_contact_name"}`;
+  const useClient =
+    clientHeaderMapping && typeof clientHeaderMapping === 'object' && Object.keys(clientHeaderMapping).length > 0;
+  if (!useClient && !(await llm.isAvailable())) {
+    console.warn('[participants] Ollama not available, using rule-based CSV mapping');
+    return { ...baseResult, llmUsed: false };
+  }
 
   try {
-    const mapping = await llm.completeJson(prompt, { maxTokens: 500 });
+    let mapping = null;
+    if (useClient) {
+      mapping = clientHeaderMapping;
+    } else {
+      mapping = await llm.completeJson(prompt, { maxTokens: 500 });
+    }
     if (!mapping || typeof mapping !== 'object') return { ...baseResult, llmUsed: false };
 
     const headerToField = {};
@@ -1852,6 +1963,59 @@ Return a JSON object mapping each header (exact string) to one of: name, first_n
   }
 }
 
+function normalizedNdisKey(raw) {
+  if (raw == null) return '';
+  return String(raw).replace(/[\s\-_]/g, '').trim();
+}
+
+/** Match CSV NDIS values to DB rows even when spacing or dashes differ. */
+function findExistingParticipantByNdis(ndisRaw) {
+  const trimmed = ndisRaw != null ? String(ndisRaw).trim() : '';
+  if (!trimmed) return null;
+  const norm = normalizedNdisKey(trimmed);
+  if (!norm) return null;
+  const row = db
+    .prepare(
+      `SELECT id, provider_org_id FROM participants
+       WHERE ndis_number = ?
+          OR replace(replace(replace(trim(ndis_number), ' ', ''), '-', ''), '_', '') = ?`
+    )
+    .get(trimmed, norm);
+  return row || null;
+}
+
+// First-row headers only (for browser → local Ollama column mapping when org enables ai_staff_local_ollama).
+router.post('/peek-csv-headers', memoryUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ error: 'No file uploaded. Upload a CSV file.' });
+    }
+    const ext = (req.file.originalname || '').toLowerCase();
+    if (!ext.endsWith('.csv') && !ext.endsWith('.txt')) {
+      return res.status(400).json({ error: 'Upload a CSV or TXT file.' });
+    }
+    const out = extractCsvHeadersFromBuffer(req.file.buffer);
+    res.json(out);
+  } catch (err) {
+    console.error('[participants] peek-csv-headers', err);
+    res.status(500).json({ error: err.message || 'Failed to read headers' });
+  }
+});
+
+async function parseLlmColumnMappingFromMultipart(req) {
+  const raw = (req.body?.llm_column_mapping_json || '').trim();
+  if (!raw) return null;
+  const { flags } = await fetchFlagsForOrg(req.session?.user?.org_id);
+  if (!flags.ai_staff_local_ollama) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const sanitized = sanitizeClientCsvHeaderMapping(parsed);
+    return Object.keys(sanitized).length ? sanitized : null;
+  } catch {
+    return null;
+  }
+}
+
 // Parse participants CSV (preview only). useLlm in form = try AI-assisted column mapping (Ollama).
 router.post('/parse-csv', memoryUpload.single('file'), async (req, res) => {
   try {
@@ -1863,7 +2027,10 @@ router.post('/parse-csv', memoryUpload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'Upload a CSV or TXT file.' });
     }
     const useLlm = req.body?.useLlm === 'true' || req.body?.useLlm === true;
-    const result = useLlm ? await parseParticipantsCsvWithLlm(req.file.buffer) : { ...parseParticipantsCsv(req.file.buffer), llmUsed: false };
+    const clientMap = useLlm ? await parseLlmColumnMappingFromMultipart(req) : null;
+    const result = useLlm
+      ? await parseParticipantsCsvWithLlm(req.file.buffer, { clientHeaderMapping: clientMap || undefined })
+      : { ...parseParticipantsCsv(req.file.buffer), llmUsed: false };
     if (result.error && result.rows.length === 0) {
       return res.status(400).json({ error: result.error });
     }
@@ -1885,27 +2052,33 @@ router.post('/import-csv', requireCoordinatorOrAdmin, memoryUpload.single('file'
       return res.status(400).json({ error: 'Upload a CSV or TXT file.' });
     }
     const useLlm = req.body?.useLlm === 'true' || req.body?.useLlm === true;
-    const result = useLlm ? await parseParticipantsCsvWithLlm(req.file.buffer) : parseParticipantsCsv(req.file.buffer);
+    const clientMap = useLlm ? await parseLlmColumnMappingFromMultipart(req) : null;
+    const result = useLlm
+      ? await parseParticipantsCsvWithLlm(req.file.buffer, { clientHeaderMapping: clientMap || undefined })
+      : parseParticipantsCsv(req.file.buffer);
     const { rows, error: parseError } = result;
     if (rows.length === 0) {
       return res.status(400).json({ error: parseError || 'No valid participant rows found. Ensure the CSV has a header row and a name column.' });
     }
 
     const providerOrgId = getProviderOrgIdForUser(req.session?.user?.id);
+    if (providerOrgId) ensureOrganisationExistsById(providerOrgId);
     const { orgByName, orgByEmail } = buildOrgLookupMaps(providerOrgId);
+    const reassignDuplicatesToMyOrg =
+      req.body?.reassignDuplicatesToMyOrg === 'true' || req.body?.reassignDuplicatesToMyOrg === true;
+    const importerIsAdmin = normalizeAppRole(req.session?.user?.role) === 'admin';
 
     const created = [];
     const skipped = [];
     for (const row of rows) {
-      const existing = row.ndis_number
-        ? db.prepare('SELECT id, provider_org_id FROM participants WHERE ndis_number = ?').get(row.ndis_number)
-        : null;
+      const existing = row.ndis_number ? findExistingParticipantByNdis(row.ndis_number) : null;
       if (existing) {
         const myOrg = getProviderOrgIdForUser(req.session?.user?.id);
-        const singleOrg = getSingleDistinctUserOrgId();
         const legacyUnscoped =
           existing.provider_org_id == null || String(existing.provider_org_id).trim() === '';
-        if (myOrg && singleOrg === myOrg && legacyUnscoped) {
+        // Attach NULL-org rows to the importer's org on re-import. (Single-tenant-only linking used to
+        // leave orphans invisible to org-scoped admins when multiple user org_ids exist in the DB.)
+        if (myOrg && legacyUnscoped) {
           db.prepare(
             `UPDATE participants SET provider_org_id = ?, updated_at = datetime('now')
              WHERE id = ? AND (provider_org_id IS NULL OR TRIM(COALESCE(provider_org_id, '')) = '')`
@@ -1914,6 +2087,23 @@ router.post('/import-csv', requireCoordinatorOrAdmin, memoryUpload.single('file'
           skipped.push({
             name: row.name,
             reason: 'Linked existing participant to your organisation (NDIS was already on file)'
+          });
+          continue;
+        }
+        const existingOtherOrg =
+          myOrg &&
+          existing.provider_org_id != null &&
+          String(existing.provider_org_id).trim() !== '' &&
+          String(existing.provider_org_id) !== String(myOrg);
+        if (existingOtherOrg && reassignDuplicatesToMyOrg && importerIsAdmin) {
+          db.prepare(`UPDATE participants SET provider_org_id = ?, updated_at = datetime('now') WHERE id = ?`).run(
+            myOrg,
+            existing.id
+          );
+          assignCreatorIfSupportCoordinator(req.session?.user?.id, existing.id);
+          skipped.push({
+            name: row.name,
+            reason: 'Moved existing participant to your organisation (admin reclaim)'
           });
           continue;
         }
@@ -1926,7 +2116,12 @@ router.post('/import-csv', requireCoordinatorOrAdmin, memoryUpload.single('file'
         ) {
           assignCreatorIfSupportCoordinator(req.session?.user?.id, existing.id);
         }
-        skipped.push({ name: row.name, reason: 'NDIS number already exists' });
+        skipped.push({
+          name: row.name,
+          reason: existingOtherOrg
+            ? 'NDIS number already exists under another organisation (enable admin "Move duplicates into my organisation" on import if these should be yours)'
+            : 'NDIS number already exists'
+        });
         continue;
       }
 
