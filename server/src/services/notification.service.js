@@ -1,5 +1,10 @@
 import { db } from '../db/index.js';
-import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
+import {
+  getEmailConfigForUser,
+  getRelayConfigFromEnv,
+  relayHostLooksLikeDocPlaceholder,
+  relayUrlPointsToThisNexusApi
+} from '../lib/emailSendConfig.js';
 import { getValidAccessToken } from './emailOAuthTokens.service.js';
 
 /** True when user has OAuth email connected and server has relay URL */
@@ -35,10 +40,31 @@ function normalizeAttachmentsForRelay(attachments) {
  * @param {string} userId
  */
 export async function sendEmailViaRelay(userId, to, subject, text, from, attachments) {
+  const rawRelay = process.env.AZURE_EMAIL_FUNCTION_URL || '';
+  if (relayHostLooksLikeDocPlaceholder(rawRelay)) {
+    const e = new Error(
+      'Outgoing email is still using a placeholder address. Ask your administrator to set the real email relay URL on the server.'
+    );
+    e.code = 'EMAIL_RELAY_PLACEHOLDER_URL';
+    throw e;
+  }
   const relay = getRelayConfigFromEnv();
   if (!relay?.url) {
     const e = new Error('Email sending is not set up on the server yet. Ask your administrator.');
     e.code = 'EMAIL_RELAY_NOT_CONFIGURED';
+    throw e;
+  }
+  if (relayUrlPointsToThisNexusApi(relay.url)) {
+    let host = '';
+    try {
+      host = new URL(relay.url).hostname;
+    } catch {
+      /* ignore */
+    }
+    const e = new Error(
+      `The email relay URL points at this Nexus server (${host}) instead of your dedicated mail service. Ask your administrator to fix the relay URL.`
+    );
+    e.code = 'EMAIL_RELAY_SELF_URL';
     throw e;
   }
   const cfg = getEmailConfigForUser(userId);
@@ -58,6 +84,28 @@ export async function sendEmailViaRelay(userId, to, subject, text, from, attachm
   }
   const headers = { 'Content-Type': 'application/json' };
   if (relay.apiKey) headers['x-api-key'] = relay.apiKey;
+  // #region agent log
+  try {
+    const relayUrl = new URL(relay.url);
+    fetch('http://127.0.0.1:7395/ingest/9396d2bf-ffd7-4cdc-a66d-39fbe0a7e677', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fa9c18' },
+      body: JSON.stringify({
+        sessionId: 'fa9c18',
+        location: 'notification.service.js:before-relay-fetch',
+        message: 'relay POST about to run',
+        data: {
+          hypothesisId: 'A,B,D,E',
+          relayHost: relayUrl.host,
+          relayPathname: relayUrl.pathname,
+          sendsXApiKey: Boolean(headers['x-api-key']),
+          xApiKeyLen: headers['x-api-key'] ? String(headers['x-api-key']).length : 0
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {});
+  } catch (_) {}
+  // #endregion
   const body = {
     provider: cfg.provider,
     accessToken,
@@ -73,19 +121,100 @@ export async function sendEmailViaRelay(userId, to, subject, text, from, attachm
     res = await fetch(relay.url, { method: 'POST', headers, body: JSON.stringify(body) });
     textRes = await res.text();
   } catch (fetchErr) {
-    throw new Error(`Could not reach email service: ${fetchErr?.message || fetchErr}`);
+    const fm = fetchErr?.message || String(fetchErr);
+    if (/Failed to parse URL/i.test(fm)) {
+      throw new Error(
+        'The email relay URL on the server is not valid. Ask your administrator to correct it.'
+      );
+    }
+    throw new Error(`Could not reach email service: ${fm}`);
   }
   if (!res.ok) {
     let errMsg = 'Email could not be sent';
+    let parsedBody = null;
     try {
-      const err = JSON.parse(textRes);
-      errMsg = err?.error || errMsg;
+      parsedBody = JSON.parse(textRes);
+      errMsg = parsedBody?.error || errMsg;
     } catch {
       if (textRes) errMsg = textRes.slice(0, 500);
     }
-    if (res.status === 401) errMsg = 'Email service security check failed.';
+    if (res.status === 401) {
+      // #region agent log
+      fetch('http://127.0.0.1:7395/ingest/9396d2bf-ffd7-4cdc-a66d-39fbe0a7e677', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'fa9c18' },
+        body: JSON.stringify({
+          sessionId: 'fa9c18',
+          location: 'notification.service.js:relay-401',
+          message: 'relay returned 401',
+          data: {
+            hypothesisId: 'A,C',
+            parsedError: parsedBody?.error != null ? String(parsedBody.error).slice(0, 200) : '',
+            bodySnippet: (textRes || '').slice(0, 400)
+          },
+          timestamp: Date.now()
+        })
+      }).catch(() => {});
+      // #endregion
+      console.warn(
+        '[email-relay] HTTP 401 from relay',
+        relay.url,
+        'x-api-key sent:',
+        Boolean(relay.apiKey),
+        'key length:',
+        relay.apiKey ? relay.apiKey.length : 0,
+        'response snippet:',
+        (textRes || '').slice(0, 120)
+      );
+      console.warn(
+        'AGENT_DEBUG_RELAY_401',
+        JSON.stringify({
+          relayHost: (() => {
+            try {
+              return new URL(relay.url).host;
+            } catch {
+              return '';
+            }
+          })(),
+          sendsXApiKey: Boolean(relay.apiKey),
+          xApiKeyLen: relay.apiKey ? relay.apiKey.length : 0,
+          parsedError: parsedBody?.error != null ? String(parsedBody.error).slice(0, 200) : null,
+          bodyStart: (textRes || '').slice(0, 200).replace(/\s+/g, ' ')
+        })
+      );
+      const fromRelay =
+        parsedBody?.error != null
+          ? String(parsedBody.error).trim()
+          : (textRes || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+      const lowerRelay = fromRelay.toLowerCase();
+      const looksLikeFunctionApiKeyReject = /invalid or missing api key/i.test(fromRelay);
+      const looksLikePlatformAuthWall =
+        /\bnot authenticated\b/.test(lowerRelay) ||
+        (lowerRelay.includes('unauthorized') && !looksLikeFunctionApiKeyReject);
+
+      if (looksLikeFunctionApiKeyReject || (!looksLikePlatformAuthWall && !fromRelay)) {
+        errMsg = [
+          parsedBody?.error ? String(parsedBody.error).trim() : 'Invalid or missing API key',
+          'The mail service and Nexus server keys may not match. Ask your administrator to check the relay configuration.',
+        ].join(' ');
+      } else if (looksLikePlatformAuthWall) {
+        const lead = fromRelay
+          ? `${fromRelay.replace(/\.\s*$/, '')}.`
+          : 'The email service rejected the request before mail could be sent.';
+        errMsg = [
+          lead,
+          'Your administrator may need to allow the Nexus server to reach the mail relay, or fix the relay URL.',
+        ].join(' ');
+      } else {
+        errMsg = [
+          fromRelay || 'Email could not be sent through the relay.',
+          'Ask your administrator to check the mail relay URL and authentication settings.',
+        ].join(' ');
+      }
+    }
     const e = new Error(errMsg);
     e.statusCode = res.status;
+    e.code = res.status === 401 ? 'EMAIL_RELAY_AUTH_FAILED' : undefined;
     throw e;
   }
 }

@@ -3,38 +3,41 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
-import { isSuperAdminEmail } from '../lib/superAdmin.js';
-import { isTenantAnchorRow } from '../services/organisations.service.js';
+import { tenantParticipantClause } from '../lib/orgScopeSql.js';
 
 const router = Router();
 router.use(requireAuth);
 
-function requesterScope(req) {
-  const u = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(req.session?.user?.id);
-  return { orgId: u?.org_id || null, superAdmin: isSuperAdminEmail(u?.email) };
+function requesterOrgId(req) {
+  return db.prepare('SELECT org_id FROM users WHERE id = ?').get(req.session?.user?.id)?.org_id || null;
 }
 
-// Standalone contacts - must be before /:id
+/** SQL fragment + params for participant subqueries (matches /participants list tenant rules). */
+function participantOrgScopeClause(req, tableAlias = 'p') {
+  const c = tenantParticipantClause(req.session?.user?.id, tableAlias);
+  if (!c.orgId) return { sql: ' AND 1=0', params: [] };
+  return { sql: ` AND (${c.sql})`, params: c.params };
+}
+
 router.get('/contacts/all', (req, res) => {
   try {
-    const scope = requesterScope(req);
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.json([]);
     const { search } = req.query;
-    const dirOrgFilter =
-      '(o.id IS NULL OR o.owner_org_id IS NULL OR o.id != o.owner_org_id)';
-    let contacts = db.prepare(`
+    let contacts = db
+      .prepare(
+        `
       SELECT c.*, o.name as org_name
       FROM contacts c
       LEFT JOIN organisations o ON c.organisation_id = o.id
-      ${
-        scope.orgId && !scope.superAdmin
-          ? `WHERE o.owner_org_id = ? AND ${dirOrgFilter}`
-          : `WHERE ${dirOrgFilter}`
-      }
+      WHERE o.owner_org_id = ?
       ORDER BY c.name
-    `).all(...(scope.orgId && !scope.superAdmin ? [scope.orgId] : []));
+    `
+      )
+      .all(orgId);
     if (search) {
       const s = search.toLowerCase();
-      contacts = contacts.filter(c => c.name && c.name.toLowerCase().includes(s));
+      contacts = contacts.filter((c) => c.name && c.name.toLowerCase().includes(s));
     }
     res.json(contacts);
   } catch (err) {
@@ -42,47 +45,49 @@ router.get('/contacts/all', (req, res) => {
   }
 });
 
-// List organisations
 router.get('/', (req, res) => {
   try {
-    const scope = requesterScope(req);
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.json([]);
+    const pc = participantOrgScopeClause(req, 'p');
     const { search, type } = req.query;
-    const dirOnly =
-      '(o.owner_org_id IS NULL OR o.id != o.owner_org_id)';
-    let orgs = db.prepare(`
+    const listParams = [...pc.params, orgId];
+    let orgs = db
+      .prepare(
+        `
       SELECT o.*, 
         (SELECT COUNT(*) FROM contacts c WHERE c.organisation_id = o.id) as contact_count,
-        (SELECT COUNT(*) FROM participants p WHERE p.plan_manager_id = o.id) as participant_count
+        (SELECT COUNT(*) FROM participants p WHERE p.plan_manager_id = o.id${pc.sql}) as participant_count
       FROM organisations o
-      ${
-        scope.orgId && !scope.superAdmin
-          ? `WHERE o.owner_org_id = ? AND ${dirOnly}`
-          : `WHERE ${dirOnly}`
-      }
+      WHERE o.owner_org_id = ?
       ORDER BY o.name
-    `).all(...(scope.orgId && !scope.superAdmin ? [scope.orgId] : []));
+    `
+      )
+      .all(...listParams);
 
     if (search) {
       const s = search.toLowerCase();
-      orgs = orgs.filter(o => 
-        (o.name && o.name.toLowerCase().includes(s)) ||
-        (o.abn && o.abn.includes(search))
+      orgs = orgs.filter(
+        (o) => (o.name && o.name.toLowerCase().includes(s)) || (o.abn && o.abn.includes(search))
       );
     }
     if (type) {
       if (type === 'plan_manager') {
-        const planManagerIds = new Set(
-          db.prepare('SELECT DISTINCT plan_manager_id FROM participants WHERE plan_manager_id IS NOT NULL').all()
-            .map(r => r.plan_manager_id)
-        );
-        orgs = orgs.filter(o => {
+        const pmPc = participantOrgScopeClause(req, 'participants');
+        const planManagerRows = db
+          .prepare(
+            `SELECT DISTINCT plan_manager_id FROM participants WHERE plan_manager_id IS NOT NULL${pmPc.sql}`
+          )
+          .all(...pmPc.params);
+        const planManagerIds = new Set(planManagerRows.map((r) => r.plan_manager_id));
+        orgs = orgs.filter((o) => {
           const t = (o.type || '').toLowerCase();
           const isPlanManagerType = t.includes('plan') && t.includes('manager');
           const isReferencedAsPlanManager = planManagerIds.has(o.id);
           return isPlanManagerType || isReferencedAsPlanManager;
         });
       } else {
-        orgs = orgs.filter(o => o.type === type);
+        orgs = orgs.filter((o) => o.type === type);
       }
     }
     res.json(orgs);
@@ -91,50 +96,62 @@ router.get('/', (req, res) => {
   }
 });
 
-// Get single organisation with contacts
 router.get('/:id', (req, res) => {
   try {
-    const scope = requesterScope(req);
-    const org = scope.orgId && !scope.superAdmin
-      ? db.prepare('SELECT * FROM organisations WHERE id = ? AND owner_org_id = ?').get(req.params.id, scope.orgId)
-      : db.prepare('SELECT * FROM organisations WHERE id = ?').get(req.params.id);
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.status(404).json({ error: 'Organisation not found' });
+    const org = db
+      .prepare('SELECT * FROM organisations WHERE id = ? AND owner_org_id = ?')
+      .get(req.params.id, orgId);
     if (!org) return res.status(404).json({ error: 'Organisation not found' });
     if (!scope.superAdmin && isTenantAnchorRow(org)) {
       return res.status(404).json({ error: 'Organisation not found' });
     }
     const contacts = db.prepare('SELECT * FROM contacts WHERE organisation_id = ?').all(req.params.id);
-    const participants = db.prepare('SELECT id, name, ndis_number FROM participants WHERE plan_manager_id = ?').all(req.params.id);
+    const pc = participantOrgScopeClause(req, 'p');
+    const participants = db
+      .prepare(`SELECT id, name, ndis_number FROM participants p WHERE p.plan_manager_id = ?${pc.sql}`)
+      .all(req.params.id, ...pc.params);
     res.json({ ...org, contacts, participants });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Create organisation (admin/delegate only)
 router.post('/', requireAdminOrDelegate, (req, res) => {
   try {
-    const scope = requesterScope(req);
-    const ownerOrgId = scope.superAdmin ? (req.body?.owner_org_id || scope.orgId || null) : scope.orgId;
+    const ownerOrgId = requesterOrgId(req);
     if (!ownerOrgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
     const id = uuidv4();
     const { name, type, abn, ndis_reg_number, email, phone, address, website } = req.body;
     db.prepare(`
       INSERT INTO organisations (id, owner_org_id, name, type, abn, ndis_reg_number, email, phone, address, website)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, ownerOrgId, name || '', type || null, abn || null, ndis_reg_number || null, email || null, phone || null, address || null, website || null);
+    `).run(
+      id,
+      ownerOrgId,
+      name || '',
+      type || null,
+      abn || null,
+      ndis_reg_number || null,
+      email || null,
+      phone || null,
+      address || null,
+      website || null
+    );
     res.status(201).json({ id, ...req.body });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Update organisation (admin/delegate only)
 router.put('/:id', requireAdminOrDelegate, (req, res) => {
   try {
-    const scope = requesterScope(req);
-    const existing = scope.orgId && !scope.superAdmin
-      ? db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ? AND owner_org_id = ?').get(req.params.id, scope.orgId)
-      : db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ?').get(req.params.id);
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.status(404).json({ error: 'Organisation not found' });
+    const existing = db
+      .prepare('SELECT id FROM organisations WHERE id = ? AND owner_org_id = ?')
+      .get(req.params.id, orgId);
     if (!existing) return res.status(404).json({ error: 'Organisation not found' });
     if (isTenantAnchorRow(existing)) {
       return res.status(400).json({
@@ -155,23 +172,16 @@ router.put('/:id', requireAdminOrDelegate, (req, res) => {
   }
 });
 
-// Delete organisation (admin/delegate only)
 router.delete('/:id', requireAdminOrDelegate, (req, res) => {
   try {
-    const scope = requesterScope(req);
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.status(404).json({ error: 'Organisation not found' });
     const id = req.params.id;
-    const existing = scope.orgId && !scope.superAdmin
-      ? db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ? AND owner_org_id = ?').get(id, scope.orgId)
-      : db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ?').get(id);
+    const existing = db
+      .prepare('SELECT id FROM organisations WHERE id = ? AND owner_org_id = ?')
+      .get(id, orgId);
     if (!existing) return res.status(404).json({ error: 'Organisation not found' });
-    if (isTenantAnchorRow(existing)) {
-      return res.status(400).json({
-        error: 'Cannot delete your Nexus organisation record from Directory. It is required for your account.',
-      });
-    }
-    // Clear plan_manager_id for participants before deleting (avoids foreign key violation)
     db.prepare('UPDATE participants SET plan_manager_id = NULL WHERE plan_manager_id = ?').run(id);
-    // Delete contacts linked to this organisation
     db.prepare('DELETE FROM contacts WHERE organisation_id = ?').run(id);
     db.prepare('DELETE FROM organisations WHERE id = ?').run(id);
     res.status(204).send();
@@ -180,12 +190,14 @@ router.delete('/:id', requireAdminOrDelegate, (req, res) => {
   }
 });
 
-// Contacts (organisation-scoped)
+function orgRowForContacts(req, id) {
+  const orgId = requesterOrgId(req);
+  if (!orgId) return null;
+  return db.prepare('SELECT id FROM organisations WHERE id = ? AND owner_org_id = ?').get(id, orgId);
+}
+
 router.get('/:id/contacts', (req, res) => {
-  const scope = requesterScope(req);
-  const org = scope.orgId && !scope.superAdmin
-    ? db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ? AND owner_org_id = ?').get(req.params.id, scope.orgId)
-    : db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ?').get(req.params.id);
+  const org = orgRowForContacts(req, req.params.id);
   if (!org) return res.status(404).json({ error: 'Organisation not found' });
   if (!scope.superAdmin && isTenantAnchorRow(org)) return res.status(404).json({ error: 'Organisation not found' });
   const contacts = db.prepare('SELECT * FROM contacts WHERE organisation_id = ?').all(req.params.id);
@@ -194,10 +206,7 @@ router.get('/:id/contacts', (req, res) => {
 
 router.post('/:id/contacts', requireAdminOrDelegate, (req, res) => {
   try {
-    const scope = requesterScope(req);
-    const org = scope.orgId && !scope.superAdmin
-      ? db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ? AND owner_org_id = ?').get(req.params.id, scope.orgId)
-      : db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ?').get(req.params.id);
+    const org = orgRowForContacts(req, req.params.id);
     if (!org) return res.status(404).json({ error: 'Organisation not found' });
     if (isTenantAnchorRow(org)) {
       return res.status(400).json({
@@ -217,10 +226,7 @@ router.post('/:id/contacts', requireAdminOrDelegate, (req, res) => {
 });
 
 router.put('/:id/contacts/:contactId', requireAdminOrDelegate, (req, res) => {
-  const scope = requesterScope(req);
-  const org = scope.orgId && !scope.superAdmin
-    ? db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ? AND owner_org_id = ?').get(req.params.id, scope.orgId)
-    : db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ?').get(req.params.id);
+  const org = orgRowForContacts(req, req.params.id);
   if (!org) return res.status(404).json({ error: 'Organisation not found' });
   if (isTenantAnchorRow(org)) {
     return res.status(400).json({
@@ -236,10 +242,7 @@ router.put('/:id/contacts/:contactId', requireAdminOrDelegate, (req, res) => {
 });
 
 router.delete('/:id/contacts/:contactId', requireAdminOrDelegate, (req, res) => {
-  const scope = requesterScope(req);
-  const org = scope.orgId && !scope.superAdmin
-    ? db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ? AND owner_org_id = ?').get(req.params.id, scope.orgId)
-    : db.prepare('SELECT id, owner_org_id FROM organisations WHERE id = ?').get(req.params.id);
+  const org = orgRowForContacts(req, req.params.id);
   if (!org) return res.status(404).json({ error: 'Organisation not found' });
   if (isTenantAnchorRow(org)) {
     return res.status(400).json({

@@ -16,6 +16,7 @@ import {
 import { recordEvent } from './learningEvent.service.js';
 import { updateAggregatesForShift } from './featureStore.service.js';
 import { scheduleMirrorShiftToNexusSupabase } from './nexusPublicShiftsSync.service.js';
+import { syncCaseNoteFromShift } from './shiftCaseNoteSync.service.js';
 import { populateShiftLineItems } from './shiftLineItems.service.js';
 
 function normNameShifts(n) {
@@ -101,8 +102,8 @@ export function processShifts(shiftsArray, options = {}) {
     const mood = String(s.mood ?? '').trim() || null;
     const sessionDetails = String(s.sessionDetails ?? s.session_details ?? '').trim() || null;
 
-    const participant = clientName ? resolveParticipantByName(clientName) : null;
-    const staff = staffName ? resolveStaffByName(staffName) : null;
+    const participant = clientName ? resolveParticipantByName(clientName, null, orgId || null) : null;
+    const staff = staffName ? resolveStaffByName(staffName, null, orgId || null) : null;
 
     if (!participant && clientName) {
       logWarn('Client not found in Nexus - add participant with matching name', { clientName });
@@ -232,6 +233,15 @@ export function processShifts(shiftsArray, options = {}) {
         } catch (le) { console.warn('[webhookProcessor] learning event error:', le.message); }
 
         scheduleMirrorShiftToNexusSupabase(resolvedShiftId);
+        syncCaseNoteFromShift(resolvedShiftId);
+
+        // If this shift was previously stored as unmatched (app_shifts), remove it now that it is on the participant file.
+        try {
+          db.prepare('DELETE FROM app_shifts WHERE shift_id = ?').run(shiftId);
+        } catch (e) {
+          logWarn('Could not remove app_shifts row after match', { shiftId, message: e.message });
+        }
+
         matched++;
       } catch (err) {
         logError('matched shift error:', err);

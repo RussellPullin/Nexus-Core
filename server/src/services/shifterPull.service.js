@@ -14,6 +14,13 @@ const ORG_COLUMN_CANDIDATES = [
   'profile_id',
 ];
 const PAGE_SIZE = 1000;
+const LOOKUP_CHUNK = 150;
+
+function isUuidString(s) {
+  return (
+    typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim())
+  );
+}
 
 function pickString(row, keys) {
   for (const key of keys) {
@@ -81,6 +88,9 @@ function mapTravelKm(row) {
     'mileage_km',
     'mileage',
     'total_km',
+    'travel_distance',
+    'kms_travelled',
+    'kms_traveled',
   ]);
   if (direct != null) return direct;
 
@@ -99,10 +109,14 @@ function mapTravelTimeMinutes(row) {
     'travel_time_minutes',
     'travelTimeMinutes',
     'travel_minutes',
+    'travel_mins',
     'travel_duration_min',
     'travel_duration_minutes',
     'travel_duration',
     'travel_time',
+    'provider_travel_minutes',
+    'provider_travel_mins',
+    'travel_time_mins',
   ]);
   if (direct != null) return direct;
 
@@ -116,17 +130,178 @@ function mapTravelTimeMinutes(row) {
   return null;
 }
 
-function mapShifterRowToWebhookShift(row) {
+function profileLabelFromRow(p) {
+  if (!p || typeof p !== 'object') return '';
+  const fromName = pickString(p, ['display_name', 'full_name', 'name', 'preferred_name']);
+  if (fromName) return fromName;
+  return pickString(p, ['email']);
+}
+
+/**
+ * Shifter Schedule / Progress stores shifts with worker_id → profiles and client_id → clients.
+ * Raw select('*') has no staff_name / client_name; resolve labels for Nexus matching.
+ */
+async function fetchProfileLabelsByIds(shifterAdmin, ids, logWarn) {
+  const map = new Map();
+  const unique = [...new Set((ids || []).filter((id) => isUuidString(String(id))))];
+  if (unique.length === 0 || !shifterAdmin) return map;
+
+  for (let i = 0; i < unique.length; i += LOOKUP_CHUNK) {
+    const chunk = unique.slice(i, i + LOOKUP_CHUNK);
+    const { data, error } = await shifterAdmin.from('profiles').select('id, display_name, email').in('id', chunk);
+    if (error) {
+      if (logWarn) logWarn('Shifter profiles lookup failed (staff names)', { message: error.message });
+      break;
+    }
+    for (const p of data || []) {
+      const id = p?.id != null ? String(p.id).trim() : '';
+      const label = profileLabelFromRow(p);
+      if (id && label) map.set(id, label);
+    }
+  }
+  return map;
+}
+
+async function fetchClientLabelsByIds(shifterAdmin, ids, logWarn) {
+  const map = new Map();
+  const unique = [...new Set((ids || []).filter((id) => isUuidString(String(id))))];
+  if (unique.length === 0 || !shifterAdmin) return map;
+
+  for (let i = 0; i < unique.length; i += LOOKUP_CHUNK) {
+    const chunk = unique.slice(i, i + LOOKUP_CHUNK);
+    const { data, error } = await shifterAdmin.from('clients').select('id, name').in('id', chunk);
+    if (error) {
+      if (logWarn) logWarn('Shifter clients lookup failed (client names)', { message: error.message });
+      break;
+    }
+    for (const c of data || []) {
+      const id = c?.id != null ? String(c.id).trim() : '';
+      const name = pickString(c, ['name', 'client_name', 'display_name']);
+      if (id && name) map.set(id, name);
+    }
+  }
+  return map;
+}
+
+function collectWorkerIdsForLookup(rows) {
+  const ids = [];
+  for (const row of rows || []) {
+    for (const key of ['worker_id', 'user_id', 'staff_id']) {
+      const v = row?.[key];
+      if (v == null || v === '') continue;
+      const s = String(v).trim();
+      if (isUuidString(s)) ids.push(s);
+    }
+  }
+  return ids;
+}
+
+function collectClientIdsForLookup(rows) {
+  const ids = [];
+  for (const row of rows || []) {
+    for (const key of ['client_id', 'participant_id']) {
+      const v = row?.[key];
+      if (v == null || v === '') continue;
+      const s = String(v).trim();
+      if (isUuidString(s)) ids.push(s);
+    }
+  }
+  return ids;
+}
+
+function collectShiftIdsForProgressNotes(rows) {
+  const ids = [];
+  for (const row of rows || []) {
+    const sid = pickString(row, ['shift_id', 'id', 'external_shift_id']);
+    if (sid && isUuidString(sid)) ids.push(sid);
+  }
+  return ids;
+}
+
+/**
+ * Shifter mobile stores completion narrative in public.progress_notes.notes, not on shifts.session_details.
+ * Latest note per shift wins (ordered by created_at DESC).
+ */
+async function fetchProgressNotesByShiftIds(shifterAdmin, shiftIds, logWarn) {
+  const map = new Map();
+  const unique = [...new Set((shiftIds || []).filter((id) => isUuidString(String(id))))];
+  if (unique.length === 0 || !shifterAdmin) return map;
+
+  for (let i = 0; i < unique.length; i += LOOKUP_CHUNK) {
+    const chunk = unique.slice(i, i + LOOKUP_CHUNK);
+    const { data, error } = await shifterAdmin
+      .from('progress_notes')
+      .select('shift_id, notes, created_at')
+      .in('shift_id', chunk)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      if (logWarn) logWarn('Shifter progress_notes lookup failed (shift notes)', { message: error.message });
+      break;
+    }
+    for (const row of data || []) {
+      const sid = row?.shift_id != null ? String(row.shift_id).trim() : '';
+      const text = String(row?.notes || '').trim();
+      if (!sid || !text) continue;
+      if (!map.has(sid)) map.set(sid, text);
+    }
+  }
+  return map;
+}
+
+async function buildShiftRowNameLookups(shifterAdmin, rows, logWarn) {
+  const workerIds = collectWorkerIdsForLookup(rows);
+  const clientIds = collectClientIdsForLookup(rows);
+  const shiftIds = collectShiftIdsForProgressNotes(rows);
+  const [profileById, clientById, progressNoteByShiftId] = await Promise.all([
+    fetchProfileLabelsByIds(shifterAdmin, workerIds, logWarn),
+    fetchClientLabelsByIds(shifterAdmin, clientIds, logWarn),
+    fetchProgressNotesByShiftIds(shifterAdmin, shiftIds, logWarn),
+  ]);
+  return { profileById, clientById, progressNoteByShiftId };
+}
+
+function mapShifterRowToWebhookShift(row, lookups = null) {
+  const profileById = lookups?.profileById;
+  const clientById = lookups?.clientById;
+  const progressNoteByShiftId = lookups?.progressNoteByShiftId;
+
   const shiftId = pickString(row, ['shift_id', 'id', 'external_shift_id']);
   const date = dateFromDateOrTimestamp(row);
   const startTime = toHm(pickString(row, ['start_time', 'scheduled_start', 'start_at'])) || '09:00';
   const finishTime = toHm(pickString(row, ['end_time', 'scheduled_end', 'end_at'])) || '17:00';
-  const staffName = pickString(row, ['staff_name', 'worker_name', 'carer_name']);
-  const clientName = pickString(row, ['client_name', 'client', 'participant_name']);
+  let staffName = pickString(row, ['staff_name', 'worker_name', 'carer_name']);
+  if (!staffName && profileById?.size) {
+    const wid = pickString(row, ['worker_id', 'user_id', 'staff_id']);
+    if (wid && profileById.has(wid)) staffName = profileById.get(wid);
+  }
+  let clientName = pickString(row, ['client_name', 'participant_name']);
+  const clientRaw = row?.client != null && row?.client !== '' ? String(row.client).trim() : '';
+  if (!clientName && clientRaw && !isUuidString(clientRaw)) clientName = clientRaw;
+  if (!clientName && clientById?.size) {
+    const cid = pickString(row, ['client_id', 'participant_id']);
+    if (cid && clientById.has(cid)) clientName = clientById.get(cid);
+  }
   const travelKm = mapTravelKm(row);
   const travelTimeMinutes = mapTravelTimeMinutes(row);
   const expenses = toNumberOrNull(row.expenses);
   const duration = toNumberOrNull(row.duration ?? row.duration_hours ?? row.duration_minutes);
+
+  const fromRowSession = pickString(row, [
+    'session_details',
+    'session_notes',
+    'shift_notes',
+    'completion_notes',
+    'progress_note',
+    'notes',
+  ]);
+  const fromProgressNote = shiftId && progressNoteByShiftId?.get(shiftId) ? String(progressNoteByShiftId.get(shiftId)).trim() : '';
+  let sessionDetails = '';
+  if (fromProgressNote && fromRowSession) {
+    sessionDetails = fromProgressNote === fromRowSession.trim() ? fromProgressNote : `${fromRowSession.trim()}\n\n${fromProgressNote}`;
+  } else {
+    sessionDetails = fromProgressNote || fromRowSession || '';
+  }
 
   return {
     shiftId,
@@ -141,7 +316,7 @@ function mapShifterRowToWebhookShift(row) {
     expenses,
     incidents: pickString(row, ['incidents']),
     mood: pickString(row, ['mood']),
-    sessionDetails: pickString(row, ['session_details', 'notes']),
+    sessionDetails,
     medicationChecks: row.medication_checks || {},
   };
 }
@@ -178,6 +353,7 @@ async function fetchRowsByOrgFromTable(shifterAdmin, table, orgCol, shifterOrgId
 
 export async function pullShiftsFromShifterSupabase(options = {}) {
   const log = options.log || (() => {});
+  const logWarn = options.logWarn || (() => {});
   const nexusOrgId = options.nexusOrgId || null;
   const fromDate = options.fromDate ? toIsoDate(options.fromDate) : '';
   const toDate = options.toDate ? toIsoDate(options.toDate) : '';
@@ -225,7 +401,8 @@ export async function pullShiftsFromShifterSupabase(options = {}) {
     throw new Error(`Unable to query Shifter shifts by organisation${reason}`);
   }
 
-  const mapped = pulledRows.map(mapShifterRowToWebhookShift);
+  const lookups = await buildShiftRowNameLookups(shifterAdmin, pulledRows, logWarn);
+  const mapped = pulledRows.map((row) => mapShifterRowToWebhookShift(row, lookups));
   const filteredByDate = mapped.filter((s) => dateInRange(s.date, fromDate, toDate));
   const valid = filteredByDate.filter((s) => s.shiftId && s.date);
   const skipped = filteredByDate.length - valid.length;
@@ -255,6 +432,7 @@ export async function pullShiftsFromShifterSupabase(options = {}) {
 }
 
 export async function debugShifterShiftsByOrg(options = {}) {
+  const logWarn = options.logWarn || (() => {});
   const nexusOrgId = options.nexusOrgId || null;
   const limit = Math.max(1, Math.min(Number(options.limit) || 10, 100));
 
@@ -292,7 +470,8 @@ export async function debugShifterShiftsByOrg(options = {}) {
       }
 
       const rows = data || [];
-      const mapped = rows.map(mapShifterRowToWebhookShift);
+      const lookups = await buildShiftRowNameLookups(shifterAdmin, rows, logWarn);
+      const mapped = rows.map((row) => mapShifterRowToWebhookShift(row, lookups));
       candidates.push({
         table,
         org_column: orgCol,

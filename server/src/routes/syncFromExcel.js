@@ -4,14 +4,24 @@
  * Requires session auth (coordinator) or optionally CRM_API_KEY for cron/scripts.
  */
 import { Router } from 'express';
-import { db } from '../db/index.js';
-import { isSuperAdminEmail } from '../lib/superAdmin.js';
+import {
+  ONEDRIVE_EXCEL_APP_ONLY_REQUIRED_HINT,
+  ONEDRIVE_EXCEL_DELEGATED_OR_ENV_HINT,
+  ONEDRIVE_EXCEL_SHIFTER_404_FALLBACK_NOTE
+} from '../lib/onedriveExcelSyncHint.js';
 import { pullShiftsFromExcel } from '../services/excelPull.service.js';
 import { processShifts } from '../services/webhookProcessor.js';
 import { mirrorAllShiftsToNexusSupabase } from '../services/nexusPublicShiftsSync.service.js';
 import { pullShiftsFromShifterSupabase, debugShifterShiftsByOrg } from '../services/shifterPull.service.js';
+import { isShifterRemoteConfigured } from '../services/supabaseStaffShifter.service.js';
 
 const router = Router();
+
+function shouldTryShifterAfterOnedriveNotFound(err) {
+  if (!isShifterRemoteConfigured()) return false;
+  const m = String(err?.message || err || '');
+  return /itemNotFound|item not found|"code":"itemNotFound"|The resource could not be found|Item not found/u.test(m);
+}
 
 function hasValidApiKey(req) {
   const expected = process.env.CRM_API_KEY?.trim?.() || process.env.CRM_API_KEY || '';
@@ -66,7 +76,7 @@ router.post('/from-excel', async (req, res) => {
 
   if (!hasSession && !hasKey) {
     return res.status(401).json({
-      error: 'Unauthorized. Sign in as coordinator or provide x-api-key / Authorization: Bearer (CRM_API_KEY).',
+      error: 'Unauthorized. Sign in as coordinator or provide the server API key in x-api-key or Authorization: Bearer.',
     });
   }
 
@@ -80,25 +90,46 @@ router.post('/from-excel', async (req, res) => {
       req.body?.useLlm !== 'false' &&
       req.query?.useLlm !== 'false';
 
-    const orgId = resolveSyncedOrgId(req);
-    if (!orgId) {
+    const orgId = req.session?.user?.org_id || null;
+    if (hasSession && !orgId) {
       return res.status(400).json({
-        error:
-          'org_id is required. Each organisation uses its own Microsoft OneDrive under Settings. Sign in with a user that has org_id, or as super admin pass org_id, or use CRM_API_KEY with org_id in the body or query.',
+        error: 'Your account has no organisation. Cannot sync for another tenant.',
+        code: 'NO_ORG',
       });
     }
+    let shifts;
+    let llmUsed = false;
+    let source = 'onedrive_excel';
 
-    const { shifts, llmUsed } = await pullShiftsFromExcel({
-      log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
-      useLlm,
-      orgId,
-    });
+    try {
+      const pulled = await pullShiftsFromExcel({
+        log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
+        useLlm,
+        organizationId: orgId || undefined,
+      });
+      shifts = pulled.shifts;
+      llmUsed = !!pulled.llmUsed;
+    } catch (excelErr) {
+      if (orgId && shouldTryShifterAfterOnedriveNotFound(excelErr)) {
+        log('OneDrive Excel not found; falling back to Shifter Supabase shifts for this org', { orgId });
+        const pulled = await pullShiftsFromShifterSupabase({
+          nexusOrgId: orgId,
+          log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
+          logWarn: (msg, data) => console.warn('[sync-from-excel]', msg, data || ''),
+        });
+        shifts = pulled.shifts;
+        llmUsed = false;
+        source = 'shifter_supabase_fallback';
+      } else {
+        throw excelErr;
+      }
+    }
 
     if (!shifts || shifts.length === 0) {
-      log('No shifts found in Excel');
+      log('No shifts found');
       return res.json({
         ok: true,
-        source: 'onedrive_excel',
+        source,
         llm_used: !!llmUsed,
         processed: 0,
         matched: 0,
@@ -120,17 +151,22 @@ router.post('/from-excel', async (req, res) => {
 
     res.json({
       ok: true,
-      source: 'onedrive_excel',
+      source,
       llm_used: !!llmUsed,
       ...result,
     });
   } catch (err) {
     console.error('[sync-from-excel]', err);
-    const hint =
-      'Connect Microsoft OneDrive under Settings for this organisation (the account that owns the Progress Notes Excel file). Optional path: ONEDRIVE_EXCEL_PATH in server env.';
+    const msg = err.message || 'Sync from Excel failed';
+    const onedriveRelated =
+      msg === ONEDRIVE_EXCEL_DELEGATED_OR_ENV_HINT ||
+      msg === ONEDRIVE_EXCEL_APP_ONLY_REQUIRED_HINT ||
+      /Could not read the Progress Notes Excel|OneDrive|ONEDRIVE|Graph|itemNotFound|item not found|Connect Microsoft|Sharing link/i.test(
+        msg
+      );
     res.status(500).json({
-      error: err.message || 'Sync from Excel failed',
-      errorDetail: hint,
+      error: msg,
+      ...(onedriveRelated ? { errorDetail: ONEDRIVE_EXCEL_SHIFTER_404_FALLBACK_NOTE } : {})
     });
   }
 });
@@ -147,11 +183,24 @@ router.post('/from-shifter', async (req, res) => {
 
   if (!hasSession && !hasKey) {
     return res.status(401).json({
-      error: 'Unauthorized. Sign in or provide x-api-key / Authorization: Bearer (CRM_API_KEY).',
+      error: 'Unauthorized. Sign in or provide the server API key in x-api-key or Authorization: Bearer.',
     });
   }
 
-  const orgId = resolveSyncedOrgId(req);
+  const sessionOrgId = req.session?.user?.org_id || null;
+  const requestedOrgId = req.body?.org_id || req.query?.org_id || null;
+  let orgId;
+  if (hasSession) {
+    if (!sessionOrgId) {
+      return res.status(400).json({
+        error: 'Your account has no organisation. Cannot sync for another tenant.',
+        code: 'NO_ORG',
+      });
+    }
+    orgId = sessionOrgId;
+  } else {
+    orgId = requestedOrgId || null;
+  }
   if (!orgId) {
     return res.status(400).json({
       error:
@@ -170,6 +219,7 @@ router.post('/from-shifter', async (req, res) => {
       toDate,
       limit,
       log: (msg, data) => console.log('[sync-from-shifter]', msg, data || ''),
+      logWarn: (msg, data) => console.warn('[sync-from-shifter]', msg, data || ''),
     });
 
     const result = processShifts(pulled.shifts, {
@@ -194,9 +244,8 @@ router.post('/from-shifter', async (req, res) => {
   } catch (err) {
     console.error('[sync-from-shifter]', err);
     res.status(500).json({
-      error: err.message || 'Sync from Shifter Supabase failed',
-      errorDetail:
-        'Check SHIFTER_SUPABASE_URL/SHIFTER_SERVICE_ROLE_KEY and that org_id maps to a Shifter org (public.organizations.shifter_organization_id).',
+      error: err.message || 'Could not pull shifts from Shifter.',
+      errorDetail: 'Ask your administrator to check Shifter and server configuration for your organisation.',
     });
   }
 });
@@ -212,11 +261,24 @@ router.post('/from-shifter/debug', async (req, res) => {
   const hasKey = hasValidApiKey(req);
   if (!hasSession && !hasKey) {
     return res.status(401).json({
-      error: 'Unauthorized. Sign in or provide x-api-key / Authorization: Bearer (CRM_API_KEY).',
+      error: 'Unauthorized. Sign in or provide the server API key in x-api-key or Authorization: Bearer.',
     });
   }
 
-  const orgId = resolveSyncedOrgId(req);
+  const sessionOrgId = req.session?.user?.org_id || null;
+  const requestedOrgId = req.body?.org_id || req.query?.org_id || null;
+  let orgId;
+  if (hasSession) {
+    if (!sessionOrgId) {
+      return res.status(400).json({
+        error: 'Your account has no organisation. Cannot debug sync for another tenant.',
+        code: 'NO_ORG',
+      });
+    }
+    orgId = sessionOrgId;
+  } else {
+    orgId = requestedOrgId || null;
+  }
   if (!orgId) {
     return res.status(400).json({
       error:
@@ -235,8 +297,7 @@ router.post('/from-shifter/debug', async (req, res) => {
     console.error('[sync-from-shifter-debug]', err);
     res.status(500).json({
       error: err.message || 'Shifter debug failed',
-      errorDetail:
-        'Check SHIFTER_SUPABASE_URL/SHIFTER_SERVICE_ROLE_KEY and that org_id maps to a Shifter org (public.organizations.shifter_organization_id).',
+      errorDetail: 'Ask your administrator to check Shifter and server configuration for your organisation.',
     });
   }
 });
@@ -251,7 +312,7 @@ router.post('/nexus-public-shifts', async (req, res) => {
   const hasKey = hasValidApiKey(req);
   if (!hasSession && !hasKey) {
     return res.status(401).json({
-      error: 'Unauthorized. Sign in or provide x-api-key / Authorization: Bearer (CRM_API_KEY).',
+      error: 'Unauthorized. Sign in or provide the server API key in x-api-key or Authorization: Bearer.',
     });
   }
   try {

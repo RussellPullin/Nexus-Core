@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { getAssignedParticipantIds, canAccessParticipant } from '../middleware/roles.js';
+import { tenantParticipantClause } from '../lib/orgScopeSql.js';
 import {
   getSupportCoordLineItem,
   roundToBillableUnits
@@ -29,6 +30,10 @@ router.get('/', (req, res) => {
   try {
     const { participant_id, status } = req.query;
     const userId = req.session?.user?.id;
+    const pc = tenantParticipantClause(userId, 'p');
+    if (!pc.orgId) {
+      return res.json([]);
+    }
 
     let cases = db.prepare(`
       SELECT cc.*, p.name as participant_name, p.ndis_number,
@@ -36,8 +41,9 @@ router.get('/', (req, res) => {
              (SELECT COUNT(*) FROM coordinator_case_tasks cct WHERE cct.case_id = cc.id) as total_tasks
       FROM coordinator_cases cc
       JOIN participants p ON p.id = cc.participant_id
+      WHERE (${pc.sql})
       ORDER BY cc.updated_at DESC, cc.created_at DESC
-    `).all();
+    `).all(...pc.params);
 
     cases = filterByAccess(cases, userId);
     if (participant_id) cases = cases.filter((c) => c.participant_id === participant_id);
@@ -103,24 +109,10 @@ router.get('/suggested-task-titles', (req, res) => {
           LIMIT 60
         `).all(...assignedIds);
       } else {
-        rows = db.prepare(`
-          SELECT title, COUNT(*) as use_count
-          FROM coordinator_case_tasks
-          WHERE title IS NOT NULL AND TRIM(title) != ''
-          GROUP BY TRIM(LOWER(title))
-          ORDER BY use_count DESC
-          LIMIT 60
-        `).all();
+        rows = [];
       }
     } else {
-      rows = db.prepare(`
-        SELECT title, COUNT(*) as use_count
-        FROM coordinator_case_tasks
-        WHERE title IS NOT NULL AND TRIM(title) != ''
-        GROUP BY TRIM(LOWER(title))
-        ORDER BY use_count DESC
-        LIMIT 60
-      `).all();
+      rows = [];
     }
     const titles = rows.map((r) => ({ title: r.title, use_count: r.use_count }));
     res.json({ titles });

@@ -44,17 +44,14 @@ export async function fetchFlagsForOrg(orgId) {
 }
 
 /**
+ * @param {string | null | undefined} onlyOrgId — if set, only that organisation row (super admin scoped to own org).
  * @returns {Promise<{ orgs: { id: string, name: string }[], feature_defs: { key: string, label: string }[], matrix: Record<string, Record<string, boolean>> }>}
  */
-export async function fetchOrgFeatureMatrix() {
+export async function fetchOrgFeatureMatrix(onlyOrgId = null) {
   const admin = getSupabaseServiceRoleClient();
-  const orgs = db
-    .prepare(
-      `SELECT id, name FROM organisations
-       WHERE owner_org_id IS NOT NULL AND id = owner_org_id
-       ORDER BY name COLLATE NOCASE`
-    )
-    .all();
+  const orgs = onlyOrgId
+    ? db.prepare('SELECT id, name FROM organisations WHERE id = ?').all(String(onlyOrgId))
+    : db.prepare('SELECT id, name FROM organisations ORDER BY name COLLATE NOCASE').all();
 
   const feature_defs = FEATURE_FLAG_KEYS.map(({ key, label }) => ({ key, label: label || key }));
   const matrix = {};

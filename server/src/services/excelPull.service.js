@@ -5,7 +5,12 @@
  */
 import ExcelJS from 'exceljs';
 import { resolveShiftExcelColumns } from './excelShiftParse.service.js';
+import {
+  ONEDRIVE_EXCEL_APP_ONLY_REQUIRED_HINT,
+  ONEDRIVE_EXCEL_DELEGATED_OR_ENV_HINT
+} from '../lib/onedriveExcelSyncHint.js';
 import { getValidAccessToken } from './orgOnedriveSync.service.js';
+import { resolveOnedriveExcelLocationFromShifterForNexusOrg } from './supabaseStaffShifter.service.js';
 
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
 
@@ -21,8 +26,185 @@ function buildItemByPathUrlMe(path) {
   return `${GRAPH_BASE_URL}/me/drive/root:/${encodeDrivePath(path)}`;
 }
 
-function buildContentUrlMe(itemId) {
-  return `${GRAPH_BASE_URL}/me/drive/items/${encodeURIComponent(itemId)}/content`;
+function buildContentUrl(adminUserId, itemId) {
+  return `${GRAPH_BASE_URL}/users/${encodeURIComponent(adminUserId)}/drive/items/${itemId}/content`;
+}
+
+function buildMeItemByPathUrl(path) {
+  return `${GRAPH_BASE_URL}/me/drive/root:/${encodeDrivePath(path)}`;
+}
+
+function buildMeContentUrl(itemId) {
+  return `${GRAPH_BASE_URL}/me/drive/items/${itemId}/content`;
+}
+
+function defaultExcelPath() {
+  return process.env.ONEDRIVE_EXCEL_PATH?.trim() || 'Progress Notes App/master progress notes.xlsx';
+}
+
+function shifterLocationIsUsable(loc) {
+  return Boolean(
+    (loc?.path && String(loc.path).trim()) || (loc?.sharingUrl && String(loc.sharingUrl).trim()),
+  );
+}
+
+async function resolvedExcelLocationForOrg(nexusOrgId, log) {
+  const pathFallback = defaultExcelPath();
+  if (!nexusOrgId) {
+    return { path: pathFallback, sharingUrl: null, pathFallback, source: 'default' };
+  }
+  try {
+    const loc = await resolveOnedriveExcelLocationFromShifterForNexusOrg(String(nexusOrgId).trim());
+    if (shifterLocationIsUsable(loc)) {
+      log('Using OneDrive Excel location from Shifter', {
+        source: loc.source,
+        hasPath: Boolean(loc.path && String(loc.path).trim()),
+        hasSharingUrl: Boolean(loc.sharingUrl && String(loc.sharingUrl).trim()),
+      });
+      const path =
+        loc.path && String(loc.path).trim() ? String(loc.path).trim().replace(/^\/+/, '') : null;
+      const sharingUrl =
+        loc.sharingUrl && String(loc.sharingUrl).trim() ? String(loc.sharingUrl).trim() : null;
+      return { path, sharingUrl, pathFallback, source: loc.source || 'shifter' };
+    }
+  } catch (e) {
+    log('Shifter Excel location lookup skipped or failed', { message: e?.message || String(e) });
+  }
+  return { path: pathFallback, sharingUrl: null, pathFallback, source: 'default' };
+}
+
+/** Microsoft Graph "shares" encoding for a sharing URL (https://learn.microsoft.com/en-us/graph/api/shares-get) */
+function graphEncodedSharingId(sharingUrl) {
+  const raw = String(sharingUrl || '').trim();
+  if (!raw) throw new Error('Missing OneDrive sharing URL');
+  const base64 = Buffer.from(raw, 'utf8').toString('base64');
+  const base64url = base64.replace(/=+$/u, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return `u!${base64url}`;
+}
+
+async function fetchExcelBufferViaSharingUrl(accessToken, sharingUrl, log) {
+  const enc = graphEncodedSharingId(sharingUrl);
+  const shareItem = `${GRAPH_BASE_URL}/shares/${encodeURIComponent(enc)}/driveItem`;
+  log('Fetching Excel via OneDrive sharing link (Graph shares API)');
+  const item = await graphJson('GET', shareItem, accessToken);
+  if (!item?.id) throw new Error('Sharing link did not resolve to a drive item');
+  const download = item['@microsoft.graph.downloadUrl'];
+  if (download) {
+    const r = await fetch(download);
+    if (!r.ok) throw new Error(`Sharing download failed: ${r.status}`);
+    return Buffer.from(await r.arrayBuffer());
+  }
+  const driveId = item.parentReference?.driveId;
+  if (driveId) {
+    const contentUrl = `${GRAPH_BASE_URL}/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(item.id)}/content`;
+    return graphBuffer('GET', contentUrl, accessToken);
+  }
+  const contentDirect = `${GRAPH_BASE_URL}/shares/${encodeURIComponent(enc)}/driveItem/content`;
+  return graphBuffer('GET', contentDirect, accessToken);
+}
+
+function hasLegacyAppOnlyCredentials() {
+  const adminUserId = process.env.ONEDRIVE_ADMIN_USER_ID?.trim() || process.env.ADMIN_USER_ID?.trim();
+  return Boolean(
+    adminUserId &&
+      process.env.AZURE_TENANT_ID?.trim() &&
+      process.env.AZURE_CLIENT_ID?.trim() &&
+      process.env.AZURE_CLIENT_SECRET?.trim(),
+  );
+}
+
+/**
+ * @param {{ organizationId?: string | null, log?: function }} options
+ * @returns {Promise<Buffer>}
+ */
+async function fetchExcelBufferCore(options = {}) {
+  const log = options.log || (() => {});
+  const { path: pathFromShifter, sharingUrl, pathFallback, source: locationSource } =
+    await resolvedExcelLocationForOrg(options.organizationId || null, log);
+  const pathForGraph = pathFromShifter || pathFallback;
+  const pathHint = pathFromShifter || pathFallback;
+
+  if (options.organizationId) {
+    const delegatedToken = await getValidAccessToken(options.organizationId);
+    if (delegatedToken) {
+      if (sharingUrl) {
+        try {
+          return await fetchExcelBufferViaSharingUrl(delegatedToken, sharingUrl, log);
+        } catch (e) {
+          log('Sharing-link Excel fetch failed, trying path', { message: e?.message || String(e) });
+        }
+      }
+      log('Fetching Excel via organisation OneDrive (delegated)', { path: pathForGraph, locationSource });
+      try {
+        const itemUrl = buildMeItemByPathUrl(pathForGraph);
+        const item = await graphJson('GET', itemUrl, delegatedToken);
+        if (!item?.id) throw new Error('Item not found');
+        const contentUrl = buildMeContentUrl(item.id);
+        return await graphBuffer('GET', contentUrl, delegatedToken);
+      } catch (e) {
+        const msg = e?.message || String(e);
+        throw new Error(
+          `Could not read the Progress Notes Excel file from the connected OneDrive account (${msg}). Expected path: "${pathHint}". Set path or progress_notes_onedrive_sharing_url on Shifter public.organizations or profiles (see supabase/shifter-migrations), or ONEDRIVE_EXCEL_PATH on the server.`,
+        );
+      }
+    }
+    log('Organisation has no OneDrive token; trying application credentials if configured');
+  }
+
+  if (!hasLegacyAppOnlyCredentials()) {
+    if (options.organizationId) {
+      throw new Error(ONEDRIVE_EXCEL_DELEGATED_OR_ENV_HINT);
+    }
+    throw new Error(ONEDRIVE_EXCEL_APP_ONLY_REQUIRED_HINT);
+  }
+
+  const adminUserId = process.env.ONEDRIVE_ADMIN_USER_ID?.trim() || process.env.ADMIN_USER_ID?.trim();
+  const accessToken = await getAccessToken();
+  if (sharingUrl) {
+    try {
+      return await fetchExcelBufferViaSharingUrl(accessToken, sharingUrl, log);
+    } catch (e) {
+      log('Sharing-link Excel fetch (app-only) failed, trying path', { message: e?.message || String(e) });
+    }
+  }
+  log('Fetching Excel from OneDrive (application access)', { path: pathForGraph, locationSource });
+  const item = await graphJson('GET', buildItemByPathUrl(adminUserId, pathForGraph), accessToken);
+  if (!item) {
+    throw new Error(`Excel file not found at: ${pathForGraph}`);
+  }
+  const contentUrl = buildContentUrl(adminUserId, item.id);
+  return graphBuffer('GET', contentUrl, accessToken);
+}
+
+async function getAccessToken() {
+  const tenantId = getRequiredEnv('AZURE_TENANT_ID');
+  const clientId = getRequiredEnv('AZURE_CLIENT_ID');
+  const clientSecret = getRequiredEnv('AZURE_CLIENT_SECRET');
+  const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    grant_type: 'client_credentials',
+    scope: 'https://graph.microsoft.com/.default',
+  });
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Token request failed: ${response.status} ${text}`);
+  }
+
+  const data = await response.json();
+  if (!data.access_token) {
+    throw new Error('Token request did not return an access token');
+  }
+  return data.access_token;
 }
 
 async function graphJson(method, url, accessToken) {
@@ -333,16 +515,22 @@ function rowToWebhookShift(row) {
 }
 
 /**
- * Pull shifts from the OneDrive Excel file for one organisation (`orgId` required).
- * Uses that org’s Settings → Microsoft OneDrive connection only.
- * @param {object} [options] - { log, useLlm, orgId } useLlm defaults true (Ollama refines columns when needed).
+ * Pull shifts from the OneDrive Excel file.
+ * Uses per-organisation delegated OneDrive (Settings → Microsoft) when options.organizationId is set and linked;
+ * otherwise falls back to application credentials: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+ * ONEDRIVE_ADMIN_USER_ID, optional ONEDRIVE_EXCEL_PATH.
+ * When organizationId is set and Shifter is configured, the path under OneDrive is read from Shifter Org Admin profiles first.
+ * @param {object} [options] - { log, useLlm, organizationId } useLlm defaults true (Ollama refines columns when needed).
  * @returns {{ shifts: Array, llmUsed?: boolean, error?: string }}
  */
 export async function pullShiftsFromExcel(options = {}) {
   const log = options.log || (() => {});
   const useLlm = options.useLlm !== false;
 
-  const buffer = await fetchExcelWorkbookBuffer({ orgId: options.orgId || null, log });
+  const buffer = await fetchExcelBufferCore({
+    organizationId: options.organizationId || null,
+    log,
+  });
 
   const { rows, llmUsed } = await parseWorkbookRows(buffer, { log, useLlm });
 
@@ -362,7 +550,10 @@ export async function pullShiftsFromExcel(options = {}) {
 }
 
 async function getExcelBuffer(options = {}) {
-  return fetchExcelWorkbookBuffer({ orgId: options.orgId || null, log: options.log });
+  return fetchExcelBufferCore({
+    organizationId: options.organizationId || null,
+    log: options.log || (() => {}),
+  });
 }
 
 function parseNumber(val) {
@@ -424,7 +615,10 @@ async function parseSummarySheet(buffer) {
 export async function pullSummaryFromExcel(options = {}) {
   const log = options.log || (() => {});
   log('Fetching Excel Summary from OneDrive');
-  const buffer = await getExcelBuffer({ orgId: options.orgId, log });
+  const buffer = await getExcelBuffer({
+    organizationId: options.organizationId || null,
+    log,
+  });
   const rows = await parseSummarySheet(buffer);
   const staffName = (options.staffName || '').trim();
   const filtered = staffName

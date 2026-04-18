@@ -187,10 +187,12 @@ CREATE TABLE IF NOT EXISTS case_notes (
   notes TEXT,
   contact_date TEXT NOT NULL,
   goal_id TEXT,
+  shift_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
   FOREIGN KEY (goal_id) REFERENCES participant_goals(id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_case_notes_shift_id ON case_notes(shift_id) WHERE shift_id IS NOT NULL;
 
 -- Staff
 CREATE TABLE IF NOT EXISTS staff (

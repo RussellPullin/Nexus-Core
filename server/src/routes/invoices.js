@@ -1,8 +1,22 @@
 import { Router } from 'express';
 import { db } from '../db/index.js';
 import { generateInvoicePDF, getInvoiceData } from '../services/invoice.service.js';
+import { tenantParticipantAndStaffClause, isShiftInRequesterTenant } from '../lib/orgScopeSql.js';
 
 const router = Router();
+
+function requireSessionUser(req, res) {
+  if (!req.session?.user) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return null;
+  }
+  return req.session.user;
+}
+
+function invoiceShiftId(invoiceId) {
+  const row = db.prepare('SELECT shift_id FROM invoices WHERE id = ?').get(invoiceId);
+  return row?.shift_id || null;
+}
 
 // Extract support category (01-15) from support_item_number
 function getSupportCategory(supportItem) {
@@ -15,6 +29,9 @@ function getSupportCategory(supportItem) {
 // Download CSV of NDIA-managed invoice line items (for NDIA portal submission)
 router.get('/ndia-managed-csv', (req, res) => {
   try {
+    const user = requireSessionUser(req, res);
+    if (!user) return;
+    const c = tenantParticipantAndStaffClause(user.id, 'p', 'st');
     const invoices = db.prepare(`
       SELECT i.*, s.start_time, s.end_time, p.name as participant_name, p.ndis_number, p.ndia_managed_services,
              st.name as staff_name
@@ -22,8 +39,9 @@ router.get('/ndia-managed-csv', (req, res) => {
       JOIN shifts s ON i.shift_id = s.id
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
+      WHERE (${c.sql})
       ORDER BY s.start_time DESC
-    `).all();
+    `).all(...c.params);
     let ndiaList = [];
     for (const inv of invoices) {
       try {
@@ -81,14 +99,18 @@ router.get('/ndia-managed-csv', (req, res) => {
 
 router.get('/', (req, res) => {
   try {
+    const user = requireSessionUser(req, res);
+    if (!user) return;
+    const c = tenantParticipantAndStaffClause(user.id, 'p', 'st');
     let invoices = db.prepare(`
       SELECT i.*, s.start_time, s.end_time, p.name as participant_name, p.ndis_number, st.name as staff_name
       FROM invoices i
       JOIN shifts s ON i.shift_id = s.id
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
+      WHERE (${c.sql})
       ORDER BY i.created_at DESC
-    `).all();
+    `).all(...c.params);
     if (req.query.shift_id) {
       invoices = invoices.filter((inv) => inv.shift_id === req.query.shift_id);
     }
@@ -100,8 +122,12 @@ router.get('/', (req, res) => {
 
 router.delete('/:id', (req, res) => {
   try {
-    const existing = db.prepare('SELECT id FROM invoices WHERE id = ?').get(req.params.id);
-    if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+    const user = requireSessionUser(req, res);
+    if (!user) return;
+    const shiftId = invoiceShiftId(req.params.id);
+    if (!shiftId || !isShiftInRequesterTenant(shiftId, user.id)) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
     db.prepare('DELETE FROM invoices WHERE id = ?').run(req.params.id);
     return res.status(204).send();
   } catch (err) {
@@ -111,6 +137,12 @@ router.delete('/:id', (req, res) => {
 
 router.get('/:id', (req, res) => {
   try {
+    const user = requireSessionUser(req, res);
+    if (!user) return;
+    const shiftId = invoiceShiftId(req.params.id);
+    if (!shiftId || !isShiftInRequesterTenant(shiftId, user.id)) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
     const data = getInvoiceData(req.params.id);
     if (!data) return res.status(404).json({ error: 'Invoice not found' });
     res.json(data);
@@ -121,6 +153,12 @@ router.get('/:id', (req, res) => {
 
 router.get('/:id/pdf', async (req, res) => {
   try {
+    const user = requireSessionUser(req, res);
+    if (!user) return;
+    const shiftId = invoiceShiftId(req.params.id);
+    if (!shiftId || !isShiftInRequesterTenant(shiftId, user.id)) {
+      return res.status(404).send('Invoice not found');
+    }
     const pdf = await generateInvoicePDF(req.params.id);
     if (!pdf) return res.status(404).send('Invoice not found');
     res.setHeader('Content-Type', 'application/pdf');
@@ -132,9 +170,19 @@ router.get('/:id/pdf', async (req, res) => {
 });
 
 router.put('/:id/status', (req, res) => {
-  const { status } = req.body;
-  db.prepare('UPDATE invoices SET status = ?, updated_at = datetime("now") WHERE id = ?').run(status, req.params.id);
-  res.json({ id: req.params.id, status });
+  try {
+    const user = requireSessionUser(req, res);
+    if (!user) return;
+    const shiftId = invoiceShiftId(req.params.id);
+    if (!shiftId || !isShiftInRequesterTenant(shiftId, user.id)) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    const { status } = req.body;
+    db.prepare('UPDATE invoices SET status = ?, updated_at = datetime("now") WHERE id = ?').run(status, req.params.id);
+    res.json({ id: req.params.id, status });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

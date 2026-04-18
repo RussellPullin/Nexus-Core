@@ -8,6 +8,7 @@ import {
   getShifterServiceRoleClient,
   provisionNexusSupabaseProfileForStaff,
   resolveEffectiveShifterOrgIdForNexusOrg,
+  resolveShifterWorkerProfileIdForEmail,
 } from './supabaseStaffShifter.service.js';
 
 function normalizeEmail(email) {
@@ -387,11 +388,26 @@ export async function mirrorShiftToNexusSupabase(shiftId) {
     return { ok: false, error: error.message };
   }
 
+  let shifterWorkerProfileId = row.shifter_worker_profile_id || null;
+  if (!shifterWorkerProfileId && row.staff_email) {
+    const orgForLookup = row.provider_org_id || row.staff_org_id || null;
+    shifterWorkerProfileId = await resolveShifterWorkerProfileIdForEmail(row.staff_email, orgForLookup);
+    if (shifterWorkerProfileId && row.sqlite_staff_id) {
+      try {
+        db.prepare(
+          'UPDATE staff SET shifter_worker_profile_id = ? WHERE id = ? AND (shifter_worker_profile_id IS NULL OR shifter_worker_profile_id = \'\')',
+        ).run(shifterWorkerProfileId, row.sqlite_staff_id);
+      } catch (e) {
+        console.warn('[nexus-public-shifts] persist shifter_worker_profile_id', e?.message || e);
+      }
+    }
+  }
+
   // Primary path is DB webhook -> push-shift-to-shifter. Also perform direct upsert so
   // worker app remains in sync even if webhook routing/config is delayed.
   const directPush = await upsertShiftDirectlyToShifter({
     shiftId: row.id,
-    workerProfileId: row.shifter_worker_profile_id || null,
+    workerProfileId: shifterWorkerProfileId,
     scheduledStartIso: startIso,
     scheduledEndIso: endIso,
     clientName: row.participant_name || null,

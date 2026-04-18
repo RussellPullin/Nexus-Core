@@ -13,7 +13,10 @@ import {
   findMatchingShift
 } from '../services/progressNoteMatcher.js';
 import { scheduleMirrorShiftToNexusSupabase } from '../services/nexusPublicShiftsSync.service.js';
+import { syncCaseNoteFromShift } from '../services/shiftCaseNoteSync.service.js';
 import { parseTravelKm, parseTravelTimeMinutes, populateShiftLineItems } from '../services/shiftLineItems.service.js';
+import { getProviderOrgIdForUser } from '../middleware/roles.js';
+import { isParticipantInRequesterTenant, tenantParticipantAndStaffClause } from '../lib/orgScopeSql.js';
 
 const router = Router();
 
@@ -29,6 +32,10 @@ const router = Router();
  */
 router.post('/', (req, res) => {
   try {
+    const userId = req.session?.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
     const {
       shift_date,
       staff_name,
@@ -55,7 +62,7 @@ router.post('/', (req, res) => {
     let staffId = staffIdParam;
 
     if (!participantId && client_name) {
-      const p = resolveParticipantByName(client_name);
+      const p = resolveParticipantByName(client_name, userId);
       if (!p) {
         return res.status(400).json({ error: `Participant not found: ${client_name}` });
       }
@@ -66,7 +73,7 @@ router.post('/', (req, res) => {
     }
 
     if (!staffId && staff_name) {
-      const s = resolveStaffByName(staff_name);
+      const s = resolveStaffByName(staff_name, userId);
       if (!s) {
         return res.status(400).json({ error: `Staff not found: ${staff_name}` });
       }
@@ -74,6 +81,18 @@ router.post('/', (req, res) => {
     }
     if (!staffId) {
       return res.status(400).json({ error: 'staff_name or staff_id is required' });
+    }
+
+    const orgId = getProviderOrgIdForUser(userId);
+    if (!orgId) {
+      return res.status(403).json({ error: 'No organisation on your account.' });
+    }
+    if (!isParticipantInRequesterTenant(participantId, userId)) {
+      return res.status(403).json({ error: 'Participant is not in your organisation.' });
+    }
+    const staffOk = db.prepare('SELECT 1 AS x FROM staff WHERE id = ? AND org_id = ?').get(staffId, orgId);
+    if (!staffOk) {
+      return res.status(403).json({ error: 'Staff member is not in your organisation.' });
     }
 
     const supportDate = parseSupportDate(shift_date);
@@ -180,6 +199,7 @@ router.post('/', (req, res) => {
     // Invoicing is done via batch (Financial > Batch invoices); no per-shift invoice creation.
 
     scheduleMirrorShiftToNexusSupabase(shiftId);
+    syncCaseNoteFromShift(shiftId);
 
     res.status(201).json({
       id: progressNoteId,
@@ -201,14 +221,16 @@ router.post('/', (req, res) => {
 router.get('/', (req, res) => {
   try {
     const { participant_id, staff_id, start, end } = req.query;
+    const c = tenantParticipantAndStaffClause(req.session?.user?.id, 'p', 'st');
+    if (!c.orgId) return res.json([]);
     let sql = `
       SELECT pn.*, p.name as participant_name, st.name as staff_name
       FROM progress_notes pn
       JOIN participants p ON pn.participant_id = p.id
       JOIN staff st ON pn.staff_id = st.id
-      WHERE 1=1
+      WHERE (${c.sql})
     `;
-    const params = [];
+    const params = [...c.params];
     if (participant_id) {
       sql += ' AND pn.participant_id = ?';
       params.push(participant_id);
@@ -238,13 +260,15 @@ router.get('/', (req, res) => {
  */
 router.get('/:id', (req, res) => {
   try {
+    const c = tenantParticipantAndStaffClause(req.session?.user?.id, 'p', 'st');
+    if (!c.orgId) return res.status(404).json({ error: 'Progress note not found' });
     const note = db.prepare(`
       SELECT pn.*, p.name as participant_name, st.name as staff_name
       FROM progress_notes pn
       JOIN participants p ON pn.participant_id = p.id
       JOIN staff st ON pn.staff_id = st.id
-      WHERE pn.id = ?
-    `).get(req.params.id);
+      WHERE pn.id = ? AND (${c.sql})
+    `).get(req.params.id, ...c.params);
     if (!note) return res.status(404).json({ error: 'Progress note not found' });
     res.json(note);
   } catch (err) {

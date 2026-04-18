@@ -58,7 +58,17 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'imageBase64 is required.' });
     }
 
-    const participant = resolveParticipantByName(clientName.trim());
+    const orgFromBody = req.body?.org_id || req.body?.organization_id || null;
+    if (!hasSession && hasKey && !orgFromBody?.trim()) {
+      return res.status(400).json({
+        error: 'When using the API key, org_id (or organization_id) is required so receipts attach to the correct tenant.',
+      });
+    }
+    const participant = resolveParticipantByName(
+      clientName.trim(),
+      req.session?.user?.id || null,
+      hasSession ? null : orgFromBody?.trim() || null
+    );
     if (!participant) {
       return res.status(404).json({
         error: `Participant not found for client name "${clientName.trim()}". Add the participant in Nexus first.`,

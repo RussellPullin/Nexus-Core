@@ -3,7 +3,7 @@
  * Resize shift cards to extend duration in 30-minute increments.
  * Notes on shifts are sent to workers when roster is sent.
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { formatDate } from '../lib/dateUtils';
 
 const SLOTS_PER_HOUR = 2; // 30-minute increments
@@ -62,13 +62,15 @@ export default function WeekPlanner({
     return d;
   });
 
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(0.75);
   const [dragging, setDragging] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
   const [pendingDrop, setPendingDrop] = useState(null);
   const [resizing, setResizing] = useState(null);
   const [workerSearch, setWorkerSearch] = useState('');
   const [clientSearch, setClientSearch] = useState('');
+  const gridWrapRef = useRef(null);
+  const sidebarScrollRef = useRef(null);
 
   const slotHeight = ZOOM_LEVELS.find((z) => z.value === zoom)?.slotHeight ?? 28;
 
@@ -170,6 +172,30 @@ export default function WeekPlanner({
     e.stopPropagation();
     setResizing({ shift, direction, startY: e.clientY, startSlot: slotIndexFromTime(shift.start_time.slice(0, 10), shift.start_time), endSlot: slotIndexFromTime(shift.start_time.slice(0, 10), shift.end_time) });
   };
+
+  // Auto-scroll grid (and palette) when dragging near edges — avoids long drags across the page.
+  useEffect(() => {
+    if (!dragging) return;
+    const onDragOver = (e) => {
+      const y = e.clientY;
+      const margin = 72;
+      const step = 14;
+      const grid = gridWrapRef.current;
+      if (grid) {
+        const gr = grid.getBoundingClientRect();
+        if (y > gr.bottom - margin) grid.scrollTop += step;
+        else if (y < gr.top + margin) grid.scrollTop -= step;
+      }
+      const side = sidebarScrollRef.current;
+      if (side) {
+        const sr = side.getBoundingClientRect();
+        if (y > sr.bottom - margin) side.scrollTop += step;
+        else if (y < sr.top + margin) side.scrollTop -= step;
+      }
+    };
+    document.addEventListener('dragover', onDragOver);
+    return () => document.removeEventListener('dragover', onDragOver);
+  }, [dragging]);
 
   useEffect(() => {
     if (!resizing) return;
@@ -273,62 +299,72 @@ export default function WeekPlanner({
   return (
     <div className="week-planner">
       <div className="week-planner-sidebar">
-        <div className="week-planner-palette-section">
-          <h4>Workers</h4>
-          <input
-            type="text"
-            placeholder="Search workers..."
-            value={workerSearch}
-            onChange={(e) => setWorkerSearch(e.target.value)}
-            className="week-planner-search"
-          />
-          {filteredWorkers.map((s) => (
-            <div
-              key={s.id}
-              className={`week-planner-draggable worker ${dragging?.id === s.id ? 'dragging' : ''}`}
-              draggable
-              onDragStart={(e) => handleDragStart(e, 'worker', s.id, s.name)}
-              onDragEnd={handleDragEnd}
-            >
-              {s.name}
-            </div>
-          ))}
-        </div>
-        <div className="week-planner-palette-section">
-          <h4>Clients</h4>
-          <input
-            type="text"
-            placeholder="Search clients..."
-            value={clientSearch}
-            onChange={(e) => setClientSearch(e.target.value)}
-            className="week-planner-search"
-          />
-          {filteredClients.map((p) => (
-            <div
-              key={p.id}
-              className={`week-planner-draggable client ${dragging?.id === p.id ? 'dragging' : ''}`}
-              draggable
-              onDragStart={(e) => handleDragStart(e, 'client', p.id, p.name)}
-              onDragEnd={handleDragEnd}
-            >
-              {p.name}
-            </div>
-          ))}
-        </div>
-        <p className="week-planner-hint">Drag worker + client onto a time slot to create a shift. Drag a shift to move it. Resize handle to extend.</p>
-        <div className="week-planner-zoom">
-          <label>
-            <span className="week-planner-zoom-label">Zoom</span>
-            <select value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="week-planner-zoom-select">
-              {ZOOM_LEVELS.map((z) => (
-                <option key={z.value} value={z.value}>{z.label}</option>
+        <div className="week-planner-sidebar-scroll" ref={sidebarScrollRef}>
+          <div className="week-planner-palette-section">
+            <h4>Workers</h4>
+            <input
+              type="text"
+              placeholder="Search workers…"
+              value={workerSearch}
+              onChange={(e) => setWorkerSearch(e.target.value)}
+              className="week-planner-search"
+            />
+            <div className="week-planner-palette-list">
+              {filteredWorkers.map((s) => (
+                <div
+                  key={s.id}
+                  className={`week-planner-draggable worker ${dragging?.id === s.id ? 'dragging' : ''}`}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, 'worker', s.id, s.name)}
+                  onDragEnd={handleDragEnd}
+                  title={s.name}
+                >
+                  {s.name}
+                </div>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
+          <div className="week-planner-palette-section week-planner-palette-section-clients">
+            <h4>Clients</h4>
+            <input
+              type="text"
+              placeholder="Search to narrow list…"
+              value={clientSearch}
+              onChange={(e) => setClientSearch(e.target.value)}
+              className="week-planner-search"
+            />
+            <div className="week-planner-palette-list week-planner-palette-list-clients">
+              {filteredClients.map((p) => (
+                <div
+                  key={p.id}
+                  className={`week-planner-draggable client ${dragging?.id === p.id ? 'dragging' : ''}`}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, 'client', p.id, p.name)}
+                  onDragEnd={handleDragEnd}
+                  title={p.name}
+                >
+                  {p.name}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="week-planner-sidebar-footer">
+          <p className="week-planner-hint">Drag worker, then client (or the other way) onto a slot. Move shifts by dragging; extend with the bottom handle.</p>
+          <div className="week-planner-zoom">
+            <label>
+              <span className="week-planner-zoom-label">Zoom</span>
+              <select value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="week-planner-zoom-select">
+                {ZOOM_LEVELS.map((z) => (
+                  <option key={z.value} value={z.value}>{z.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
       </div>
 
-      <div className="week-planner-grid-wrap">
+      <div className="week-planner-grid-wrap" ref={gridWrapRef}>
         <div
           className={`week-planner-grid ${zoom <= 0.75 ? 'week-planner-zoom-out' : ''}`}
           style={{

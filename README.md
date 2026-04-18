@@ -66,10 +66,11 @@ Secrets must never be committed. **`azure-email-function/local.settings.json`** 
 Shifts and progress notes from the mobile Progress Notes App can be pushed to this app when CRM integration is enabled.
 
 1. Set `CRM_API_KEY` in `.env` (any secure random string).
-2. In the Progress Notes App Admin screen, enable **Schedule Shift App Link** and enter:
-   - **Webhook URL**: `https://your-domain.com/api/webhooks/progress-app` (or `http://localhost:3001/api/webhooks/progress-app` for local dev)
+2. Set `SHIFTER_SUPABASE_URL` and `SHIFTER_SERVICE_ROLE_KEY` if you use Shifter — when an org admin uses **Settings → Link to Shifter**, Nexus tries to write the webhook URL and API key onto the linked row in Shifter’s `organizations` table (when known column names exist), so admins usually do not need to paste URLs manually.
+3. If auto-config does not apply (custom Shifter schema, missing env, or wrong public API base), use **Settings → Shifter** → *Manual webhook / Excel sync* and enter in the Progress Notes App Admin → **Schedule Shift App Link**:
+   - **Webhook URL**: `https://your-domain.com/api/webhooks/progress-app` (or `http://localhost:3080/api/webhooks/progress-app` for local dev if that is your API port)
    - **API Key**: The same value as `CRM_API_KEY`
-3. On each sync in the Progress Notes App, shift data is forwarded to this webhook. Matched participant/staff names create completed shifts; unmatched entries appear in Coordinator Tasks for manual linking.
+4. On each sync in the Progress Notes App, shift data is forwarded to this webhook. Matched participant/staff names create completed shifts; unmatched entries appear in Coordinator Tasks for manual linking.
 
 ## Project Structure
 

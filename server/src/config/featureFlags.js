@@ -5,7 +5,11 @@
 export const FEATURE_FLAG_KEYS = [
   { key: 'shifter_beta', label: 'Shifter (beta flows)' },
   { key: 'advanced_reporting', label: 'Advanced reporting' },
-  { key: 'beta_invoicing', label: 'Beta invoicing' }
+  { key: 'beta_invoicing', label: 'Beta invoicing' },
+  {
+    key: 'ai_staff_local_ollama',
+    label: 'AI: Ollama on staff computers (per-user link + CSV mapping from browser)'
+  }
 ];
 
 export function listFeatureFlagKeys() {

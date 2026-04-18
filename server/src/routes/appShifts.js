@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
-import { getProviderOrgIdForUser } from '../middleware/roles.js';
+import { getProviderOrgIdForUser, getSingleDistinctUserOrgId } from '../middleware/roles.js';
 import { processShifts } from '../services/webhookProcessor.js';
 
 const router = Router();
@@ -16,6 +16,21 @@ router.get('/', (req, res) => {
     const { date, from_date, to_date } = req.query;
     let sql = 'SELECT * FROM app_shifts WHERE 1=1';
     const params = [];
+
+    const orgId = req.session?.user?.id ? getProviderOrgIdForUser(req.session.user.id) : null;
+    const single = getSingleDistinctUserOrgId();
+    if (orgId) {
+      if (single && String(single).trim() === String(orgId).trim()) {
+        sql += ` AND (
+          lower(trim(coalesce(source_org_id,''))) = lower(trim(?))
+          OR source_org_id IS NULL OR trim(coalesce(source_org_id,'')) = ''
+        )`;
+        params.push(orgId);
+      } else {
+        sql += ' AND lower(trim(coalesce(source_org_id,''))) = lower(trim(?))';
+        params.push(orgId);
+      }
+    }
 
     if (date) {
       sql += ' AND date = ?';

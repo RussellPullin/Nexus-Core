@@ -2015,7 +2015,7 @@ export default function ParticipantProfile() {
                 {data.case_notes.map((n) => (
                   <tr key={n.id}>
                     <td>{formatDate(n.contact_date)}</td>
-                    <td>{n.contact_type}</td>
+                    <td>{n.contact_type === 'support_shift' ? 'Support shift (session)' : n.contact_type}</td>
                     <td>{n.notes || '-'}</td>
                   </tr>
                 ))}

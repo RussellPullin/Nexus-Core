@@ -23,7 +23,6 @@ import {
   scheduleMirrorShiftsForStaffSqliteId,
 } from '../services/nexusPublicShiftsSync.service.js';
 import { availabilityFromRequestBody } from '../lib/staffAvailability.js';
-import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { tryPushStaffDocument, resolveOrgIdForStaff } from '../services/orgOnedriveSync.service.js';
 import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 
@@ -72,37 +71,14 @@ const complianceUpload = multer({
 
 const router = Router();
 
-function requesterScope(userId) {
-  if (!userId) return { orgId: null, superAdmin: false };
-  const u = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(userId);
-  return { orgId: u?.org_id || null, superAdmin: isSuperAdminEmail(u?.email) };
+function requesterOrgId(userId) {
+  if (!userId) return null;
+  return db.prepare('SELECT org_id FROM users WHERE id = ?').get(userId)?.org_id || null;
 }
 
-/**
- * Staff list scope: non–super-admins always see their org only.
- * Super admins default to their own org when they have users.org_id (avoids merging tenants in one DB).
- * Use ?all_orgs=1 for a global list; ?org_id= for another tenant (super admin only).
- */
-function resolveStaffListScope(req) {
-  const scope = requesterScope(req.session?.user?.id);
-  const allOrgs = req.query?.all_orgs === 'true' || req.query?.all_orgs === '1';
-  const rawQ = req.query?.org_id;
-  const qOrg = typeof rawQ === 'string' && rawQ.trim() !== '' ? rawQ.trim() : null;
-
-  if (!scope.superAdmin) {
-    if (!scope.orgId) return { mode: 'none' };
-    return { mode: 'scoped', orgId: scope.orgId };
-  }
-
-  if (allOrgs) return { mode: 'all' };
-  if (qOrg) return { mode: 'scoped', orgId: qOrg };
-  if (scope.orgId) return { mode: 'scoped', orgId: scope.orgId };
-  return { mode: 'all' };
-}
-
-function visibleStaffById(staffId, scope) {
-  if (scope?.orgId && !scope.superAdmin) {
-    return db.prepare('SELECT * FROM staff WHERE id = ? AND org_id = ?').get(staffId, scope.orgId);
+function visibleStaffById(staffId, orgId) {
+  if (orgId) {
+    return db.prepare('SELECT * FROM staff WHERE id = ? AND org_id = ?').get(staffId, orgId);
   }
   return db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
 }
@@ -168,14 +144,12 @@ function getProviderProfileForUser(userId) {
 router.get('/', async (req, res) => {
   try {
     const { include_archived } = req.query;
-    const listScope = resolveStaffListScope(req);
+    const orgId = requesterOrgId(req.session?.user?.id);
     let staff;
-    if (listScope.mode === 'none') {
-      staff = [];
-    } else if (listScope.mode === 'scoped') {
-      staff = db.prepare('SELECT * FROM staff WHERE org_id = ? ORDER BY name').all(listScope.orgId);
+    if (orgId) {
+      staff = db.prepare('SELECT * FROM staff WHERE org_id = ? ORDER BY name').all(orgId);
     } else {
-      staff = db.prepare('SELECT * FROM staff ORDER BY name').all();
+      staff = [];
     }
     if (include_archived !== 'true' && include_archived !== '1') {
       staff = staff.filter(s => !s.archived_at || s.archived_at === '');
@@ -209,8 +183,8 @@ router.post('/shifter-invites', requireAdminOrDelegate, async (req, res) => {
     if (!Array.isArray(staffIds) || staffIds.length === 0) {
       return res.status(400).json({ error: 'staff_ids array required' });
     }
-    const scope = requesterScope(req.session?.user?.id);
-    const getStaffById = (id) => visibleStaffById(id, scope);
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const getStaffById = (id) => visibleStaffById(id, orgId);
     const nexusOrgId = nexusOrgIdForSessionUser(req.session?.user?.id);
     const results = await sendShifterInvitesForStaffIds(staffIds, getStaffById, { nexusOrgId, db });
     res.json({ results });
@@ -228,8 +202,8 @@ export async function handleSetStaffShifterEnabled(req, res) {
   try {
     const staffId = req.params?.id ?? req.body?.staff_id;
     if (!staffId) return res.status(400).json({ error: 'staff_id required' });
-    const scope = requesterScope(req.session?.user?.id);
-    const s = visibleStaffById(staffId, scope);
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(staffId, orgId);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
     const shifter_enabled = Boolean(req.body?.shifter_enabled);
     const nexusOrgId = nexusOrgIdForSessionUser(req.session?.user?.id);
@@ -311,8 +285,8 @@ router.patch('/:id/shifter-enabled', requireAdminOrDelegate, handleSetStaffShift
 router.put('/:id/shifter-enabled', requireAdminOrDelegate, handleSetStaffShifterEnabled);
 
 router.get('/:id', async (req, res) => {
-  const scope = requesterScope(req.session?.user?.id);
-  const s = visibleStaffById(req.params.id, scope);
+  const orgId = requesterOrgId(req.session?.user?.id);
+  const s = visibleStaffById(req.params.id, orgId);
   if (!s) return res.status(404).json({ error: 'Staff not found' });
   const shifterDefaults = {
     shifter_enabled: false,
@@ -350,14 +324,14 @@ router.get('/:id/assignments', (req, res) => {
 
 router.post('/:id/assignments', requireAdminOrDelegate, (req, res) => {
   try {
-    const scope = requesterScope(req.session?.user?.id);
+    const orgId = requesterOrgId(req.session?.user?.id);
     const { participant_id } = req.body;
     if (!participant_id) return res.status(400).json({ error: 'participant_id required' });
     const staffId = req.params.id;
-    const staffRow = visibleStaffById(staffId, scope);
+    const staffRow = visibleStaffById(staffId, orgId);
     if (!staffRow) return res.status(404).json({ error: 'Staff not found' });
-    const partRow = scope.orgId && !scope.superAdmin
-      ? db.prepare('SELECT id FROM participants WHERE id = ? AND provider_org_id = ?').get(participant_id, scope.orgId)
+    const partRow = orgId
+      ? db.prepare('SELECT id FROM participants WHERE id = ? AND provider_org_id = ?').get(participant_id, orgId)
       : db.prepare('SELECT id FROM participants WHERE id = ?').get(participant_id);
     if (!partRow) return res.status(404).json({ error: 'Participant not found' });
     const id = uuidv4();
@@ -400,9 +374,10 @@ router.get('/:id/excel-summary', async (req, res) => {
     }
     const s = db.prepare('SELECT id, name FROM staff WHERE id = ? AND org_id = ?').get(req.params.id, orgId);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
+    const orgId = req.session?.user?.org_id || null;
     const { summaryRows } = await pullSummaryFromExcel({
       staffName: s.name,
-      orgId,
+      organizationId: orgId || undefined,
       log: (msg, data) => console.log('[staff excel-summary]', msg, data || ''),
     });
     res.json({ summaryRows });
@@ -433,12 +408,44 @@ router.get('/:id/shift-hours-summary', (req, res) => {
   }
 });
 
+router.post('/send-test-email', async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Staff id required' });
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(id, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+    if (!s.email?.trim()) return res.status(400).json({ error: 'Staff member has no email address' });
+
+    const userId = req.session?.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Not logged in' });
+
+    if (!isEmailConfiguredForUser(userId)) {
+      return res.status(400).json({
+        error: 'Connect your email in Settings to send messages.',
+        code: 'EMAIL_NOT_CONNECTED',
+        errorDetail: 'Open Settings and use Connect email (Gmail or Microsoft 365).'
+      });
+    }
+
+    const subject = 'Schedule Shift – Test email';
+    const text = `Hi ${s.name},\n\nThis is a test email from Schedule Shift. Your email integration is working correctly.\n\nYou will receive roster and shift notifications at this address.`;
+
+    await sendEmailViaRelay(userId, s.email, subject, text, null, null);
+
+    res.json({ ok: true, message: `Test email sent to ${s.email}` });
+  } catch (err) {
+    const msg = formatSmtpAuthError(err);
+    res.status(400).json({ error: msg });
+  }
+});
+
 // Start staff onboarding: create record, set token, send welcome email with form link and policy PDFs
 router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) => {
   try {
     const staffId = req.params.id;
-    const scope = requesterScope(req.session?.user?.id);
-    const s = visibleStaffById(staffId, scope);
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(staffId, orgId);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
     if (!s.email?.trim()) return res.status(400).json({ error: 'Staff member has no email address' });
     if (s.onboarding_status === 'complete') return res.status(400).json({ error: 'Onboarding already complete' });
@@ -516,7 +523,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
   } catch (err) {
     console.error('[start-onboarding]', err);
     const msg = formatSmtpAuthError(err);
-    res.status(400).json({ error: msg, errorDetail: err?.message });
+    res.status(400).json({ error: msg });
   }
 });
 
@@ -612,8 +619,8 @@ router.patch('/:id/compliance-documents/:docId', requireAdminOrDelegate, (req, r
 
 router.post('/:id/send-renewal-reminder', requireAdminOrDelegate, async (req, res) => {
   try {
-    const scope = requesterScope(req.session?.user?.id);
-    const s = visibleStaffById(req.params.id, scope);
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(req.params.id, orgId);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
     if (!s.email?.trim()) return res.status(400).json({ error: 'No email address' });
     const userId = req.session?.user?.id;
@@ -638,8 +645,8 @@ router.post('/:id/send-renewal-reminder', requireAdminOrDelegate, async (req, re
 
 router.post('/:id/renewal-link', requireAdminOrDelegate, async (req, res) => {
   try {
-    const scope = requesterScope(req.session?.user?.id);
-    const s = visibleStaffById(req.params.id, scope);
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(req.params.id, orgId);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
     if (!s.email?.trim()) return res.status(400).json({ error: 'No email address' });
     const userId = req.session?.user?.id;
@@ -664,9 +671,8 @@ router.post('/:id/renewal-link', requireAdminOrDelegate, async (req, res) => {
 
 router.post('/', requireAdminOrDelegate, async (req, res) => {
   try {
-    const scope = requesterScope(req.session?.user?.id);
-    const targetOrgId = scope.superAdmin ? (req.body?.org_id || scope.orgId || null) : scope.orgId;
-    if (!targetOrgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
+    const orgId = requesterOrgId(req.session?.user?.id);
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
     const id = uuidv4();
     const { name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate } = req.body;
     const { present: availPresent, value: availabilityJson } = availabilityFromRequestBody(req.body);
@@ -675,7 +681,7 @@ router.post('/', requireAdminOrDelegate, async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_started', ?)
     `).run(
       id,
-      targetOrgId,
+      orgId,
       name || '',
       email || null,
       phone || null,
@@ -706,8 +712,8 @@ function normStaffEmail(e) {
 
 router.put('/:id', requireAdminOrDelegate, async (req, res) => {
   try {
-    const scope = requesterScope(req.session?.user?.id);
-    const existing = visibleStaffById(req.params.id, scope);
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const existing = visibleStaffById(req.params.id, orgId);
     if (!existing) return res.status(404).json({ error: 'Staff not found' });
     const { name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate } = req.body;
     const before = db.prepare('SELECT email, availability_json FROM staff WHERE id = ?').get(req.params.id);
@@ -750,8 +756,8 @@ router.put('/:id', requireAdminOrDelegate, async (req, res) => {
 // Archive staff (soft delete) (admin/delegate only)
 router.post('/:id/archive', requireAdminOrDelegate, (req, res) => {
   try {
-    const scope = requesterScope(req.session?.user?.id);
-    const existing = visibleStaffById(req.params.id, scope);
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const existing = visibleStaffById(req.params.id, orgId);
     if (!existing) return res.status(404).json({ error: 'Staff not found' });
     db.prepare('UPDATE staff SET archived_at = datetime(\'now\') WHERE id = ?').run(req.params.id);
     res.json({ id: req.params.id, archived: true });
@@ -763,8 +769,8 @@ router.post('/:id/archive', requireAdminOrDelegate, (req, res) => {
 // Unarchive staff (admin/delegate only)
 router.post('/:id/unarchive', requireAdminOrDelegate, (req, res) => {
   try {
-    const scope = requesterScope(req.session?.user?.id);
-    const existing = visibleStaffById(req.params.id, scope);
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const existing = visibleStaffById(req.params.id, orgId);
     if (!existing) return res.status(404).json({ error: 'Staff not found' });
     db.prepare('UPDATE staff SET archived_at = NULL WHERE id = ?').run(req.params.id);
     res.json({ id: req.params.id, archived: false });
@@ -774,8 +780,8 @@ router.post('/:id/unarchive', requireAdminOrDelegate, (req, res) => {
 });
 
 router.delete('/:id', requireAdminOrDelegate, (req, res) => {
-  const scope = requesterScope(req.session?.user?.id);
-  const existing = visibleStaffById(req.params.id, scope);
+  const orgId = requesterOrgId(req.session?.user?.id);
+  const existing = visibleStaffById(req.params.id, orgId);
   if (!existing) return res.status(404).json({ error: 'Staff not found' });
   const shiftIds = db.prepare('SELECT id FROM shifts WHERE staff_id = ?').all(req.params.id).map((r) => r.id);
   db.prepare('DELETE FROM staff WHERE id = ?').run(req.params.id);

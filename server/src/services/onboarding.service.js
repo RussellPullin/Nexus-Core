@@ -188,7 +188,8 @@ export function getOnboardingByParticipant(participantId) {
 
   const intakeFields = getIntakeFields(onboarding.id);
   const forms = db.prepare(`
-    SELECT pfi.*, ft.form_type, ft.display_name, ft.version as template_version, ft.renewal_days, ft.legal_basis
+    SELECT pfi.*, ft.form_type, ft.display_name, ft.version as template_version, ft.renewal_days, ft.legal_basis,
+           ft.template_filename
     FROM participant_form_instances pfi
     JOIN form_templates ft ON ft.id = pfi.form_template_id
     WHERE pfi.participant_onboarding_id = ?
@@ -543,8 +544,13 @@ export async function generateFormPack({
   const templates = allTemplates.filter((t) => ['service_agreement', 'support_plan', 'privacy_consent'].includes(t.form_type));
   if (!templates.length) throw new Error('No templates configured. Save intake first to enable auto-filled forms.');
 
+  const organisationId = onboarding.organisation_id || null;
+  const pathOpts = (t) => ({
+    organisationId,
+    templateFilename: t.template_filename || null
+  });
+
   const snapshot = buildPrefillSnapshot(participantId, onboarding.id);
-  const consentFormPath = getConsentFormPath();
   const generatedIds = [];
   const insertForm = db.prepare(`
     INSERT INTO participant_form_instances (
@@ -559,7 +565,8 @@ export async function generateFormPack({
   const signatureOptions = coordinatorSignatureDataUrl ? { coordinatorSignatureDataUrl } : {};
 
   for (const template of templates) {
-    if (template.form_type === 'privacy_consent' && !consentFormPath) continue;
+    const tmplPath = pathOpts(template);
+    if (template.form_type === 'privacy_consent' && !getConsentFormPath(tmplPath)) continue;
     const version = getNextFormVersion(onboarding.id, template.id);
     const dueAtBase = new Date();
     const renewalDays = template.renewal_days || 365;
@@ -567,28 +574,44 @@ export async function generateFormPack({
     let draftPath;
     let sourceJson;
     if (template.form_type === 'privacy_consent') {
-      const filledDocx = fillConsentForm(participant, intake, signatureOptions);
+      const filledDocx = fillConsentForm(participant, intake, { ...signatureOptions, ...tmplPath });
       const pdfBuffer = convertDocxToPdf(filledDocx);
       const ext = pdfBuffer ? 'pdf' : 'docx';
       draftPath = persistFilledDocument(participantId, template.form_type, version, pdfBuffer || filledDocx, ext);
       sourceJson = JSON.stringify({ ...snapshot, template: { id: template.id, form_type: 'privacy_consent', display_name: template.display_name } });
-    } else if (template.form_type === 'service_agreement' && getServiceAgreementTemplatePath()) {
-      const filledBuffer = await fillServiceAgreement(participant, plan, intake, { ...signatureOptions, db });
+    } else if (template.form_type === 'service_agreement' && getServiceAgreementTemplatePath(tmplPath)) {
+      const filledBuffer = await fillServiceAgreement(participant, plan, intake, { ...signatureOptions, db, ...tmplPath });
       draftPath = persistFilledDocument(participantId, template.form_type, version, filledBuffer, 'pdf');
       sourceJson = JSON.stringify({
         ...snapshot,
         template: { id: template.id, form_type: 'service_agreement', display_name: template.display_name, version: template.template_version || template.version },
         mapping: parseJson(template.mapping_json, {})
       });
-    } else if (template.form_type === 'support_plan' && getSupportPlanTemplatePath()) {
-      const filledBuffer = await fillSupportPlan(participant, plan, intake, signatureOptions);
-      const ext = getSupportPlanTemplatePath().type === 'docx' ? 'docx' : 'pdf';
-      draftPath = persistFilledDocument(participantId, template.form_type, version, filledBuffer, ext);
-      sourceJson = JSON.stringify({
-        ...snapshot,
-        template: { id: template.id, form_type: 'support_plan', display_name: template.display_name, version: template.template_version || template.version },
-        mapping: parseJson(template.mapping_json, {})
-      });
+    } else if (template.form_type === 'support_plan') {
+      const spTpl = getSupportPlanTemplatePath(tmplPath);
+      if (spTpl) {
+        const filledBuffer = await fillSupportPlan(participant, plan, intake, { ...signatureOptions, ...tmplPath });
+        const ext = spTpl.type === 'docx' ? 'docx' : 'pdf';
+        draftPath = persistFilledDocument(participantId, template.form_type, version, filledBuffer, ext);
+        sourceJson = JSON.stringify({
+          ...snapshot,
+          template: { id: template.id, form_type: 'support_plan', display_name: template.display_name, version: template.template_version || template.version },
+          mapping: parseJson(template.mapping_json, {})
+        });
+      } else {
+        const formSnapshot = {
+          ...snapshot,
+          template: {
+            id: template.id,
+            form_type: template.form_type,
+            display_name: template.display_name,
+            version: template.template_version || template.version
+          },
+          mapping: parseJson(template.mapping_json, {})
+        };
+        draftPath = persistGeneratedDraft(participantId, template.form_type, version, formSnapshot);
+        sourceJson = JSON.stringify(formSnapshot);
+      }
     } else {
       const formSnapshot = {
         ...snapshot,

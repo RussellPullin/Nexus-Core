@@ -362,6 +362,21 @@ try {
     if (!e.message?.includes('already exists')) console.warn('users migration:', e.message);
   }
 
+  // case_notes.shift_id: mirror completed shift session notes into case notes (quarterly reporting / CRM)
+  try {
+    const cnCols = db.prepare('PRAGMA table_info(case_notes)').all();
+    if (cnCols.length && !cnCols.some((c) => c.name === 'shift_id')) {
+      db.exec('ALTER TABLE case_notes ADD COLUMN shift_id TEXT');
+    }
+    if (cnCols.length) {
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_case_notes_shift_id ON case_notes(shift_id) WHERE shift_id IS NOT NULL'
+      );
+    }
+  } catch (e) {
+    if (!e.message?.includes('duplicate column')) console.warn('case_notes.shift_id migration:', e.message);
+  }
+
   // progress_notes: evidence of actual delivery, links to shifts for invoicing/payroll
   try {
     db.exec(`
@@ -997,6 +1012,19 @@ try {
   }
 
   try {
+    let biVoidCols = db.prepare('PRAGMA table_info(billing_invoices)').all();
+    if (!biVoidCols.some((c) => c.name === 'voided_at')) {
+      db.exec('ALTER TABLE billing_invoices ADD COLUMN voided_at TEXT');
+    }
+    biVoidCols = db.prepare('PRAGMA table_info(billing_invoices)').all();
+    if (!biVoidCols.some((c) => c.name === 'void_reason')) {
+      db.exec('ALTER TABLE billing_invoices ADD COLUMN void_reason TEXT');
+    }
+  } catch (e) {
+    if (!e.message?.includes('duplicate column')) console.warn('billing_invoices void columns migration:', e.message);
+  }
+
+  try {
     const shiftCols = db.prepare("PRAGMA table_info(shifts)").all();
     if (!shiftCols.some(c => c.name === 'billing_invoice_id')) {
       db.exec('ALTER TABLE shifts ADD COLUMN billing_invoice_id TEXT REFERENCES billing_invoices(id) ON DELETE SET NULL');
@@ -1159,7 +1187,20 @@ try {
     if (!businessCols.some((c) => c.name === 'org_id')) {
       db.exec('ALTER TABLE business_settings ADD COLUMN org_id TEXT');
     }
-    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS business_settings_org_unique ON business_settings(org_id) WHERE org_id IS NOT NULL');
+    // Non-partial UNIQUE on org_id: required for INSERT ... ON CONFLICT(org_id). Partial unique indexes are not valid UPSERT conflict targets in SQLite.
+    try {
+      const idx = db.prepare(`SELECT sql FROM sqlite_master WHERE type='index' AND name='business_settings_org_unique'`).get();
+      if (idx?.sql && /\bWHERE\b/i.test(idx.sql)) {
+        db.exec('DROP INDEX business_settings_org_unique');
+      }
+    } catch (e) {
+      console.warn('business_settings_org_unique migration (drop partial):', e.message);
+    }
+    try {
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS business_settings_org_unique ON business_settings(org_id)');
+    } catch (e) {
+      console.warn('business_settings_org_unique index:', e.message);
+    }
     if (!businessCols.some((c) => c.name === 'accounting_provider')) {
       db.exec('ALTER TABLE business_settings ADD COLUMN accounting_provider TEXT');
     }
@@ -1171,6 +1212,27 @@ try {
     }
   } catch (e) {
     if (!e.message?.includes('duplicate column')) console.warn('business_settings xero migration:', e.message);
+  }
+
+  // Tie legacy id='default' to the sole CRM tenant so SELECT ... WHERE org_id = ? finds it (startup only; avoids runtime fallback that leaked default into other orgs).
+  try {
+    const def = db.prepare(`SELECT org_id AS o FROM business_settings WHERE id = 'default'`).get();
+    if (def && def.o == null) {
+      const distinctRow = db
+        .prepare(`SELECT COUNT(DISTINCT org_id) AS c FROM users WHERE org_id IS NOT NULL`)
+        .get();
+      if (distinctRow?.c === 1) {
+        const one = db.prepare(`SELECT org_id FROM users WHERE org_id IS NOT NULL LIMIT 1`).get();
+        if (one?.org_id) {
+          const taken = db.prepare(`SELECT 1 AS x FROM business_settings WHERE org_id = ?`).get(one.org_id);
+          if (!taken) {
+            db.prepare(`UPDATE business_settings SET org_id = ? WHERE id = 'default' AND org_id IS NULL`).run(one.org_id);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    if (!e.message?.includes('no such table')) console.warn('business_settings default org_id backfill:', e.message);
   }
 
   // ── End Learning Layer tables ─────────────────────────────────────────────
@@ -1356,6 +1418,9 @@ try {
     }
     if (!userCols.some(c => c.name === 'signature_data')) {
       db.exec('ALTER TABLE users ADD COLUMN signature_data TEXT');
+    }
+    if (!userCols.some((c) => c.name === 'ollama_local_base_url')) {
+      db.exec('ALTER TABLE users ADD COLUMN ollama_local_base_url TEXT');
     }
   } catch (e) {
     if (!e.message?.includes('duplicate column')) console.warn('users coordinator migration:', e.message);

@@ -7,6 +7,16 @@
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 const AI_ENABLED = process.env.AI_ENABLED !== 'false';
 
+function ollamaBaseLooksLikeLocalhost() {
+  try {
+    const u = new URL(OLLAMA_BASE_URL);
+    const h = u.hostname.toLowerCase();
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1';
+  } catch {
+    return false;
+  }
+}
+
 /** When OLLAMA_MODEL is not set, we use the first model returned by Ollama (e.g. gemma3). */
 let cachedFirstModel = null;
 
@@ -26,7 +36,7 @@ export async function isAvailable() {
 
 /**
  * Check Ollama connection and return status plus optional error message for the UI.
- * @returns {Promise<{ available: boolean, error?: string }>}
+ * @returns {Promise<{ available: boolean, error?: string, warning?: string }>}
  */
 export async function getConnectionStatus() {
   if (!AI_ENABLED) return { available: false, error: 'AI is disabled (AI_ENABLED=false)' };
@@ -39,17 +49,43 @@ export async function getConnectionStatus() {
       if (Array.isArray(models) && models.length > 0 && models[0]?.name) {
         cachedFirstModel = models[0].name;
       }
-      return { available: true };
+      const noModels =
+        !Array.isArray(models) ||
+        models.length === 0 ||
+        !models.some((m) => m && String(m.name || '').trim());
+      return {
+        available: true,
+        ...(noModels
+          ? {
+              warning:
+                'Ollama is running but no models are installed. In Terminal run: ollama pull llama3.2 (or set OLLAMA_MODEL in server .env after pulling that model).'
+            }
+          : {})
+      };
     }
     return { available: false, error: `Ollama returned ${res.status}. Check that the app is open.` };
   } catch (err) {
     const code = err?.code || err?.cause?.code;
     const message = err?.message || String(err);
     if (code === 'ECONNREFUSED' || message.includes('ECONNREFUSED')) {
-      return { available: false, error: `Cannot reach Ollama at ${OLLAMA_BASE_URL}. Open the Ollama app on this machine.` };
+      if (ollamaBaseLooksLikeLocalhost()) {
+        return {
+          available: false,
+          error: `Cannot reach Ollama at ${OLLAMA_BASE_URL} from the API server. On cloud hosting, localhost is the server machine, not your laptop. Options: enable org feature "AI: Ollama on staff computers" and use Settings → Ollama on this computer; or set OLLAMA_BASE_URL to an Ollama the API can reach; or run Nexus and Ollama on the same host.`
+        };
+      }
+      return {
+        available: false,
+        error: `Cannot reach Ollama at ${OLLAMA_BASE_URL}. Run Ollama on the same machine (or network) as the Nexus API, or change OLLAMA_BASE_URL.`
+      };
     }
     if (code === 'ABORT_ERR' || message.includes('timeout')) {
-      return { available: false, error: 'Connection timed out. Is Ollama running?' };
+      return {
+        available: false,
+        error: ollamaBaseLooksLikeLocalhost()
+          ? `Timed out reaching ${OLLAMA_BASE_URL}. If the API runs in the cloud, localhost Ollama on your PC will not work — see Settings (per-computer Ollama) or set OLLAMA_BASE_URL.`
+          : 'Connection timed out. Is Ollama running?'
+      };
     }
     return { available: false, error: message || 'Connection failed.' };
   }

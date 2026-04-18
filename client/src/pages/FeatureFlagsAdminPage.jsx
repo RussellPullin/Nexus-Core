@@ -64,19 +64,28 @@ export default function FeatureFlagsAdminPage() {
     );
   }
 
-  const { orgs = [], feature_defs = [], matrix = {}, supabase_configured } = matrixPayload || {};
+  const {
+    orgs = [],
+    feature_defs = [],
+    matrix = {},
+    supabase_configured,
+    scoped_to_own_org: scopedToOwnOrg
+  } = matrixPayload || {};
+
+  const singleOrg = orgs.length === 1 ? orgs[0] : null;
 
   return (
     <div className="admin-page">
       <h2>Organisation feature flags</h2>
       <p style={{ color: '#64748b', maxWidth: 720 }}>
-        Toggles update <code>public.org_features</code> in Supabase. Each Nexus user&apos;s <code>org_id</code> must match the
-        same UUID in Supabase <code>organizations</code>. Set <code>NEXUS_SUPER_ADMIN_EMAILS</code> in server env for access.
+        {scopedToOwnOrg || singleOrg
+          ? 'Turn features on or off for your organisation only.'
+          : 'Turn features on or off per organisation. Access to this page is limited to super-admin accounts configured by your host.'}
       </p>
 
       {!supabase_configured && (
         <div className="settings-error" style={{ marginBottom: '1rem' }}>
-          Supabase is not configured on the server (<code>SUPABASE_URL</code> / <code>SUPABASE_SERVICE_ROLE_KEY</code>).
+          Organisation features are not available until your administrator finishes server setup.
         </div>
       )}
 
@@ -88,9 +97,62 @@ export default function FeatureFlagsAdminPage() {
 
       {loading && <p>Loading…</p>}
 
-      {!loading && orgs.length === 0 && <p>No organisations in Nexus yet. Create one under Directory / org setup first.</p>}
+      {!loading && orgs.length === 0 && (
+        <p>No organisation found for your account. Create one under Directory / org setup first, or ask your host to assign you to an organisation.</p>
+      )}
 
-      {!loading && orgs.length > 0 && (
+      {!loading && singleOrg && (
+        <div
+          style={{
+            maxWidth: 560,
+            border: '1px solid #e2e8f0',
+            borderRadius: 8,
+            padding: '1.25rem',
+            background: '#fafafa'
+          }}
+        >
+          <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.15rem' }}>{singleOrg.name}</h3>
+          <p className="form-hint" style={{ marginTop: 0, marginBottom: '1rem' }}>
+            Toggle features for this organisation only.
+          </p>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {feature_defs.map((fd) => {
+              const on = Boolean(matrix[singleOrg.id]?.[fd.key]);
+              const busy = pending.has(`${singleOrg.id}:${fd.key}`);
+              return (
+                <li
+                  key={fd.key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.75rem',
+                    padding: '0.6rem 0',
+                    borderBottom: '1px solid #f1f5f9'
+                  }}
+                >
+                  <label style={{ cursor: busy ? 'wait' : 'pointer', userSelect: 'none', display: 'flex', gap: '0.75rem', flex: 1 }}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={busy || !supabase_configured}
+                      onChange={(e) => toggle(singleOrg.id, fd.key, e.target.checked)}
+                      aria-label={fd.label || fd.key}
+                    />
+                    <span>
+                      <span style={{ fontWeight: 500 }}>{fd.label || fd.key}</span>
+                      <span className="form-hint" style={{ display: 'block', fontSize: '0.85rem' }}>
+                        {fd.key}
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {!loading && !singleOrg && orgs.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
           <table className="table" style={{ minWidth: 480 }}>
             <thead>

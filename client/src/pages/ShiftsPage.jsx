@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatDate, formatDateLocal } from '../lib/dateUtils';
 import { useSearchParams } from 'react-router-dom';
-import { shifts, participants, staff, appShifts, syncFromExcel } from '../lib/api';
+import { shifts, participants, staff, appShifts, syncFromExcel, syncFromShifter } from '../lib/api';
 import WeekPlanner from '../components/WeekPlanner';
 import SearchableSelect from '../components/SearchableSelect';
 import SuggestionPanel from '../components/SuggestionPanel';
@@ -56,6 +56,7 @@ export default function ShiftsPage() {
   const [appShiftsList, setAppShiftsList] = useState([]);
   const [showAppShifts, setShowAppShifts] = useState(true);
   const [syncingExcel, setSyncingExcel] = useState(false);
+  const [syncingShifter, setSyncingShifter] = useState(false);
   const [resolvingShift, setResolvingShift] = useState(null);
   const sendAfterRef = useRef(false);
   const formRef = useRef(null);
@@ -74,15 +75,25 @@ export default function ShiftsPage() {
     }
   };
 
+  const getDisplayedWeekRange = () => {
+    const start = formatDateLocal(weekStart);
+    const end = new Date(weekStart);
+    end.setDate(end.getDate() + 6);
+    const endStr = formatDateLocal(end);
+    return { start, endStr, apiStart: `${start}T00:00:00`, apiEnd: `${endStr}T23:59:59` };
+  };
+
+  const shiftDetailPeriodQuery = () => {
+    const { start, endStr } = getDisplayedWeekRange();
+    return `periodStart=${encodeURIComponent(start)}&periodEnd=${encodeURIComponent(endStr)}`;
+  };
+
   const load = async (opts = {}) => {
     if (!opts.silent) setLoading(true);
     try {
-      const start = formatDateLocal(weekStart);
-      const end = new Date(weekStart);
-      end.setDate(end.getDate() + 6);
-      const endStr = formatDateLocal(end);
+      const { apiStart, apiEnd } = getDisplayedWeekRange();
       const [s, p, st] = await Promise.all([
-        shifts.list({ start: `${start}T00:00:00`, end: `${endStr}T23:59:59` }),
+        shifts.list({ start: apiStart, end: apiEnd }),
         participants.list(),
         staff.list()
       ]);
@@ -112,23 +123,45 @@ export default function ShiftsPage() {
     loadAppShifts();
   }, [weekStart]);
 
+  const alertSyncResult = (result, label) => {
+    const newCount = (result?.matched ?? 0) + (result?.unmatched ?? 0);
+    const message = newCount === 0
+      ? `No new shifts from ${label}.`
+      : newCount === 1
+        ? `1 new shift from ${label}.`
+        : `${newCount} new shifts from ${label}.`;
+    if (result?.source === 'shifter_supabase_fallback') {
+      alert(`${message} (OneDrive file was missing; used Shifter database instead.)`);
+    } else {
+      alert(message);
+    }
+  };
+
   const handleSyncFromExcel = async () => {
     setSyncingExcel(true);
     try {
       const result = await syncFromExcel.run();
       loadAppShifts();
       load();
-      const newCount = (result?.matched ?? 0) + (result?.unmatched ?? 0);
-      const message = newCount === 0
-        ? 'No new shifts from Excel.'
-        : newCount === 1
-          ? '1 new shift has been uploaded.'
-          : `${newCount} new shifts have been uploaded.`;
-      alert(message);
+      alertSyncResult(result, 'Excel / OneDrive');
     } catch (err) {
       alert(err.message || 'Sync from Excel failed');
     } finally {
       setSyncingExcel(false);
+    }
+  };
+
+  const handleSyncFromShifter = async () => {
+    setSyncingShifter(true);
+    try {
+      const result = await syncFromShifter.run();
+      loadAppShifts();
+      load();
+      alertSyncResult(result, 'Shifter');
+    } catch (err) {
+      alert(err.message || 'Sync from Shifter failed');
+    } finally {
+      setSyncingShifter(false);
     }
   };
 
@@ -474,23 +507,36 @@ export default function ShiftsPage() {
             {showAppShifts ? '▼' : '▶'}
           </button>
           Shifts from App ({appShiftsList.length})
-          <button
-            type="button"
-            onClick={handleSyncFromExcel}
-            disabled={syncingExcel}
-            style={{ marginLeft: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.8rem', cursor: syncingExcel ? 'wait' : 'pointer' }}
-          >
-            {syncingExcel ? 'Running shift pull…' : 'Run shift pull now'}
-          </button>
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={handleSyncFromExcel}
+              disabled={syncingExcel || syncingShifter}
+              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', cursor: syncingExcel || syncingShifter ? 'wait' : 'pointer' }}
+            >
+              {syncingExcel ? 'Pulling Excel…' : 'Pull from OneDrive Excel'}
+            </button>
+            <button
+              type="button"
+              onClick={handleSyncFromShifter}
+              disabled={syncingExcel || syncingShifter}
+              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', cursor: syncingExcel || syncingShifter ? 'wait' : 'pointer' }}
+            >
+              {syncingShifter ? 'Pulling Shifter…' : 'Pull from Shifter DB'}
+            </button>
+          </span>
         </h3>
         <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-          Pull shifts from the Progress Notes Excel file in OneDrive. Uses your organisation&apos;s Microsoft OneDrive connection in Settings (or legacy server Excel settings). Matched staff/client appear in Shifts; unmatched appear here for manual linking.
+          Shifts can come from the Progress app (webhook), from an Excel workbook on OneDrive (connect Microsoft in Settings and set the path in
+          Shifter), or from Shifter directly — use <strong>Pull from Shifter DB</strong> when shifts already live there. Matched names become
+          shifts; unmatched rows stay here for linking.
         </p>
         {showAppShifts && (
           <div style={{ marginTop: '0.75rem', maxHeight: 300, overflowY: 'auto' }}>
             {appShiftsList.length === 0 ? (
               <div className="empty-state" style={{ padding: '1rem', fontSize: '0.9rem', color: '#64748b' }}>
-                No shifts yet. Click &quot;Run shift pull now&quot; to pull from the OneDrive Excel file, or set up links in Settings → Schedule Shift App Link.
+                No shifts yet. Use Pull from OneDrive Excel or Pull from Shifter DB, or ensure the Progress app can reach your Nexus webhook (see
+                Settings → Shifter).
                 <div style={{ marginTop: '0.6rem' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => navigate('/settings')}>
                     Open Settings
@@ -701,6 +747,7 @@ export default function ShiftsPage() {
                     <th>Participant</th>
                     <th>Staff</th>
                     <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Charges</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -712,9 +759,12 @@ export default function ShiftsPage() {
                       <td>{s.participant_name}</td>
                       <td>{s.staff_name}</td>
                       <td><span className={`badge badge-${s.status}`}>{s.status}</span></td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                        ${Number(s.charges_total ?? 0).toFixed(2)}
+                      </td>
                       <td>
                         {s.roster_sent_at && <span className="badge badge-completed" style={{ marginRight: '0.25rem' }} title="Roster sent">Sent</span>}
-                        <button className="btn btn-primary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} onClick={() => navigate(`/shifts/${s.id}`)}>View / Charges</button>
+                        <button className="btn btn-primary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} onClick={() => navigate(`/shifts/${s.id}?${shiftDetailPeriodQuery()}`)}>View / Charges</button>
                         <a href={shifts.icsUrl(s.id)} download className="btn btn-secondary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} title="Download ICS">ICS</a>
                         <button className="btn btn-secondary" style={{ fontSize: '0.75rem' }} onClick={() => handleEditShift(s)}>Edit</button>
                       </td>
@@ -836,7 +886,7 @@ export default function ShiftsPage() {
                   {editingShift ? 'Save & send to staff' : 'Create & send to staff'}
                 </button>
                 {editingShift && (
-                  <button type="button" className="btn btn-primary" onClick={() => { setShowModal(false); setEditingShift(null); navigate(`/shifts/${editingShift.id}`); }}>
+                  <button type="button" className="btn btn-primary" onClick={() => { setShowModal(false); setEditingShift(null); navigate(`/shifts/${editingShift.id}?${shiftDetailPeriodQuery()}`); }}>
                     View / Charges
                   </button>
                 )}

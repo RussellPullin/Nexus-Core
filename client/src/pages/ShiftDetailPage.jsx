@@ -1,7 +1,25 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { shifts, ndis, invoices } from '../lib/api';
-import { formatDate } from '../lib/dateUtils';
+import { formatDate, formatDateLocal } from '../lib/dateUtils';
+
+function mondayOfWeekContaining(d) {
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d);
+  monday.setDate(diff);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+function weekRangeFromShiftStart(isoStart) {
+  const d = new Date(String(isoStart).replace(' ', 'T'));
+  if (isNaN(d.getTime())) return null;
+  const monday = mondayOfWeekContaining(d);
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  return { periodStart: formatDateLocal(monday), periodEnd: formatDateLocal(sunday) };
+}
 
 const CLAIM_TYPES = [
   { value: 'standard', label: 'Direct Service' },
@@ -19,6 +37,9 @@ function toDatetimeLocal(dt) {
 export default function ShiftDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const periodStartQ = searchParams.get('periodStart');
+  const periodEndQ = searchParams.get('periodEnd');
   const [shift, setShift] = useState(null);
   const [lineItems, setLineItems] = useState([]);
   const [ndisItems, setNdisItems] = useState([]);
@@ -36,6 +57,9 @@ export default function ShiftDetailPage() {
   const [showAddTravel, setShowAddTravel] = useState(false);
   const [addTravelQty, setAddTravelQty] = useState('');
   const [shiftReceipts, setShiftReceipts] = useState([]);
+  const [periodNavShifts, setPeriodNavShifts] = useState(null);
+  const [periodNavLoading, setPeriodNavLoading] = useState(false);
+  const [effectivePeriod, setEffectivePeriod] = useState(null);
 
   const loadShiftData = async () => {
     if (!id) return;
@@ -78,6 +102,56 @@ export default function ShiftDetailPage() {
     }
     loadShiftData();
   }, [id]);
+
+  useEffect(() => {
+    if (!shift?.start_time) {
+      setPeriodNavShifts(null);
+      setEffectivePeriod(null);
+      return;
+    }
+    const range =
+      periodStartQ && periodEndQ
+        ? { periodStart: periodStartQ, periodEnd: periodEndQ }
+        : weekRangeFromShiftStart(shift.start_time);
+    if (!range) {
+      setPeriodNavShifts(null);
+      setEffectivePeriod(null);
+      return;
+    }
+    setEffectivePeriod(range);
+    let cancelled = false;
+    setPeriodNavLoading(true);
+    shifts
+      .list({ start: `${range.periodStart}T00:00:00`, end: `${range.periodEnd}T23:59:59` })
+      .then((list) => {
+        if (!cancelled) setPeriodNavShifts(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setPeriodNavShifts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPeriodNavLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [shift?.start_time, periodStartQ, periodEndQ, id]);
+
+  const { prevShift, nextShift, periodQueryStr, showPeriodNav } = useMemo(() => {
+    if (!effectivePeriod || !periodNavShifts?.length) {
+      return { prevShift: null, nextShift: null, periodQueryStr: '', showPeriodNav: false };
+    }
+    const q = `periodStart=${encodeURIComponent(effectivePeriod.periodStart)}&periodEnd=${encodeURIComponent(effectivePeriod.periodEnd)}`;
+    const navIdx = periodNavShifts.findIndex((s) => s.id === id);
+    if (navIdx < 0) return { prevShift: null, nextShift: null, periodQueryStr: q, showPeriodNav: false };
+    const show = periodNavShifts.length > 1;
+    return {
+      prevShift: navIdx > 0 ? periodNavShifts[navIdx - 1] : null,
+      nextShift: navIdx < periodNavShifts.length - 1 ? periodNavShifts[navIdx + 1] : null,
+      periodQueryStr: q,
+      showPeriodNav: show
+    };
+  }, [effectivePeriod, periodNavShifts, id]);
 
   // When existing line items exist, filter by same support_category so next items suit the first
   const getSupportCategoryFromItem = (item) => {
@@ -370,7 +444,33 @@ export default function ShiftDetailPage() {
         {tab === 'finance' && (
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0 }}>Charges</h3>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <h3 style={{ margin: 0 }}>Charges</h3>
+                {!periodNavLoading && showPeriodNav && periodQueryStr && (
+                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                      disabled={!prevShift}
+                      onClick={() => prevShift && navigate(`/shifts/${prevShift.id}?${periodQueryStr}`)}
+                      title="Previous shift in this week (same order as Shifts table)"
+                    >
+                      ← Previous
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                      disabled={!nextShift}
+                      onClick={() => nextShift && navigate(`/shifts/${nextShift.id}?${periodQueryStr}`)}
+                      title="Next shift in this week (same order as Shifts table)"
+                    >
+                      Next →
+                    </button>
+                  </div>
+                )}
+              </div>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <button type="button" className="btn btn-primary" onClick={openAddCharge}>
                   Add Charge

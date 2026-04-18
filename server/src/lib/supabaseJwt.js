@@ -8,7 +8,7 @@ import { getSupabaseServiceRoleClient } from '../services/supabaseStaffShifter.s
 export async function verifySupabaseAccessToken(accessToken) {
   const admin = getSupabaseServiceRoleClient();
   if (!admin || !accessToken) {
-    const err = new Error('Supabase JWT verification is not configured');
+    const err = new Error('Sign-in verification is not configured on the server.');
     err.code = 'AUTH_CONFIG';
     throw err;
   }

@@ -1,6 +1,7 @@
 /**
  * Per-org Microsoft 365 connection for OneDrive document archive (delegated OAuth).
  * Add redirect URI: {OAUTH_PUBLIC_URL}/api/integrations/microsoft-drive/callback
+ * (OAUTH_PUBLIC_URL = API origin only, e.g. https://app.fly.dev — not the full callback path.)
  * Azure app needs Files.ReadWrite.All (admin consent typical for org-wide).
  */
 import { Router } from 'express';
@@ -15,23 +16,13 @@ import {
   syncRegisterWorkbookNow,
   syncTemplateRegistersNow
 } from '../services/orgOnedriveSync.service.js';
+import { buildSettingsRedirectLocation } from '../lib/frontendBaseUrl.js';
+import { oauthApiPublicOrigin } from '../lib/oauthPublicOrigin.js';
 
 const router = Router();
 
 const DRIVE_SCOPES =
   'offline_access openid profile User.Read Files.ReadWrite.All';
-
-function apiPublicBase(req) {
-  const env = process.env.OAUTH_PUBLIC_URL?.trim();
-  if (env) return env.replace(/\/$/, '');
-  return `${req.protocol}://${req.get('host')}`;
-}
-
-function frontendBase(req) {
-  const env = process.env.FRONTEND_ORIGIN?.trim();
-  if (env) return env.replace(/\/$/, '');
-  return `${req.protocol}://${req.get('host')}`;
-}
 
 router.get('/status', requireAuth, (req, res) => {
   try {
@@ -118,7 +109,7 @@ router.get('/start', requireAuth, requireAdmin, (req, res) => {
     return res.status(400).send('Your user has no organisation. Complete organisation setup first.');
   }
   const tenant = process.env.MICROSOFT_OAUTH_TENANT || 'common';
-  const redirectUri = `${apiPublicBase(req)}/api/integrations/microsoft-drive/callback`;
+  const redirectUri = `${oauthApiPublicOrigin(req)}/api/integrations/microsoft-drive/callback`;
   const state = signOAuthState({
     uid: req.session.user.id,
     orgId: u.org_id,
@@ -138,8 +129,8 @@ router.get('/start', requireAuth, requireAdmin, (req, res) => {
 });
 
 router.get('/callback', async (req, res) => {
-  const front = `${frontendBase(req)}/settings`;
-  const errRedirect = (msg) => res.redirect(`${front}?ms_drive_error=${encodeURIComponent(msg)}`);
+  const errRedirect = (msg) =>
+    res.redirect(buildSettingsRedirectLocation(req, `?ms_drive_error=${encodeURIComponent(msg)}`));
 
   try {
     const { code, state, error, error_description } = req.query;
@@ -150,7 +141,7 @@ router.get('/callback', async (req, res) => {
     const cid = process.env.MICROSOFT_OAUTH_CLIENT_ID?.trim();
     const secret = process.env.MICROSOFT_OAUTH_CLIENT_SECRET?.trim();
     const tenant = process.env.MICROSOFT_OAUTH_TENANT || 'common';
-    const redirectUri = `${apiPublicBase(req)}/api/integrations/microsoft-drive/callback`;
+    const redirectUri = `${oauthApiPublicOrigin(req)}/api/integrations/microsoft-drive/callback`;
     const body = new URLSearchParams({
       code: String(code),
       client_id: cid,
@@ -209,7 +200,7 @@ router.get('/callback', async (req, res) => {
       );
     }
 
-    res.redirect(`${front}?ms_drive_connected=1`);
+    res.redirect(buildSettingsRedirectLocation(req, '?ms_drive_connected=1'));
   } catch (e) {
     console.error('[orgMicrosoftDrive] callback', e);
     errRedirect(e.message || 'Connection failed');

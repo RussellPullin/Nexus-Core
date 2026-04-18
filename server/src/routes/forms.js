@@ -33,8 +33,7 @@ function getProviderProfileForUser(userId) {
   const user = db.prepare('SELECT org_id FROM users WHERE id = ?').get(userId);
   const orgId = user?.org_id || null;
   if (!orgId) {
-    const first = db.prepare('SELECT id FROM organisations ORDER BY created_at ASC LIMIT 1').get();
-    return { profile: first ? ensureProviderProfile(first.id) : null, organisation_id: first?.id || null };
+    return { profile: null, organisation_id: null };
   }
   const profile = ensureProviderProfile(orgId);
   return { profile, organisation_id: orgId };
@@ -46,7 +45,7 @@ ROUTER.get('/context', (req, res) => {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
     const { profile, organisation_id } = getProviderProfileForUser(req.session.user.id);
     if (!profile) {
-      return res.json({ organisation_id: null, organisation_name: null, message: 'No organisation set. Set your organisation in Admin or use the first organisation.' });
+      return res.json({ organisation_id: null, organisation_name: null, message: 'No organisation set. Assign your user to an organisation in Admin to manage forms.' });
     }
     const org = db.prepare('SELECT id, name FROM organisations WHERE id = ?').get(profile.organisation_id);
     res.json({
@@ -70,8 +69,9 @@ ROUTER.get('/templates', (req, res) => {
     const workflow = req.query.workflow || null;
     const coverage = getTemplateCoverage(profile.id, workflow ? { workflow } : {});
     const templateFiles = {};
+    const orgId = profile.organisation_id || null;
     for (const ft of UPLOAD_FORM_TYPES) {
-      const found = getTemplatePath(ft);
+      const found = getTemplatePath(ft, { organisationId: orgId });
       templateFiles[ft] = found ? { filename: found.path.split(/[/\\]/).pop(), has_file: true } : { has_file: false };
     }
     coverage.templates.forEach((t) => {
@@ -150,7 +150,10 @@ ROUTER.post('/templates/upload', memoryUpload.single('file'), (req, res) => {
     if (!UPLOAD_FORM_TYPES.includes(formType)) {
       return res.status(400).json({ error: 'Invalid form_type. Use privacy_consent, service_agreement, or support_plan (or template_id for custom forms).' });
     }
-    const dir = getTemplateDir(formType);
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const orgId = profile.organisation_id || null;
+    const dir = getTemplateDir(formType, orgId);
     if (!dir) return res.status(400).json({ error: 'Invalid form type.' });
     if (formType === 'privacy_consent' && ext !== 'docx') {
       return res.status(400).json({ error: 'Privacy consent template must be a .docx file.' });

@@ -9,8 +9,33 @@ import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 
 const USER_SELECT = `id, email, name, role, org_id, auth_uid, billing_interval_minutes, staff_id, signature_data,
+  ollama_local_base_url,
   email_provider, email_connected_address, email_reconnect_required`;
 const SUPABASE_PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
+
+/** @param {unknown} raw */
+function normalizeOllamaLocalBaseUrl(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === '') return null;
+  const s = String(raw).trim().slice(0, 512);
+  if (!s) return null;
+  let u;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  const host = u.hostname.toLowerCase();
+  const allowed =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '[::1]' ||
+    host === '::1' ||
+    host === 'host.docker.internal';
+  if (!allowed) return null;
+  return u.toString().replace(/\/$/, '');
+}
 
 function secureEquals(a, b) {
   const left = Buffer.from(String(a || ''), 'utf8');
@@ -26,8 +51,18 @@ function shapeUser(row) {
     role: normalizeAppRole(row.role),
     billing_interval_minutes: row.billing_interval_minutes ?? 15,
     signature_data: row.signature_data || null,
+    ollama_local_base_url: row.ollama_local_base_url || null,
     email_reconnect_required: !!row.email_reconnect_required,
     is_super_admin: isSuperAdminEmail(row.email)
+  };
+}
+
+/** True when AZURE_EMAIL_FUNCTION_URL is set so roster/test mail can be sent via the relay. */
+function withEmailRelayFlag(user) {
+  if (!user) return null;
+  return {
+    ...user,
+    email_relay_configured: Boolean(getRelayConfigFromEnv()?.url)
   };
 }
 
@@ -56,7 +91,7 @@ router.post('/login', (req, res) => {
     }
     if (isSupabaseOnlyAccount) {
       return res.status(401).json({
-        error: 'This account uses Supabase sign-in. Use the same email on the login page with Supabase enabled.',
+        error: 'This account uses cloud sign-in. Use organisation cloud sign-in on the login page with the same email.',
         code: 'USE_SUPABASE_AUTH'
       });
     }
@@ -72,7 +107,7 @@ router.post('/login', (req, res) => {
       org_id: user.org_id || null
     };
     const u = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(user.id);
-    res.json({ user: shapeUser(u) });
+    res.json({ user: withEmailRelayFlag(shapeUser(u)) });
   } catch (err) {
     console.error('[auth] login error:', err);
     res.status(500).json({ error: err.message });
@@ -110,7 +145,7 @@ router.post('/emergency-login', (req, res) => {
       org_id: user.org_id || null
     };
     return res.json({
-      user: shapeUser(user),
+      user: withEmailRelayFlag(shapeUser(user)),
       emergency_login: true
     });
   } catch (err) {
@@ -142,7 +177,7 @@ router.post('/register', (req, res) => {
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     req.session.user = { id: user.id, email: user.email, name: user.name, role: normalizeAppRole(user.role), org_id: user.org_id || null };
     const u = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(id);
-    res.status(201).json({ user: shapeUser(u) });
+    res.status(201).json({ user: withEmailRelayFlag(shapeUser(u)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -169,12 +204,12 @@ router.get('/me', (req, res) => {
       `).get(req.session.user.id)
     : null;
   res.json({
-    user: {
+    user: withEmailRelayFlag({
       ...shapeUser(user),
       org_id: user.org_id || null,
       assigned_participant_count: assignedCount,
       delegate_grant_active: !!delegateGrant
-    }
+    })
   });
 });
 
@@ -208,19 +243,19 @@ router.post('/test-email', requireAuth, async (req, res) => {
   try {
     const { sendEmailViaRelay } = await import('../services/notification.service.js');
     const userId = req.session.user.id;
-    if (!getRelayConfigFromEnv()?.url) {
-      return res.status(400).json({
-        ok: false,
-        code: 'EMAIL_RELAY_NOT_CONFIGURED',
-        error:
-          'Email sending is not configured on the server. The administrator must set AZURE_EMAIL_FUNCTION_URL (Azure sendEmail function URL).'
-      });
-    }
     if (!getEmailConfigForUser(userId)) {
       return res.status(400).json({
         ok: false,
         code: 'EMAIL_NOT_CONNECTED',
         error: 'Connect your email in Settings first, then try again.'
+      });
+    }
+    if (!getRelayConfigFromEnv()?.url) {
+      return res.status(400).json({
+        ok: false,
+        code: 'EMAIL_RELAY_NOT_CONFIGURED',
+        error:
+          'Your inbox is connected, but the server is not set up to send outgoing mail yet. Ask your administrator to finish email setup.'
       });
     }
     const u = db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
@@ -234,19 +269,29 @@ router.post('/test-email', requireAuth, async (req, res) => {
     );
     res.json({ ok: true, message: 'Test email sent to your login address.' });
   } catch (err) {
-    const code = err.code === 'EMAIL_RECONNECT_REQUIRED' ? 'EMAIL_RECONNECT_REQUIRED' : undefined;
+    let code =
+      err.code === 'EMAIL_RECONNECT_REQUIRED'
+        ? 'EMAIL_RECONNECT_REQUIRED'
+        : err.code === 'EMAIL_RELAY_NOT_CONFIGURED'
+          ? 'EMAIL_RELAY_NOT_CONFIGURED'
+          : err.code === 'EMAIL_RELAY_SELF_URL'
+            ? 'EMAIL_RELAY_SELF_URL'
+            : err.code === 'EMAIL_RELAY_PLACEHOLDER_URL'
+              ? 'EMAIL_RELAY_PLACEHOLDER_URL'
+              : err.code === 'EMAIL_RELAY_AUTH_FAILED'
+                ? 'EMAIL_RELAY_AUTH_FAILED'
+                : undefined;
     res.status(400).json({
       ok: false,
       code: code || undefined,
-      error: err?.message || 'Test failed',
-      errorDetail: err?.message
+      error: err?.message || 'Test failed'
     });
   }
 });
 
 router.put('/settings', requireAuth, (req, res) => {
   try {
-    const { billing_interval_minutes, staff_id, signature_data } = req.body;
+    const { billing_interval_minutes, staff_id, signature_data, ollama_local_base_url } = req.body;
     const userId = req.session.user.id;
 
     const updates = [];
@@ -264,9 +309,19 @@ router.put('/settings', requireAuth, (req, res) => {
       const val = signature_data === null || signature_data === '' ? null : String(signature_data).slice(0, 500000);
       values.push(val);
     }
+    if (ollama_local_base_url !== undefined) {
+      const norm = normalizeOllamaLocalBaseUrl(ollama_local_base_url);
+      if (norm === null && ollama_local_base_url !== null && String(ollama_local_base_url).trim() !== '') {
+        return res.status(400).json({
+          error: 'Invalid Ollama URL. Use http://127.0.0.1:11434 or http://localhost:11434 (or host.docker.internal in Docker).'
+        });
+      }
+      updates.push('ollama_local_base_url = ?');
+      values.push(norm === undefined ? null : norm);
+    }
     if (updates.length === 0) {
       const user = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(userId);
-      return res.json({ user: shapeUser(user) });
+      return res.json({ user: withEmailRelayFlag(shapeUser(user)) });
     }
     values.push(userId);
     db.prepare(`
@@ -274,7 +329,7 @@ router.put('/settings', requireAuth, (req, res) => {
       WHERE id = ?
     `).run(...values);
     const user = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(userId);
-    res.json({ user: shapeUser(user) });
+    res.json({ user: withEmailRelayFlag(shapeUser(user)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

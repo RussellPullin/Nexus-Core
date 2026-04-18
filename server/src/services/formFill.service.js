@@ -286,14 +286,17 @@ function buildFillData(participant = {}, plan = null, intake = {}, context = {})
  * @returns {Buffer} Filled PDF buffer
  */
 export async function fillServiceAgreement(participant = {}, plan = null, intake = {}, options = {}) {
-  const template = getServiceAgreementTemplatePath();
-  if (!template) throw new Error('Service Agreement template not found. Add a PDF or .docx to data/forms/templates/service-agreement/');
-
-  if (template.type === 'docx') {
-    return fillWordTemplate(template.path, participant, plan, intake, options);
+  const { organisationId, templateFilename, ...fillOpts } = options;
+  const template = getServiceAgreementTemplatePath({ organisationId, templateFilename });
+  if (!template) {
+    throw new Error('Service Agreement template not found. Upload a template in Forms for your organisation or add a file under data/forms/templates/by-org/<orgId>/service-agreement/.');
   }
 
-  const context = options.db ? { db: options.db } : {};
+  if (template.type === 'docx') {
+    return fillWordTemplate(template.path, participant, plan, intake, fillOpts);
+  }
+
+  const context = fillOpts.db ? { db: fillOpts.db } : {};
   const data = buildFillData(participant, plan, intake, context);
   const pdfBytes = readFileSync(template.path);
   const doc = await PDFDocument.load(pdfBytes);
@@ -378,22 +381,25 @@ export async function fillServiceAgreement(participant = {}, plan = null, intake
   }
 
   form.flatten();
-  if (options.coordinatorSignatureDataUrl) {
-    await embedCoordinatorSignature(doc, options.coordinatorSignatureDataUrl);
+  if (fillOpts.coordinatorSignatureDataUrl) {
+    await embedCoordinatorSignature(doc, fillOpts.coordinatorSignatureDataUrl);
   }
   return Buffer.from(await doc.save());
 }
 
 /**
  * Fill Support Plan (PDF or Word)
- * @param {object} [options] - optional { coordinatorSignatureDataUrl }
+ * @param {object} [options] - optional { coordinatorSignatureDataUrl, organisationId, templateFilename }
  */
 export async function fillSupportPlan(participant = {}, plan = null, intake = {}, options = {}) {
-  const template = getSupportPlanTemplatePath();
-  if (!template) throw new Error('Support Plan template not found. Add a PDF or .docx to data/forms/templates/support-plan/');
+  const { organisationId, templateFilename, ...fillOpts } = options;
+  const template = getSupportPlanTemplatePath({ organisationId, templateFilename });
+  if (!template) {
+    throw new Error('Support Plan template not found. Upload a template in Forms for your organisation or add a file under data/forms/templates/by-org/<orgId>/support-plan/.');
+  }
 
   if (template.type === 'docx') {
-    return fillWordTemplate(template.path, participant, plan, intake, options);
+    return fillWordTemplate(template.path, participant, plan, intake, fillOpts);
   }
 
   const data = buildFillData(participant, plan, intake);
@@ -415,8 +421,8 @@ export async function fillSupportPlan(participant = {}, plan = null, intake = {}
   }
 
   form.flatten();
-  if (options.coordinatorSignatureDataUrl) {
-    await embedCoordinatorSignature(doc, options.coordinatorSignatureDataUrl);
+  if (fillOpts.coordinatorSignatureDataUrl) {
+    await embedCoordinatorSignature(doc, fillOpts.coordinatorSignatureDataUrl);
   }
   return Buffer.from(await doc.save());
 }

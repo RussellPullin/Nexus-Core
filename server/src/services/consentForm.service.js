@@ -145,14 +145,14 @@ function fillContentControlsInZip(zip, data) {
  * All intake field_key values are exposed as placeholders (e.g. {primary_contact_name}).
  * @param {object} participant - { name, email, phone, address, date_of_birth, ndis_number }
  * @param {object} intake - intake fields (key-value from participant_intake_fields)
- * @param {object} [options] - optional { coordinatorSignatureDataUrl, templateFilename } (templateFilename from form_templates after Forms upload)
+ * @param {object} [options] - optional { coordinatorSignatureDataUrl, templateFilename, organisationId }
  * @returns {Buffer} Filled docx buffer
  */
 export function fillConsentForm(participant = {}, intake = {}, options = {}) {
-  const { templateFilename, ...restOptions } = options;
-  const path = getConsentFormPath({ templateFilename });
+  const { templateFilename, organisationId, ...restOptions } = options;
+  const path = getConsentFormPath({ templateFilename, organisationId });
   if (!path) {
-    throw new Error('Consent form template not found. Place a .docx template in data/forms/templates/privacy-consent/');
+    throw new Error('Consent form template not found. Upload a .docx in Forms for your organisation or place one under data/forms/templates/by-org/<orgId>/privacy-consent/.');
   }
 
   const content = readFileSync(path, 'binary');

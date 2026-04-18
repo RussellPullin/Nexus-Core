@@ -121,7 +121,7 @@ export default function StaffPage() {
 
   const handleShifterToggle = async (s, nextEnabled) => {
     if (!s.email?.trim()) {
-      alert('Add an email address for this staff member so they can be linked to a Supabase profile for Shifter.');
+      alert('Add an email address for this staff member so they can be linked for Shifter.');
       return;
     }
     setShifterSavingId(s.id);
@@ -364,7 +364,7 @@ export default function StaffPage() {
                               cursor: s.email?.trim() ? 'pointer' : 'not-allowed',
                               opacity: s.email?.trim() ? 1 : 0.55,
                             }}
-                            title={!s.email?.trim() ? 'Add an email to manage Shifter access in Supabase' : 'Toggle profiles.shifter_enabled (Supabase)'}
+                            title={!s.email?.trim() ? 'Add an email to manage Shifter access' : 'Turn Shifter access on or off for this person'}
                           >
                             <input
                               type="checkbox"

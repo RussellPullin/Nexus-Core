@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { useFeatureFlag } from '../context/FeatureFlagContext';
 import { participants, organisations, ndis } from '../lib/api';
+import { tryClientSideParticipantsCsvMapping } from '../lib/participantsCsvClientMapping.js';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate } from '../lib/dateUtils';
 
@@ -35,9 +38,12 @@ const defaultForm = () => ({
 });
 
 export default function ParticipantsPage() {
+  const { canManageUsers, isAdmin, user } = useAuth();
+  const { enabled: aiStaffLocalOllama } = useFeatureFlag('ai_staff_local_ollama');
   const [list, setList] = useState([]);
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [showOrgOrphans, setShowOrgOrphans] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showIntakeModal, setShowIntakeModal] = useState(false);
@@ -51,6 +57,7 @@ export default function ParticipantsPage() {
   const [csvLoading, setCsvLoading] = useState(false);
   const [csvImporting, setCsvImporting] = useState(false);
   const [csvUseLlm, setCsvUseLlm] = useState(true);
+  const [csvReassignDuplicates, setCsvReassignDuplicates] = useState(false);
   const [form, setForm] = useState(defaultForm());
   const [invoiceEmailInput, setInvoiceEmailInput] = useState('');
   const [orgs, setOrgs] = useState([]);
@@ -59,7 +66,7 @@ export default function ParticipantsPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const p = await participants.list(search, showArchived);
+      const p = await participants.list(search, showArchived, isAdmin && showOrgOrphans);
       setList(p);
     } catch (e) {
       console.error(e);
@@ -70,7 +77,7 @@ export default function ParticipantsPage() {
 
   useEffect(() => {
     load();
-  }, [search, showArchived]);
+  }, [search, showArchived, showOrgOrphans, isAdmin]);
 
   useEffect(() => {
     organisations.list('', 'plan_manager').then(setOrgs).catch(() => {});
@@ -197,7 +204,19 @@ export default function ParticipantsPage() {
     setCsvLoading(true);
     setCsvPreview(null);
     try {
-      const parsed = await participants.parseCsv(csvFile, csvUseLlm);
+      let clientMapping = null;
+      if (csvUseLlm && aiStaffLocalOllama && user) {
+        try {
+          clientMapping = await tryClientSideParticipantsCsvMapping(csvFile, user);
+        } catch (e) {
+          console.warn('Local Ollama CSV mapping skipped:', e);
+        }
+      }
+      const parsed = await participants.parseCsv(
+        csvFile,
+        csvUseLlm,
+        clientMapping ? { llmColumnMapping: clientMapping } : {}
+      );
       setCsvPreview(parsed);
     } catch (err) {
       setCsvPreview({ rows: [], error: err.message || 'Could not parse CSV.' });
@@ -210,12 +229,33 @@ export default function ParticipantsPage() {
     if (!csvFile) return;
     setCsvImporting(true);
     try {
-      const result = await participants.importCsv(csvFile, csvUseLlm);
+      let clientMapping = null;
+      if (csvUseLlm && aiStaffLocalOllama && user) {
+        try {
+          clientMapping = await tryClientSideParticipantsCsvMapping(csvFile, user);
+        } catch (e) {
+          console.warn('Local Ollama CSV mapping skipped:', e);
+        }
+      }
+      const result = await participants.importCsv(csvFile, csvUseLlm, {
+        llmColumnMapping: clientMapping || undefined,
+        reassignDuplicatesToMyOrg: csvReassignDuplicates
+      });
       setShowCsvModal(false);
       setCsvFile(null);
       setCsvPreview(null);
+      setCsvReassignDuplicates(false);
       load().catch((e) => console.error(e));
-      alert(`Imported ${result.created} participant(s).${result.skipped > 0 ? ` ${result.skipped} skipped (duplicate NDIS numbers).` : ''}`);
+      let msg = `Imported ${result.created} participant(s).`;
+      if (result.skipped > 0) {
+        msg += ` ${result.skipped} row(s) skipped — see reasons below.`;
+        const details = Array.isArray(result.skipped_details) ? result.skipped_details.slice(0, 8) : [];
+        if (details.length) {
+          msg += `\n\n${details.map((d) => `${d.name || '(no name)'}: ${d.reason || ''}`).join('\n')}`;
+          if (result.skipped > details.length) msg += `\n… and ${result.skipped - details.length} more`;
+        }
+      }
+      alert(msg);
     } catch (err) {
       alert(err.message || 'Could not import participants.');
     } finally {
@@ -277,6 +317,12 @@ export default function ParticipantsPage() {
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
         </label>
+        {isAdmin && (
+          <label className="checkbox-label" style={{ margin: 0 }} title="Shows clients whose record has no organisation set (common after imports). You can then open each profile and they stay visible once assigned to your org.">
+            <input type="checkbox" checked={showOrgOrphans} onChange={(e) => setShowOrgOrphans(e.target.checked)} />
+            Include participants with no organisation
+          </label>
+        )}
       </div>
       <div className="card">
         {loading ? (
@@ -284,6 +330,19 @@ export default function ParticipantsPage() {
         ) : list.length === 0 ? (
           <div className="empty-state">
             <p>No participants yet.</p>
+            {isAdmin && !showOrgOrphans && (
+              <p style={{ color: '#64748b', fontSize: '0.95rem', marginTop: '0.75rem', maxWidth: 560 }}>
+                If you imported clients but they do not appear, tick <strong>Include participants with no organisation</strong> above
+                (their records may lack an organisation link), or re-import the CSV with <strong>Move duplicate NDIS rows into my organisation</strong>.
+              </p>
+            )}
+            {!canManageUsers && (
+              <p style={{ color: '#64748b', fontSize: '0.95rem', marginTop: '0.75rem', maxWidth: 520 }}>
+                Accounts without admin access only see participants assigned to them. If clients are missing, ask an
+                organisation admin to assign you to those participants (Admin), or confirm you are signed into the
+                correct workspace.
+              </p>
+            )}
             <button className="btn btn-primary" onClick={() => setShowModal(true)}>Add your first participant</button>
           </div>
         ) : (
@@ -591,6 +650,19 @@ export default function ParticipantsPage() {
               <input type="checkbox" checked={csvUseLlm} onChange={(e) => setCsvUseLlm(e.target.checked)} />
               <span>Use AI (Ollama) to map columns – recommended for non-standard CSV formats</span>
             </label>
+            {isAdmin && (
+              <label className="checkbox-label" style={{ flexShrink: 0, marginBottom: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  checked={csvReassignDuplicates}
+                  onChange={(e) => setCsvReassignDuplicates(e.target.checked)}
+                  style={{ marginTop: 3 }}
+                />
+                <span style={{ fontSize: '0.9rem', lineHeight: 1.35 }}>
+                  <strong>Move duplicate NDIS rows into my organisation.</strong> Use when participants already exist in the database but do not appear in your workspace (wrong or missing organisation on the record). This reassigns them to your organisation. Do not use if another real provider shares this Nexus database and owns those participants.
+                </span>
+              </label>
+            )}
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexShrink: 0 }}>
               <button
                 className="btn btn-secondary"
@@ -617,7 +689,14 @@ export default function ParticipantsPage() {
                       {csvPreview.llmUsed ? (
                         <span style={{ color: '#059669' }}>AI (Ollama) mapped columns</span>
                       ) : (
-                        <span style={{ color: '#d97706' }}>Rule-based mapping{csvUseLlm ? ' (Ollama not available – start Ollama to use AI)' : ''}</span>
+                        <span style={{ color: '#d97706' }}>
+                          Rule-based mapping
+                          {csvUseLlm
+                            ? aiStaffLocalOllama
+                              ? ' (Ollama on this computer or the API server was not used — open Ollama and link it in Settings)'
+                              : ' (Ollama not available – start Ollama to use AI)'
+                            : ''}
+                        </span>
                       )}
                     </p>
                     {csvPreview.columnMapping && (
