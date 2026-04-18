@@ -125,7 +125,8 @@ run_deploy_git_checks
 
 if [[ "${SKIP_FLY_BACKUP:-}" != "1" ]]; then
   echo "=== Backing up production SQLite on Fly ($APP) ==="
-  if fly ssh console -a "$APP" -C 'cd /app && DATABASE_PATH=/data/schedule.db DATA_DIR=/data NODE_ENV=production node server/scripts/backup-sqlite.mjs'; then
+  # fly ssh -C uses exec (no shell): use env(1) + absolute script path — not "cd …" (cd is not a binary).
+  if fly ssh console -a "$APP" -C "env DATABASE_PATH=/data/schedule.db DATA_DIR=/data NODE_ENV=production node /app/server/scripts/backup-sqlite.mjs"; then
     echo "=== Fly volume backup finished ==="
   else
     echo "Warning: Fly SSH backup failed or was skipped (auth, app name, or script missing on running image). Deploy continues. Set SKIP_FLY_BACKUP=1 to silence." >&2

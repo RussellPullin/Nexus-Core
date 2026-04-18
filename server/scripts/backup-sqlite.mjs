@@ -8,7 +8,7 @@
  *
  * Usage:
  *   node server/scripts/backup-sqlite.mjs
- *   fly ssh console -a nexus-core-crm -C 'cd /app && DATABASE_PATH=/data/schedule.db DATA_DIR=/data NODE_ENV=production node server/scripts/backup-sqlite.mjs'
+ *   fly ssh console -a nexus-core-crm -C "env DATABASE_PATH=/data/schedule.db DATA_DIR=/data NODE_ENV=production node /app/server/scripts/backup-sqlite.mjs"
  */
 import { config } from 'dotenv';
 import Database from 'better-sqlite3';
