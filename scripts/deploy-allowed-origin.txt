@@ -1,0 +1,4 @@
+# Optional guard: if this file exists, `npm run deploy:fly` requires `git remote get-url origin`
+# to contain this substring (case-insensitive). Prevents deploying from a random fork or duplicate clone.
+# Edit if your canonical remote differs.
+github.com/russellpullin/nexus-core
