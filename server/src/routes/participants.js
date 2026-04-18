@@ -31,6 +31,10 @@ import {
   scheduleMirrorShiftsForParticipantId,
 } from '../services/nexusPublicShiftsSync.service.js';
 import {
+  computeBudgetUtilizationForPlan,
+  computeInvoicedUsedRemainingForPlanRefresh
+} from '../services/participantBudgetUtilization.service.js';
+import {
   prepareFundReleaseScheduleForStorage,
   parseFundReleaseScheduleFromDb
 } from '../utils/fundReleaseSchedule.js';
@@ -919,7 +923,7 @@ router.get('/', (req, res) => {
   }
 });
 
-// Budget utilization for participant's current plan (used vs budget per category)
+// Budget utilization for participant's current plan (invoiced vs budget; pending = delivered not yet on a batch invoice)
 router.get('/:id/budget-utilization', (req, res) => {
   try {
     const today = new Date().toISOString().slice(0, 10);
@@ -930,59 +934,7 @@ router.get('/:id/budget-utilization', (req, res) => {
     `).get(req.params.id, today, today);
     if (!plan) return res.json({ plan: null, budgets: [] });
 
-    const budgets = db.prepare(`
-      SELECT pb.*, bli.ndis_line_item_id
-      FROM plan_budgets pb
-      LEFT JOIN budget_line_items bli ON bli.budget_id = pb.id
-      WHERE pb.plan_id = ?
-    `).all(plan.id);
-
-    const budgetById = {};
-    for (const b of budgets) {
-      if (!budgetById[b.id]) {
-        budgetById[b.id] = { id: b.id, name: b.name, category: b.category, amount: b.amount, used: 0, line_item_ids: [] };
-      }
-      if (b.ndis_line_item_id) budgetById[b.id].line_item_ids.push(b.ndis_line_item_id);
-    }
-
-    const shifts = db.prepare(`
-      SELECT s.id, s.start_time, s.end_time
-      FROM shifts s
-      WHERE s.participant_id = ?
-        AND s.start_time >= ? AND s.start_time <= ?
-    `).all(req.params.id, `${plan.start_date} 00:00:00`, `${plan.end_date} 23:59:59`);
-
-    const shiftIds = shifts.map(s => s.id);
-    if (shiftIds.length > 0) {
-      const placeholders = shiftIds.map(() => '?').join(',');
-      const lineItems = db.prepare(`
-        SELECT sli.shift_id, sli.ndis_line_item_id, sli.quantity, sli.unit_price
-        FROM shift_line_items sli
-        WHERE sli.shift_id IN (${placeholders})
-      `).all(...shiftIds);
-
-      for (const li of lineItems) {
-        const cost = (li.quantity || 0) * (li.unit_price || 0);
-        for (const bid of Object.keys(budgetById)) {
-          const b = budgetById[bid];
-          if (b.line_item_ids.includes(li.ndis_line_item_id)) {
-            b.used += cost;
-            break; // only one budget per line item
-          }
-        }
-      }
-    }
-
-    const result = Object.values(budgetById).map(b => ({
-      id: b.id,
-      name: b.name,
-      category: b.category,
-      amount: b.amount,
-      used: Math.round(b.used * 100) / 100,
-      remaining: Math.round((b.amount - b.used) * 100) / 100,
-      percent_used: b.amount > 0 ? Math.round((b.used / b.amount) * 100) : 0
-    }));
-
+    const result = computeBudgetUtilizationForPlan(req.params.id, plan);
     res.json({ plan: { id: plan.id, start_date: plan.start_date, end_date: plan.end_date }, budgets: result });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2689,62 +2641,15 @@ router.post('/:id/plans/:planId/refresh-available-funding', (req, res) => {
       return res.status(400).json({ error: 'Plan starts today or in the future. Refresh is only for in-progress plans.' });
     }
 
-    const budgetRows = db.prepare(`
-      SELECT pb.*, bli.ndis_line_item_id
-      FROM plan_budgets pb
-      LEFT JOIN budget_line_items bli ON bli.budget_id = pb.id
-      WHERE pb.plan_id = ?
-    `).all(plan.id);
-    if (!budgetRows.length) {
+    const budgets = computeInvoicedUsedRemainingForPlanRefresh(
+      req.params.id,
+      plan.id,
+      plan.start_date,
+      today
+    );
+    if (!budgets.length) {
       return res.status(400).json({ error: 'Plan has no budgets to refresh.' });
     }
-
-    const byBudgetId = new Map();
-    for (const row of budgetRows) {
-      if (!byBudgetId.has(row.id)) {
-        byBudgetId.set(row.id, {
-          id: row.id,
-          name: row.name,
-          category: row.category,
-          management_type: row.management_type || 'self',
-          amount: Number(row.amount) || 0,
-          used: 0,
-          line_item_ids: []
-        });
-      }
-      if (row.ndis_line_item_id) byBudgetId.get(row.id).line_item_ids.push(row.ndis_line_item_id);
-    }
-
-    const shifts = db.prepare(`
-      SELECT s.id
-      FROM shifts s
-      WHERE s.participant_id = ?
-        AND s.start_time >= ? AND s.start_time <= ?
-    `).all(req.params.id, `${plan.start_date} 00:00:00`, `${today} 23:59:59`);
-    const shiftIds = shifts.map((s) => s.id);
-    if (shiftIds.length > 0) {
-      const placeholders = shiftIds.map(() => '?').join(',');
-      const shiftLineItems = db.prepare(`
-        SELECT sli.ndis_line_item_id, sli.quantity, sli.unit_price
-        FROM shift_line_items sli
-        WHERE sli.shift_id IN (${placeholders})
-      `).all(...shiftIds);
-      for (const li of shiftLineItems) {
-        const cost = (Number(li.quantity) || 0) * (Number(li.unit_price) || 0);
-        for (const budget of byBudgetId.values()) {
-          if (budget.line_item_ids.includes(li.ndis_line_item_id)) {
-            budget.used += cost;
-            break;
-          }
-        }
-      }
-    }
-
-    const budgets = Array.from(byBudgetId.values()).map((b) => {
-      const used = Math.round((Number(b.used) || 0) * 100) / 100;
-      const remaining = Math.max(0, Math.round(((Number(b.amount) || 0) - used) * 100) / 100);
-      return { ...b, used, remaining };
-    });
 
     const oldPlanEndDate = new Date(`${today}T00:00:00Z`);
     oldPlanEndDate.setUTCDate(oldPlanEndDate.getUTCDate() - 1);

@@ -20,6 +20,16 @@ import {
 
 const router = Router();
 
+/**
+ * SQLite often returns "YYYY-MM-DD HH:MM:SS" while clients send ISO "YYYY-MM-DDTHH:MM:SS".
+ * String comparison treats space before "T" at position 10, so shifts on the range start day
+ * incorrectly fail `>= start` when compared in JS.
+ */
+function normalizeShiftTimeForCompare(t) {
+  if (t == null) return '';
+  return String(t).replace(/^(\d{4}-\d{2}-\d{2}) /, '$1T');
+}
+
 router.get('/', (req, res) => {
   try {
     const userId = req.session?.user?.id;
@@ -43,10 +53,10 @@ router.get('/', (req, res) => {
     `).all(...c.params);
 
     if (start) {
-      shifts = shifts.filter(s => s.start_time >= start);
+      shifts = shifts.filter((s) => normalizeShiftTimeForCompare(s.start_time) >= start);
     }
     if (end) {
-      shifts = shifts.filter(s => s.start_time <= end);
+      shifts = shifts.filter((s) => normalizeShiftTimeForCompare(s.start_time) <= end);
     }
     if (participant_id) {
       shifts = shifts.filter(s => s.participant_id === participant_id);

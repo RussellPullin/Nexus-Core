@@ -1136,19 +1136,23 @@ export default function ParticipantProfile() {
               </p>
               {(() => {
                 const totals = budgetUtilization.budgets.reduce((acc, b) => {
+                  const invoiced = Number(b.invoiced ?? b.used) || 0;
+                  const pending = Number(b.pending_invoice) || 0;
                   acc.amount += Number(b.amount) || 0;
-                  acc.used += Number(b.used) || 0;
+                  acc.invoiced += invoiced;
+                  acc.pending_invoice += pending;
                   acc.remaining += Number(b.remaining) || 0;
                   return acc;
-                }, { amount: 0, used: 0, remaining: 0 });
-                const totalPercent = totals.amount > 0 ? Math.round((totals.used / totals.amount) * 100) : 0;
+                }, { amount: 0, invoiced: 0, pending_invoice: 0, remaining: 0 });
+                const totalPercent = totals.amount > 0 ? Math.round((totals.invoiced / totals.amount) * 100) : 0;
                 return (
                   <table style={{ width: '100%', fontSize: '0.92rem', marginBottom: '1rem' }}>
                     <thead>
                       <tr>
                         <th style={{ textAlign: 'left' }}>Category</th>
                         <th style={{ textAlign: 'right' }}>Budget</th>
-                        <th style={{ textAlign: 'right' }}>Used</th>
+                        <th style={{ textAlign: 'right' }}>Invoiced</th>
+                        <th style={{ textAlign: 'right' }}>Pending</th>
                         <th style={{ textAlign: 'right' }}>Remaining</th>
                         <th style={{ textAlign: 'right' }}>Utilisation</th>
                       </tr>
@@ -1157,34 +1161,45 @@ export default function ParticipantProfile() {
                       <tr style={{ background: '#f8fafc', borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0' }}>
                         <td><strong>Plan total</strong></td>
                         <td style={{ textAlign: 'right' }}><strong>${totals.amount.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</strong></td>
-                        <td style={{ textAlign: 'right' }}><strong>${totals.used.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</strong></td>
+                        <td style={{ textAlign: 'right' }}><strong>${totals.invoiced.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</strong></td>
+                        <td style={{ textAlign: 'right' }}><strong>${totals.pending_invoice.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</strong></td>
                         <td style={{ textAlign: 'right' }}><strong>${totals.remaining.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</strong></td>
                         <td style={{ textAlign: 'right' }}>
                           <span className={`badge ${totalPercent >= 90 ? 'badge-danger' : totalPercent >= 70 ? 'badge-warning' : 'badge-success'}`}>
-                            {totalPercent}% used
+                            {totalPercent}% invoiced
                           </span>
                         </td>
                       </tr>
-                      {budgetUtilization.budgets.map((b) => (
-                        <tr key={b.id}>
-                          <td>
-                            <span style={{ color: '#64748b', marginRight: '0.35rem' }}>↳</span>
-                            <strong>{b.category || '—'}</strong> {supportCategories.find(c => c.id === b.category)?.name || b.name}
-                          </td>
-                          <td style={{ textAlign: 'right' }}>${Number(b.amount).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
-                          <td style={{ textAlign: 'right' }}>${Number(b.used).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
-                          <td style={{ textAlign: 'right' }}>${Number(b.remaining).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
-                          <td style={{ textAlign: 'right' }}>
-                            <span className={`badge ${b.percent_used >= 90 ? 'badge-danger' : b.percent_used >= 70 ? 'badge-warning' : 'badge-success'}`}>
-                              {b.percent_used}% used
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {budgetUtilization.budgets.map((b) => {
+                        const invoiced = Number(b.invoiced ?? b.used) || 0;
+                        const pending = Number(b.pending_invoice) || 0;
+                        return (
+                          <tr key={b.id}>
+                            <td>
+                              <span style={{ color: '#64748b', marginRight: '0.35rem' }}>↳</span>
+                              <strong>{b.category || '—'}</strong> {supportCategories.find(c => c.id === b.category)?.name || b.name}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>${Number(b.amount).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
+                            <td style={{ textAlign: 'right' }}>${invoiced.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
+                            <td style={{ textAlign: 'right' }}>${pending.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
+                            <td style={{ textAlign: 'right' }}>${Number(b.remaining).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <span className={`badge ${b.percent_used >= 90 ? 'badge-danger' : b.percent_used >= 70 ? 'badge-warning' : 'badge-success'}`}>
+                                {b.percent_used}% invoiced
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 );
               })()}
+              <p style={{ marginTop: '0.75rem', fontSize: '0.82rem', color: '#64748b', lineHeight: 1.45 }}>
+                <strong>Invoiced</strong> sums amounts on Financial batch invoices (non-void) in this plan period, matched to each budget&apos;s NDIS line items.
+                {' '}
+                <strong>Pending</strong> is support recorded (shifts and billable coordinator tasks) that is not yet on a batch invoice.
+              </p>
               <p style={{ marginTop: '1rem', fontSize: '0.85rem', color: '#64748b' }}>
                 <button type="button" className="btn btn-secondary" style={{ fontSize: '0.85rem' }} onClick={() => setTab('plans')}>
                   Manage plans & budgets →
