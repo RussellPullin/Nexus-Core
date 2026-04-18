@@ -130,6 +130,8 @@ import billingRouter from './routes/billing.js';
 import appShiftsRouter from './routes/appShifts.js';
 import syncFromExcelRouter from './routes/syncFromExcel.js';
 import webhooksPublicRouter from './routes/webhooksPublic.js';
+import xeroWebhookRouter from './routes/xeroWebhook.js';
+import xeroWebhookRouter from './routes/xeroWebhook.js';
 import receiptsRouter from './routes/receipts.js';
 import settingsRouter from './routes/settings.js';
 import learningRouter from './routes/learning.js';

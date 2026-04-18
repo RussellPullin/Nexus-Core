@@ -19,11 +19,13 @@ import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } f
 import { sendBillingBatch } from '../services/billingBatchSend.service.js';
 import { generateBillingInvoicePdfBuffer } from '../services/billingInvoicePdf.service.js';
 import { rebuildBillingInvoiceLineItems } from '../services/billingInvoiceRepair.service.js';
-import { voidXeroInvoiceById } from '../services/xeroBillingPush.service.js';
+import { syncBillingInvoiceFromXero } from '../services/xeroPaymentSync.service.js';
 import { getProviderOrgIdForUser } from '../middleware/roles.js';
 import {
+  billingParticipantFilterFromRequest,
   isCoordinatorTaskInRequesterTenant,
   isParticipantInRequesterTenant,
+  isParticipantVisibleToBillingRequest,
   isShiftInRequesterTenant,
   tenantParticipantAndStaffClause,
   tenantParticipantClause,
@@ -531,9 +533,8 @@ router.post('/create-batch', (req, res) => {
 // List billing invoices
 router.get('/', (req, res) => {
   try {
-    const userId = req.session?.user?.id;
-    const pc = tenantParticipantClause(userId, 'p');
-    if (!pc.orgId) return res.json([]);
+    const bf = billingParticipantFilterFromRequest(req);
+    if (bf.empty) return res.json([]);
     const rows = db.prepare(`
       SELECT bi.*, p.name as participant_name, p.ndis_number, p.invoice_emails, p.invoice_includes_gst,
              COALESCE(li_sum.line_sub, 0) as line_sub,
@@ -551,9 +552,9 @@ router.get('/', (req, res) => {
         FROM billing_invoice_payments
         GROUP BY billing_invoice_id
       ) pay ON pay.billing_invoice_id = bi.id
-      WHERE (${pc.sql})
+      WHERE (${bf.sql})
       ORDER BY bi.created_at DESC
-    `).all(...pc.params);
+    `).all(...bf.params);
     const list = rows.map((inv) => {
       let emails = [];
       try { emails = JSON.parse(inv.invoice_emails || '[]'); } catch { emails = []; }
@@ -584,16 +585,15 @@ router.get('/', (req, res) => {
 // invoice_number format: BINV-{batchRef}-{index}
 router.get('/batches', (req, res) => {
   try {
-    const userId = req.session?.user?.id;
-    const pc = tenantParticipantClause(userId, 'p');
-    if (!pc.orgId) return res.json([]);
+    const bf = billingParticipantFilterFromRequest(req);
+    if (bf.empty) return res.json([]);
     const invoices = db.prepare(`
       SELECT bi.id, bi.invoice_number, bi.status, bi.created_at, p.invoice_includes_gst
       FROM billing_invoices bi
       JOIN participants p ON p.id = bi.participant_id
-      WHERE (${pc.sql})
+      WHERE (${bf.sql})
       ORDER BY bi.created_at DESC
-    `).all(...pc.params);
+    `).all(...bf.params);
 
     const batchMap = new Map();
     for (const inv of invoices) {
@@ -638,6 +638,40 @@ router.get('/batches', (req, res) => {
   } catch (err) {
     console.error('[billing batches]', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Pull AmountPaid from Xero for this invoice and add a Nexus payment row if Xero shows more received than Nexus.
+router.post('/:id/sync-from-xero', async (req, res) => {
+  try {
+    const invRow = db
+      .prepare(
+        `
+      SELECT bi.id, p.id as participant_id
+      FROM billing_invoices bi
+      JOIN participants p ON p.id = bi.participant_id
+      WHERE bi.id = ?
+    `
+      )
+      .get(req.params.id);
+    if (!invRow) {
+      return res.status(404).json({ error: 'Invoice not found', code: 'NOT_FOUND' });
+    }
+    if (!isParticipantVisibleToBillingRequest(invRow.participant_id, req)) {
+      return res.status(404).json({ error: 'Invoice not found', code: 'NOT_FOUND' });
+    }
+    const requester = db.prepare('SELECT org_id FROM users WHERE id = ?').get(req.session?.user?.id);
+    const result = await syncBillingInvoiceFromXero(req.params.id, requester?.org_id ?? null, null);
+    res.json(result);
+  } catch (err) {
+    console.error('[billing sync-from-xero]', err);
+    if (err.code === 'ORG_MISMATCH') {
+      return res.status(403).json({ error: err.message, code: err.code });
+    }
+    if (err.code === 'NO_XERO_LINK' || err.code === 'NOT_FOUND') {
+      return res.status(400).json({ error: err.message, code: err.code });
+    }
+    res.status(500).json({ error: err.message || 'Sync failed' });
   }
 });
 
@@ -718,7 +752,7 @@ router.post('/:id/void', (req, res) => {
       )
       .get(id);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+    if (!isParticipantVisibleToBillingRequest(inv.participant_id, req)) {
       return res.status(403).json({ error: 'Invoice does not belong to your organisation' });
     }
     if (inv.status === 'void') {
@@ -764,7 +798,7 @@ router.post('/:id/rebuild-lines', (req, res) => {
     const invRow = db
       .prepare('SELECT participant_id FROM billing_invoices WHERE id = ?')
       .get(req.params.id);
-    if (!invRow || !isParticipantInRequesterTenant(invRow.participant_id, req.session?.user?.id)) {
+    if (!invRow || !isParticipantVisibleToBillingRequest(invRow.participant_id, req)) {
       return res.status(404).json({ error: 'Invoice not found' });
     }
     const result = rebuildBillingInvoiceLineItems(req.params.id);
@@ -801,7 +835,7 @@ router.post('/:id/payments', (req, res) => {
       )
       .get(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+    if (!isParticipantVisibleToBillingRequest(inv.participant_id, req)) {
       return res.status(404).json({ error: 'Invoice not found' });
     }
     if (inv.status === 'void') {
@@ -861,7 +895,7 @@ router.get('/:id', (req, res) => {
       WHERE bi.id = ?
     `).get(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+    if (!isParticipantVisibleToBillingRequest(inv.participant_id, req)) {
       return res.status(404).json({ error: 'Invoice not found' });
     }
 
@@ -915,7 +949,7 @@ router.get('/:id/pdf', async (req, res) => {
       )
       .get(req.params.id);
     if (!inv) return res.status(404).send('Invoice not found');
-    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+    if (!isParticipantVisibleToBillingRequest(inv.participant_id, req)) {
       return res.status(404).send('Invoice not found');
     }
 
@@ -949,7 +983,7 @@ router.put('/:id/status', (req, res) => {
       .prepare('SELECT status, participant_id FROM billing_invoices WHERE id = ?')
       .get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Invoice not found' });
-    if (!isParticipantInRequesterTenant(existing.participant_id, req.session?.user?.id)) {
+    if (!isParticipantVisibleToBillingRequest(existing.participant_id, req)) {
       return res.status(404).json({ error: 'Invoice not found' });
     }
     if (existing.status === 'void') {
@@ -967,7 +1001,7 @@ router.delete('/:id', (req, res) => {
   try {
     const inv = db.prepare('SELECT id, participant_id FROM billing_invoices WHERE id = ?').get(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-    if (!isParticipantInRequesterTenant(inv.participant_id, req.session?.user?.id)) {
+    if (!isParticipantVisibleToBillingRequest(inv.participant_id, req)) {
       return res.status(404).json({ error: 'Invoice not found' });
     }
     const id = req.params.id;

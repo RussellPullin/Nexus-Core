@@ -1,5 +1,8 @@
 import { db } from '../db/index.js';
-import { includeNullProviderParticipantsForUser } from '../middleware/roles.js';
+import {
+  includeNullProviderParticipantsForUser,
+  resolveFinancialDataOrgScope,
+} from '../middleware/roles.js';
 
 /**
  * Returns SQL + params so queries only return rows for the user's provider org.
@@ -71,4 +74,45 @@ export function isShiftInRequesterTenant(shiftId, userId) {
     )
     .get(shiftId, ...c.params);
   return !!row;
+}
+
+/**
+ * SQL fragment for billing_invoices JOIN participants p — own org only; super admins cannot pivot org via query string.
+ * @returns {{ empty: true } | { sql: string, params: unknown[] }}
+ */
+export function billingParticipantFilterFromRequest(req) {
+  const scope = resolveFinancialDataOrgScope(req);
+  if (scope.mode === 'none') return { empty: true };
+
+  const orgId = scope.orgId;
+  const dbUser = scope.dbUser;
+  const legacy = includeNullProviderParticipantsForUser(dbUser);
+
+  if (legacy) {
+    return {
+      sql: `(p.provider_org_id = ? OR p.provider_org_id IS NULL OR TRIM(COALESCE(p.provider_org_id, '')) = '')`,
+      params: [orgId],
+    };
+  }
+  return { sql: 'p.provider_org_id = ?', params: [orgId] };
+}
+
+/** True if this participant is in scope for billing APIs (matches list endpoints). */
+export function isParticipantVisibleToBillingRequest(participantId, req) {
+  if (!participantId || !req) return false;
+  const bf = billingParticipantFilterFromRequest(req);
+  if (bf.empty) return false;
+  const row = db.prepare(`SELECT 1 AS x FROM participants p WHERE p.id = ? AND (${bf.sql})`).get(participantId, ...bf.params);
+  return !!row;
+}
+
+/**
+ * Filter staff by org (admin pay summary, etc.) — own org only; no super-admin cross-org view.
+ * @returns {{ empty: true } | { sql: string, params: unknown[] }}
+ */
+export function staffTableOrgFilterFromRequest(req, tableAlias = 'st') {
+  const scope = resolveFinancialDataOrgScope(req);
+  if (scope.mode === 'none') return { empty: true };
+  const a = tableAlias;
+  return { sql: `${a}.org_id = ?`, params: [scope.orgId] };
 }

@@ -65,6 +65,20 @@ export function resolveParticipantListScope(req) {
 }
 
 /**
+ * Financial / billing / pay data: always the signed-in user's own organisation only.
+ * Ignores super-admin ?org_id= and ?all_orgs= (super admins manage features elsewhere, not other orgs' money).
+ * Users without users.org_id (typical global super admin) see no financial rows.
+ */
+export function resolveFinancialDataOrgScope(req) {
+  const userId = req.session?.user?.id;
+  if (!userId) return { mode: 'none' };
+  const dbUser = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(userId);
+  if (!dbUser) return { mode: 'none' };
+  if (!dbUser.org_id) return { mode: 'none' };
+  return { mode: 'scoped', orgId: dbUser.org_id, dbUser };
+}
+
+/**
  * Require user to have one of the given roles.
  * Use after requireAuth.
  */

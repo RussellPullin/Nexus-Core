@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
+import { billingParticipantFilterFromRequest, staffTableOrgFilterFromRequest } from '../lib/orgScopeSql.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
 
 const router = Router();
@@ -15,14 +16,19 @@ router.use(requireAdminOrDelegate);
 // Coordinator activity: tasks and aggregates by coordinator
 router.get('/coordinator-activity', (req, res) => {
   try {
+    const bf = billingParticipantFilterFromRequest(req);
+    if (bf.empty) {
+      return res.json({ tasks: [], aggregates: [] });
+    }
     const { from_date, to_date, staff_id } = req.query;
     let tasks = db.prepare(`
       SELECT ct.*, p.name as participant_name, p.ndis_number, st.name as staff_name
       FROM coordinator_tasks ct
       JOIN participants p ON p.id = ct.participant_id
       JOIN staff st ON st.id = ct.staff_id
+      WHERE (${bf.sql})
       ORDER BY ct.activity_date DESC, ct.created_at DESC
-    `).all();
+    `).all(...bf.params);
     if (from_date) tasks = tasks.filter((t) => t.activity_date >= from_date);
     if (to_date) tasks = tasks.filter((t) => t.activity_date <= to_date);
     if (staff_id) tasks = tasks.filter((t) => t.staff_id === staff_id);
@@ -76,6 +82,15 @@ router.get('/coordinator-activity', (req, res) => {
 // Billable summary: hours and value, unbilled vs billed
 router.get('/billable-summary', (req, res) => {
   try {
+    const bf = billingParticipantFilterFromRequest(req);
+    if (bf.empty) {
+      return res.json({
+        coordinator_tasks: { unbilled: { count: 0, hours: 0, value: 0 }, billed: { count: 0, hours: 0, value: 0 } },
+        shifts: { unbilled: { count: 0, hours: 0, value: 0 }, billed: { count: 0, hours: 0, value: 0 } },
+        total_unbilled: { hours: 0, value: 0 },
+        total_billed: { hours: 0, value: 0 }
+      });
+    }
     const { from_date, to_date } = req.query;
     const from = from_date || '1970-01-01';
     const to = to_date || '9999-12-31';
@@ -83,20 +98,24 @@ router.get('/billable-summary', (req, res) => {
     const unbilledTasks = db.prepare(`
       SELECT ct.id, ct.quantity, ct.unit_price, ct.activity_date
       FROM coordinator_tasks ct
-      WHERE ct.activity_date >= ? AND ct.activity_date <= ?
+      JOIN participants p ON p.id = ct.participant_id
+      WHERE (${bf.sql})
+        AND ct.activity_date >= ? AND ct.activity_date <= ?
         AND ct.task_invoice_id IS NULL AND (ct.billing_invoice_id IS NULL OR ct.billing_invoice_id = '')
-    `).all(from, to);
+    `).all(...bf.params, from, to);
     const unbilledTaskHours = unbilledTasks.reduce((s, t) => s + (t.quantity || 0), 0);
     const unbilledTaskValue = unbilledTasks.reduce((s, t) => s + (t.quantity || 0) * (t.unit_price || 0), 0);
 
     const unbilledShifts = db.prepare(`
       SELECT s.id, s.start_time, s.end_time
       FROM shifts s
-      WHERE s.status IN ('completed', 'completed_by_admin')
+      JOIN participants p ON p.id = s.participant_id
+      WHERE (${bf.sql})
+        AND s.status IN ('completed', 'completed_by_admin')
         AND (s.billing_invoice_id IS NULL OR s.billing_invoice_id = '')
         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id)
         AND s.start_time >= ? AND s.start_time <= ?
-    `).all(`${from}T00:00:00`, `${to}T23:59:59`);
+    `).all(...bf.params, `${from}T00:00:00`, `${to}T23:59:59`);
     let unbilledShiftHours = 0;
     unbilledShifts.forEach((s) => {
       if (s.start_time && s.end_time) {
@@ -107,26 +126,32 @@ router.get('/billable-summary', (req, res) => {
       SELECT sli.shift_id, sli.quantity, sli.unit_price
       FROM shift_line_items sli
       JOIN shifts s ON s.id = sli.shift_id
-      WHERE s.status IN ('completed', 'completed_by_admin')
+      JOIN participants p ON p.id = s.participant_id
+      WHERE (${bf.sql})
+        AND s.status IN ('completed', 'completed_by_admin')
         AND (s.billing_invoice_id IS NULL OR s.billing_invoice_id = '')
         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id)
         AND s.start_time >= ? AND s.start_time <= ?
-    `).all(`${from}T00:00:00`, `${to}T23:59:59`);
+    `).all(...bf.params, `${from}T00:00:00`, `${to}T23:59:59`);
     const unbilledShiftValue = shiftLineItems.reduce((s, li) => s + (li.quantity || 0) * (li.unit_price || 0), 0);
 
     const billedTasks = db.prepare(`
       SELECT ct.quantity, ct.unit_price FROM coordinator_tasks ct
-      WHERE ct.activity_date >= ? AND ct.activity_date <= ?
+      JOIN participants p ON p.id = ct.participant_id
+      WHERE (${bf.sql})
+        AND ct.activity_date >= ? AND ct.activity_date <= ?
         AND (ct.billing_invoice_id IS NOT NULL AND ct.billing_invoice_id != '')
-    `).all(from, to);
+    `).all(...bf.params, from, to);
     const billedTaskHours = billedTasks.reduce((s, t) => s + (t.quantity || 0), 0);
     const billedTaskValue = billedTasks.reduce((s, t) => s + (t.quantity || 0) * (t.unit_price || 0), 0);
 
     const billedShifts = db.prepare(`
       SELECT sli.quantity, sli.unit_price FROM billing_invoice_line_items sli
       JOIN shifts s ON s.id = sli.source_shift_id
-      WHERE sli.source_type = 'shift' AND sli.line_date >= ? AND sli.line_date <= ?
-    `).all(from, to);
+      JOIN participants p ON p.id = s.participant_id
+      WHERE (${bf.sql})
+        AND sli.source_type = 'shift' AND sli.line_date >= ? AND sli.line_date <= ?
+    `).all(...bf.params, from, to);
     const billedShiftHours = billedShifts.reduce((s, li) => s + (li.quantity || 0), 0);
     const billedShiftValue = billedShifts.reduce((s, li) => s + (li.quantity || 0) * (li.unit_price || 0), 0);
 
@@ -156,6 +181,14 @@ router.get('/billable-summary', (req, res) => {
 // Financial overview: invoice breakdown by period/coordinator/participant
 router.get('/financial-overview', (req, res) => {
   try {
+    const bf = billingParticipantFilterFromRequest(req);
+    if (bf.empty) {
+      return res.json({
+        by_status: { draft: { count: 0, total: 0 }, sent: { count: 0, total: 0 }, paid: { count: 0, total: 0 } },
+        grouped: [],
+        invoices: []
+      });
+    }
     const { from_date, to_date, group_by = 'month' } = req.query;
     const from = from_date || '1970-01-01';
     const to = to_date || '9999-12-31';
@@ -165,8 +198,8 @@ router.get('/financial-overview', (req, res) => {
              p.name as participant_name
       FROM billing_invoices bi
       JOIN participants p ON p.id = bi.participant_id
-      WHERE bi.period_from <= ? AND bi.period_to >= ?
-    `).all(to, from);
+      WHERE (${bf.sql}) AND bi.period_from <= ? AND bi.period_to >= ?
+    `).all(...bf.params, to, from);
 
     const byStatus = { draft: { count: 0, total: 0 }, sent: { count: 0, total: 0 }, paid: { count: 0, total: 0 } };
     const invIds = invoices.map((i) => i.id);
@@ -256,7 +289,13 @@ router.get('/financial-overview', (req, res) => {
 /** Full staff pay-period summary from Nexus shifts (same rules as per-staff shift-hours-summary). */
 router.get('/pay-summary', (req, res) => {
   try {
-    const staffRows = db.prepare('SELECT id, name FROM staff ORDER BY name COLLATE NOCASE').all();
+    const sf = staffTableOrgFilterFromRequest(req);
+    if (sf.empty) {
+      return res.json([]);
+    }
+    const staffRows = db
+      .prepare(`SELECT id, name FROM staff WHERE (${sf.sql}) ORDER BY name COLLATE NOCASE`)
+      .all(...sf.params);
     const shiftStmt = db.prepare(`
       SELECT s.id, s.start_time, s.end_time, s.expenses,
         (SELECT pn.travel_time_min FROM progress_notes pn WHERE pn.shift_id = s.id LIMIT 1) as travel_time_min,
