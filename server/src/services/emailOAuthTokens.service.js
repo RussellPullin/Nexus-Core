@@ -68,7 +68,15 @@ export async function getValidAccessToken(userId) {
     throw err;
   }
 
-  const refresh = decrypt(row.email_oauth_refresh_encrypted);
+  let refresh;
+  try {
+    refresh = decrypt(row.email_oauth_refresh_encrypted);
+  } catch {
+    markReconnectRequired(userId);
+    const err = new Error('Your email connection expired. Please reconnect in Settings.');
+    err.code = 'EMAIL_RECONNECT_REQUIRED';
+    throw err;
+  }
   if (!refresh) {
     markReconnectRequired(userId);
     const err = new Error('Your email connection expired. Please reconnect in Settings.');
@@ -78,7 +86,12 @@ export async function getValidAccessToken(userId) {
 
   const expiresAt = row.email_token_expires_at || 0;
   if (expiresAt > Date.now() + FIVE_MIN_MS && row.email_oauth_access_encrypted) {
-    const access = decrypt(row.email_oauth_access_encrypted);
+    let access;
+    try {
+      access = decrypt(row.email_oauth_access_encrypted);
+    } catch {
+      access = null;
+    }
     if (access) return access;
   }
 

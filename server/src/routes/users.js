@@ -3,8 +3,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdmin, requireAdminOrDelegate } from '../middleware/roles.js';
-import { isSuperAdminEmail } from '../lib/superAdmin.js';
-
 const router = Router();
 
 // All routes require auth
@@ -14,8 +12,7 @@ router.use(requireAuth);
 router.get('/', requireAdminOrDelegate, (req, res) => {
   try {
     const requester = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(req.session.user.id);
-    const tenantFilter =
-      requester?.org_id && !isSuperAdminEmail(requester.email) ? 'WHERE u.org_id = ?' : '';
+    const tenantFilter = requester?.org_id ? 'WHERE u.org_id = ?' : '';
     const users = db
       .prepare(`
       SELECT u.id, u.email, u.name, u.role, u.org_id, u.staff_id, u.created_at,
@@ -47,7 +44,7 @@ router.get('/', requireAdminOrDelegate, (req, res) => {
 router.put('/:id/role', requireAdmin, (req, res) => {
   try {
     const requester = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(req.session.user.id);
-    const orgScoped = requester?.org_id && !isSuperAdminEmail(requester.email);
+    const orgScoped = Boolean(requester?.org_id);
     const { role } = req.body;
     if (!['admin', 'support_coordinator', 'delegate'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
@@ -69,7 +66,7 @@ router.put('/:id/role', requireAdmin, (req, res) => {
 router.get('/user-participants', requireAdminOrDelegate, (req, res) => {
   try {
     const requester = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(req.session.user.id);
-    const orgScoped = requester?.org_id && !isSuperAdminEmail(requester.email);
+    const orgScoped = Boolean(requester?.org_id);
     const { user_id } = req.query;
     let rows = db.prepare(`
       SELECT up.id, up.user_id, up.participant_id, up.created_at,
@@ -92,7 +89,7 @@ router.get('/user-participants', requireAdminOrDelegate, (req, res) => {
 router.post('/user-participants', requireAdminOrDelegate, (req, res) => {
   try {
     const requester = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(req.session.user.id);
-    const orgScoped = requester?.org_id && !isSuperAdminEmail(requester.email);
+    const orgScoped = Boolean(requester?.org_id);
     const { user_id, participant_id } = req.body;
     if (!user_id || !participant_id) {
       return res.status(400).json({ error: 'user_id and participant_id required' });
@@ -130,7 +127,7 @@ router.post('/user-participants', requireAdminOrDelegate, (req, res) => {
 router.delete('/user-participants/:id', requireAdminOrDelegate, (req, res) => {
   try {
     const requester = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(req.session.user.id);
-    const orgScoped = requester?.org_id && !isSuperAdminEmail(requester.email);
+    const orgScoped = Boolean(requester?.org_id);
     const result = orgScoped
       ? db.prepare(`
           DELETE FROM user_participants
@@ -149,7 +146,7 @@ router.delete('/user-participants/:id', requireAdminOrDelegate, (req, res) => {
 router.post('/delegate-grants', requireAdmin, (req, res) => {
   try {
     const requester = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(req.session.user.id);
-    const orgScoped = requester?.org_id && !isSuperAdminEmail(requester.email);
+    const orgScoped = Boolean(requester?.org_id);
     const { user_id, expires_at } = req.body;
     if (!user_id) return res.status(400).json({ error: 'user_id required' });
     const user = orgScoped
@@ -182,7 +179,7 @@ router.post('/delegate-grants', requireAdmin, (req, res) => {
 router.delete('/delegate-grants/:userId', requireAdmin, (req, res) => {
   try {
     const requester = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(req.session.user.id);
-    const orgScoped = requester?.org_id && !isSuperAdminEmail(requester.email);
+    const orgScoped = Boolean(requester?.org_id);
     const result = orgScoped
       ? db.prepare(`
           DELETE FROM delegate_grants

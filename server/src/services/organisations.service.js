@@ -1,6 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 
+/** True for the Nexus tenant anchor row (same id as owner_org_id), not a directory / external org. */
+export function isTenantAnchorRow(row) {
+  return Boolean(row?.owner_org_id && row.id === row.owner_org_id);
+}
+
 /**
  * Find or create a plan manager organisation by name/email.
  * Returns org id or null. Mutates orgByName and orgByEmail with new entries.
@@ -24,8 +29,14 @@ export function ensurePlanManagerOrg(orgByName, orgByEmail, name, email, ownerOr
 /** Build org lookup maps from organisations table. */
 export function buildOrgLookupMaps(ownerOrgId = null) {
   const orgs = ownerOrgId
-    ? db.prepare('SELECT id, name, email FROM organisations WHERE owner_org_id = ?').all(ownerOrgId)
-    : db.prepare('SELECT id, name, email FROM organisations').all();
+    ? db
+        .prepare(
+          'SELECT id, name, email FROM organisations WHERE owner_org_id = ? AND id != owner_org_id'
+        )
+        .all(ownerOrgId)
+    : db
+        .prepare('SELECT id, name, email FROM organisations WHERE owner_org_id IS NULL OR id != owner_org_id')
+        .all();
   const orgByName = {};
   const orgByEmail = {};
   for (const o of orgs) {

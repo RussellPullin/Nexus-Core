@@ -5,16 +5,9 @@
  */
 import ExcelJS from 'exceljs';
 import { resolveShiftExcelColumns } from './excelShiftParse.service.js';
+import { getValidAccessToken } from './orgOnedriveSync.service.js';
 
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
-
-function getRequiredEnv(key) {
-  const value = process.env[key];
-  if (!value) {
-    throw new Error(`Missing environment variable: ${key}. Configure OneDrive Excel pull in .env`);
-  }
-  return value;
-}
 
 const encodeDrivePath = (path) =>
   path
@@ -23,43 +16,13 @@ const encodeDrivePath = (path) =>
     .map((s) => encodeURIComponent(s))
     .join('/');
 
-function buildItemByPathUrl(adminUserId, path) {
-  return `${GRAPH_BASE_URL}/users/${encodeURIComponent(adminUserId)}/drive/root:/${encodeDrivePath(path)}`;
+/** Delegated OAuth (per-org Settings → OneDrive): token is for the linked account — use /me/drive/... */
+function buildItemByPathUrlMe(path) {
+  return `${GRAPH_BASE_URL}/me/drive/root:/${encodeDrivePath(path)}`;
 }
 
-function buildContentUrl(adminUserId, itemId) {
-  return `${GRAPH_BASE_URL}/users/${encodeURIComponent(adminUserId)}/drive/items/${itemId}/content`;
-}
-
-async function getAccessToken() {
-  const tenantId = getRequiredEnv('AZURE_TENANT_ID');
-  const clientId = getRequiredEnv('AZURE_CLIENT_ID');
-  const clientSecret = getRequiredEnv('AZURE_CLIENT_SECRET');
-  const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-
-  const body = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
-    grant_type: 'client_credentials',
-    scope: 'https://graph.microsoft.com/.default',
-  });
-
-  const response = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Token request failed: ${response.status} ${text}`);
-  }
-
-  const data = await response.json();
-  if (!data.access_token) {
-    throw new Error('Token request did not return an access token');
-  }
-  return data.access_token;
+function buildContentUrlMe(itemId) {
+  return `${GRAPH_BASE_URL}/me/drive/items/${encodeURIComponent(itemId)}/content`;
 }
 
 async function graphJson(method, url, accessToken) {
@@ -86,6 +49,38 @@ async function graphBuffer(method, url, accessToken) {
   }
   const buf = await response.arrayBuffer();
   return Buffer.from(buf);
+}
+
+/**
+ * Load the Progress Notes master workbook from OneDrive.
+ * Requires `orgId`: uses that org's Settings → Microsoft OneDrive (delegated) connection only — each tenant has its own linked account and workbook.
+ * @param {{ orgId?: string|null, log?: function }} options
+ */
+async function fetchExcelWorkbookBuffer(options = {}) {
+  const log = options.log || (() => {});
+  const excelPath = process.env.ONEDRIVE_EXCEL_PATH?.trim() || 'Progress Notes App/master progress notes.xlsx';
+  const orgId = options.orgId || null;
+
+  if (!orgId) {
+    throw new Error(
+      'Excel pull requires an organisation id. Each organisation must connect Microsoft OneDrive under Settings (document archive) so this server reads that org’s workbook only — there is no shared server-wide Excel.'
+    );
+  }
+
+  const accessToken = await getValidAccessToken(orgId);
+  if (!accessToken) {
+    throw new Error(
+      'Microsoft OneDrive is not connected for this organisation. Connect it under Settings (Microsoft OneDrive / document archive), using the account where the Progress Notes Excel file lives.'
+    );
+  }
+  log('Fetching Excel from OneDrive (organisation connection)', { path: excelPath, orgId });
+  const itemUrl = buildItemByPathUrlMe(excelPath);
+  const item = await graphJson('GET', itemUrl, accessToken);
+  if (!item?.id) {
+    throw new Error(`Excel file not found at: ${excelPath} (in the connected user's OneDrive)`);
+  }
+  const contentUrl = buildContentUrlMe(item.id);
+  return graphBuffer('GET', contentUrl, accessToken);
 }
 
 const normalizeHeader = (v) => String(v || '').trim().toLowerCase();
@@ -338,38 +333,16 @@ function rowToWebhookShift(row) {
 }
 
 /**
- * Pull shifts from the OneDrive Excel file.
- * Requires: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
- *           ONEDRIVE_ADMIN_USER_ID, ONEDRIVE_EXCEL_PATH
- * @param {object} [options] - { log, useLlm } useLlm defaults true (Ollama refines columns when needed).
+ * Pull shifts from the OneDrive Excel file for one organisation (`orgId` required).
+ * Uses that org’s Settings → Microsoft OneDrive connection only.
+ * @param {object} [options] - { log, useLlm, orgId } useLlm defaults true (Ollama refines columns when needed).
  * @returns {{ shifts: Array, llmUsed?: boolean, error?: string }}
  */
 export async function pullShiftsFromExcel(options = {}) {
   const log = options.log || (() => {});
   const useLlm = options.useLlm !== false;
 
-  const adminUserId = process.env.ONEDRIVE_ADMIN_USER_ID?.trim() || process.env.ADMIN_USER_ID?.trim();
-  const excelPath = process.env.ONEDRIVE_EXCEL_PATH?.trim() || 'Progress Notes App/master progress notes.xlsx';
-
-  if (!adminUserId) {
-    throw new Error('ONEDRIVE_ADMIN_USER_ID (or ADMIN_USER_ID) is required. Set the OneDrive owner email in .env');
-  }
-
-  if (!process.env.AZURE_TENANT_ID || !process.env.AZURE_CLIENT_ID || !process.env.AZURE_CLIENT_SECRET) {
-    throw new Error('AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET are required for OneDrive Excel pull');
-  }
-
-  log('Fetching Excel from OneDrive', { path: excelPath });
-
-  const accessToken = await getAccessToken();
-  const item = await graphJson('GET', buildItemByPathUrl(adminUserId, excelPath), accessToken);
-
-  if (!item) {
-    throw new Error(`Excel file not found at: ${excelPath}`);
-  }
-
-  const contentUrl = buildContentUrl(adminUserId, item.id);
-  const buffer = await graphBuffer('GET', contentUrl, accessToken);
+  const buffer = await fetchExcelWorkbookBuffer({ orgId: options.orgId || null, log });
 
   const { rows, llmUsed } = await parseWorkbookRows(buffer, { log, useLlm });
 
@@ -389,16 +362,7 @@ export async function pullShiftsFromExcel(options = {}) {
 }
 
 async function getExcelBuffer(options = {}) {
-  const adminUserId = process.env.ONEDRIVE_ADMIN_USER_ID?.trim() || process.env.ADMIN_USER_ID?.trim();
-  const excelPath = process.env.ONEDRIVE_EXCEL_PATH?.trim() || 'Progress Notes App/master progress notes.xlsx';
-  if (!adminUserId) throw new Error('ONEDRIVE_ADMIN_USER_ID is required');
-  if (!process.env.AZURE_TENANT_ID || !process.env.AZURE_CLIENT_ID || !process.env.AZURE_CLIENT_SECRET) {
-    throw new Error('AZURE credentials required for OneDrive Excel pull');
-  }
-  const accessToken = await getAccessToken();
-  const item = await graphJson('GET', buildItemByPathUrl(adminUserId, excelPath), accessToken);
-  if (!item) throw new Error(`Excel file not found at: ${excelPath}`);
-  return graphBuffer('GET', buildContentUrl(adminUserId, item.id), accessToken);
+  return fetchExcelWorkbookBuffer({ orgId: options.orgId || null, log: options.log });
 }
 
 function parseNumber(val) {
@@ -454,13 +418,13 @@ async function parseSummarySheet(buffer) {
 /**
  * Pull Summary sheet from OneDrive Excel (staff hours by pay period).
  * Matches staff by name (case-insensitive).
- * @param {object} [options] - { log, staffName }
+ * @param {object} [options] - { log, staffName, orgId? } orgId: use org’s Settings → OneDrive (delegated).
  * @returns {{ summaryRows: Array }}
  */
 export async function pullSummaryFromExcel(options = {}) {
   const log = options.log || (() => {});
   log('Fetching Excel Summary from OneDrive');
-  const buffer = await getExcelBuffer(options);
+  const buffer = await getExcelBuffer({ orgId: options.orgId, log });
   const rows = await parseSummarySheet(buffer);
   const staffName = (options.staffName || '').trim();
   const filtered = staffName

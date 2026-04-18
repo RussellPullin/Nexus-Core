@@ -25,6 +25,7 @@ import {
 import { availabilityFromRequestBody } from '../lib/staffAvailability.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { tryPushStaffDocument, resolveOrgIdForStaff } from '../services/orgOnedriveSync.service.js';
+import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -75,6 +76,28 @@ function requesterScope(userId) {
   if (!userId) return { orgId: null, superAdmin: false };
   const u = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(userId);
   return { orgId: u?.org_id || null, superAdmin: isSuperAdminEmail(u?.email) };
+}
+
+/**
+ * Staff list scope: non–super-admins always see their org only.
+ * Super admins default to their own org when they have users.org_id (avoids merging tenants in one DB).
+ * Use ?all_orgs=1 for a global list; ?org_id= for another tenant (super admin only).
+ */
+function resolveStaffListScope(req) {
+  const scope = requesterScope(req.session?.user?.id);
+  const allOrgs = req.query?.all_orgs === 'true' || req.query?.all_orgs === '1';
+  const rawQ = req.query?.org_id;
+  const qOrg = typeof rawQ === 'string' && rawQ.trim() !== '' ? rawQ.trim() : null;
+
+  if (!scope.superAdmin) {
+    if (!scope.orgId) return { mode: 'none' };
+    return { mode: 'scoped', orgId: scope.orgId };
+  }
+
+  if (allOrgs) return { mode: 'all' };
+  if (qOrg) return { mode: 'scoped', orgId: qOrg };
+  if (scope.orgId) return { mode: 'scoped', orgId: scope.orgId };
+  return { mode: 'all' };
 }
 
 function visibleStaffById(staffId, scope) {
@@ -145,10 +168,12 @@ function getProviderProfileForUser(userId) {
 router.get('/', async (req, res) => {
   try {
     const { include_archived } = req.query;
-    const scope = requesterScope(req.session?.user?.id);
+    const listScope = resolveStaffListScope(req);
     let staff;
-    if (scope.orgId && !scope.superAdmin) {
-      staff = db.prepare('SELECT * FROM staff WHERE org_id = ? ORDER BY name').all(scope.orgId);
+    if (listScope.mode === 'none') {
+      staff = [];
+    } else if (listScope.mode === 'scoped') {
+      staff = db.prepare('SELECT * FROM staff WHERE org_id = ? ORDER BY name').all(listScope.orgId);
     } else {
       staff = db.prepare('SELECT * FROM staff ORDER BY name').all();
     }
@@ -242,6 +267,46 @@ export async function handleSetStaffShifterEnabled(req, res) {
 router.post('/shifter-enabled', requireAdminOrDelegate, handleSetStaffShifterEnabled);
 router.post('/set-shifter-enabled', requireAdminOrDelegate, handleSetStaffShifterEnabled);
 
+router.post('/send-test-email', async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Staff id required' });
+    const scope = requesterScope(req.session?.user?.id);
+    const s = visibleStaffById(id, scope);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+    if (!s.email?.trim()) return res.status(400).json({ error: 'Staff member has no email address' });
+
+    const userId = req.session?.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Not logged in' });
+
+    if (!getRelayConfigFromEnv()?.url) {
+      return res.status(400).json({
+        error:
+          'Email sending is not configured on the server. Ask your administrator to set AZURE_EMAIL_FUNCTION_URL.',
+        code: 'EMAIL_RELAY_NOT_CONFIGURED',
+        errorDetail: 'Deploy the Azure sendEmail function and add its URL to server environment.',
+      });
+    }
+    if (!getEmailConfigForUser(userId)) {
+      return res.status(400).json({
+        error: 'Connect your email in Settings to send messages.',
+        code: 'EMAIL_NOT_CONNECTED',
+        errorDetail: 'Open Settings and use Connect email (Gmail or Microsoft 365).',
+      });
+    }
+
+    const subject = 'Schedule Shift – Test email';
+    const text = `Hi ${s.name},\n\nThis is a test email from Schedule Shift. Your email integration is working correctly.\n\nYou will receive roster and shift notifications at this address.`;
+
+    await sendEmailViaRelay(userId, s.email, subject, text, null, null);
+
+    res.json({ ok: true, message: `Test email sent to ${s.email}` });
+  } catch (err) {
+    const msg = formatSmtpAuthError(err);
+    res.status(400).json({ error: msg, errorDetail: err?.message });
+  }
+});
+
 router.patch('/:id/shifter-enabled', requireAdminOrDelegate, handleSetStaffShifterEnabled);
 router.put('/:id/shifter-enabled', requireAdminOrDelegate, handleSetStaffShifterEnabled);
 
@@ -320,10 +385,24 @@ router.delete('/:id/assignments/:assignmentId', requireAdminOrDelegate, (req, re
 
 router.get('/:id/excel-summary', async (req, res) => {
   try {
-    const s = db.prepare('SELECT id, name FROM staff WHERE id = ?').get(req.params.id);
+    const listScope = resolveStaffListScope(req);
+    if (listScope.mode === 'none') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (listScope.mode === 'all') {
+      return res.status(400).json({
+        error: 'Pass ?org_id= to choose which organisation’s linked OneDrive to read (super admin).',
+      });
+    }
+    const orgId = listScope.orgId;
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organisation context required for Excel summary.' });
+    }
+    const s = db.prepare('SELECT id, name FROM staff WHERE id = ? AND org_id = ?').get(req.params.id, orgId);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
     const { summaryRows } = await pullSummaryFromExcel({
       staffName: s.name,
+      orgId,
       log: (msg, data) => console.log('[staff excel-summary]', msg, data || ''),
     });
     res.json({ summaryRows });
@@ -351,38 +430,6 @@ router.get('/:id/shift-hours-summary', (req, res) => {
   } catch (err) {
     console.error('[staff shift-hours-summary]', err);
     res.status(500).json({ error: err.message || 'Failed to compute shift hours' });
-  }
-});
-
-router.post('/send-test-email', async (req, res) => {
-  try {
-    const { id } = req.body;
-    if (!id) return res.status(400).json({ error: 'Staff id required' });
-    const scope = requesterScope(req.session?.user?.id);
-    const s = visibleStaffById(id, scope);
-    if (!s) return res.status(404).json({ error: 'Staff not found' });
-    if (!s.email?.trim()) return res.status(400).json({ error: 'Staff member has no email address' });
-
-    const userId = req.session?.user?.id;
-    if (!userId) return res.status(401).json({ error: 'Not logged in' });
-
-    if (!isEmailConfiguredForUser(userId)) {
-      return res.status(400).json({
-        error: 'Connect your email in Settings to send messages.',
-        code: 'EMAIL_NOT_CONNECTED',
-        errorDetail: 'Open Settings and use Connect email (Gmail or Microsoft 365).'
-      });
-    }
-
-    const subject = 'Schedule Shift – Test email';
-    const text = `Hi ${s.name},\n\nThis is a test email from Schedule Shift. Your email integration is working correctly.\n\nYou will receive roster and shift notifications at this address.`;
-
-    await sendEmailViaRelay(userId, s.email, subject, text, null, null);
-
-    res.json({ ok: true, message: `Test email sent to ${s.email}` });
-  } catch (err) {
-    const msg = formatSmtpAuthError(err);
-    res.status(400).json({ error: msg, errorDetail: err?.message });
   }
 });
 

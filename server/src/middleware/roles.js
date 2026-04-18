@@ -26,6 +26,40 @@ export function includeNullProviderParticipantsForUser(user) {
   return Boolean(single && single === user.org_id);
 }
 
+/** Legacy NULL provider rows are visible only when this DB has a single tenant and it matches scopeOrgId. */
+export function includeNullProviderParticipantsForOrgId(scopeOrgId) {
+  if (!scopeOrgId) return false;
+  const single = getSingleDistinctUserOrgId();
+  return Boolean(single && single === scopeOrgId);
+}
+
+/**
+ * Same rules as staff list: tenants are isolated; super admins with users.org_id default to that tenant;
+ * ?all_orgs=1 or ?org_id= for overrides (super admin only).
+ */
+export function resolveParticipantListScope(req) {
+  const userId = req.session?.user?.id;
+  if (!userId) return { mode: 'none' };
+  const dbUser = db.prepare('SELECT role, org_id, email FROM users WHERE id = ?').get(userId);
+  if (!dbUser) return { mode: 'none' };
+
+  const superA = isSuperAdminEmail(dbUser.email);
+  const allOrgs = req.query?.all_orgs === 'true' || req.query?.all_orgs === '1';
+  const rawQ = req.query?.org_id;
+  const qOrg = typeof rawQ === 'string' && rawQ.trim() !== '' ? rawQ.trim() : null;
+
+  if (!superA && !dbUser.org_id) return { mode: 'none' };
+
+  if (superA) {
+    if (allOrgs) return { mode: 'all', dbUser };
+    if (qOrg) return { mode: 'scoped', orgId: qOrg, dbUser };
+    if (dbUser.org_id) return { mode: 'scoped', orgId: dbUser.org_id, dbUser };
+    return { mode: 'all', dbUser };
+  }
+
+  return { mode: 'scoped', orgId: dbUser.org_id, dbUser };
+}
+
 /**
  * Require user to have one of the given roles.
  * Use after requireAuth.
@@ -116,7 +150,7 @@ export function canAccessParticipant(userId, participantId) {
 
   const participant = db.prepare('SELECT provider_org_id FROM participants WHERE id = ?').get(participantId);
   if (!participant) return false;
-  if (user.org_id && !isSuperAdminEmail(user.email)) {
+  if (user.org_id) {
     const po = participant.provider_org_id;
     if (po && po !== user.org_id) return false;
     if (!po && !includeNullProviderParticipantsForUser(user)) return false;
@@ -140,16 +174,14 @@ export function canAccessParticipant(userId, participantId) {
 
 /**
  * Participant IDs visible for assignment-style filtering (cases, tasks, list).
- * Returns null when the caller should not filter by this list (non-org-scoped admin/delegate).
- * Org-scoped admin/delegate: IDs in this org, plus legacy rows with NULL provider_org_id when single-tenant.
- * Support coordinators: assigned IDs that belong to this org (or legacy NULL when single-tenant).
+ * Returns null only when the user has no org_id (e.g. platform operator) so the list is not narrowed by assignment.
+ * When users.org_id is set (including super admins), returns IDs for that tenant only.
  */
 export function getAssignedParticipantIds(userId) {
   const user = db.prepare('SELECT role, org_id, email FROM users WHERE id = ?').get(userId);
   if (!user) return [];
 
-  const superAdmin = isSuperAdminEmail(user.email);
-  const orgScoped = Boolean(user.org_id) && !superAdmin;
+  const orgScoped = Boolean(user.org_id);
   const legacyNull = includeNullProviderParticipantsForUser(user);
 
   const now = new Date().toISOString().slice(0, 10);

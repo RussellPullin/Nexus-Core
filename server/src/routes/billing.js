@@ -22,6 +22,7 @@ import { isNf2fTask, NF2F_TASK_TYPES } from '../lib/billingConstants.js';
 import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
 import { sanitizePdfText } from '../lib/pdfInvoiceText.js';
 import { sendBillingBatchToXero } from '../services/xeroBillingPush.service.js';
+import { syncBillingInvoiceFromXero } from '../services/xeroPaymentSync.service.js';
 
 const router = Router();
 
@@ -581,6 +582,24 @@ router.get('/batches', (req, res) => {
   } catch (err) {
     console.error('[billing batches]', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Pull AmountPaid from Xero for this invoice and add a Nexus payment row if Xero shows more received than Nexus.
+router.post('/:id/sync-from-xero', async (req, res) => {
+  try {
+    const requester = db.prepare('SELECT org_id FROM users WHERE id = ?').get(req.session?.user?.id);
+    const result = await syncBillingInvoiceFromXero(req.params.id, requester?.org_id ?? null, null);
+    res.json(result);
+  } catch (err) {
+    console.error('[billing sync-from-xero]', err);
+    if (err.code === 'ORG_MISMATCH') {
+      return res.status(403).json({ error: err.message, code: err.code });
+    }
+    if (err.code === 'NO_XERO_LINK' || err.code === 'NOT_FOUND') {
+      return res.status(400).json({ error: err.message, code: err.code });
+    }
+    res.status(500).json({ error: err.message || 'Sync failed' });
   }
 });
 

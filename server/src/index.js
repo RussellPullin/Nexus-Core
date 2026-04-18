@@ -6,6 +6,7 @@ import { mkdirSync, existsSync, readFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import fileStoreFactory from 'session-file-store';
+import { isLegacyOnedriveAdminConfigured } from './lib/onedriveLegacyUser.js';
 
 // Load .env from project root (parent of server/) so config works regardless of cwd
 const __filename = fileURLToPath(import.meta.url);
@@ -14,17 +15,27 @@ const projectRoot = resolve(__dirname, '../..');
 const envPath = join(projectRoot, '.env');
 config({ path: envPath, override: true });
 
-// Fallback: dotenv can fail to parse CRM_API_KEY (e.g. OneDrive sync). Read .env directly.
-if (!process.env.CRM_API_KEY) {
+// Fallback: dotenv can fail to parse some lines (quotes, # in values, etc.). Read keys from .env directly.
+function loadEnvKeyFromFile(key, label) {
+  if (process.env[key]) return;
   const tryPaths = [envPath, join(process.cwd(), '.env')];
   for (const p of tryPaths) {
     if (!existsSync(p)) continue;
     try {
       const raw = readFileSync(p, 'utf8');
-      const m = raw.match(/CRM_API_KEY\s*=\s*["']?([^"'\s\r\n]+)["']?/);
-      if (m && m[1]) {
-        process.env.CRM_API_KEY = m[1].trim();
-        console.log('[nexus] CRM_API_KEY loaded from fallback read:', p);
+      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`^${escaped}\\s*=\\s*(.+)`, 'm');
+      const m = raw.match(re);
+      if (!m) continue;
+      let v = m[1].trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+        v = v.slice(1, -1);
+      }
+      const hash = v.indexOf('#');
+      if (hash >= 0 && !v.slice(0, hash).includes('"')) v = v.slice(0, hash).trim();
+      if (v) {
+        process.env[key] = v;
+        console.log(`[nexus] ${label || key} loaded from fallback read:`, p);
         break;
       }
     } catch (e) {
@@ -33,13 +44,26 @@ if (!process.env.CRM_API_KEY) {
   }
 }
 
+loadEnvKeyFromFile('CRM_API_KEY', 'CRM_API_KEY');
+loadEnvKeyFromFile('ONEDRIVE_ADMIN_USER_ID', 'ONEDRIVE_ADMIN_USER_ID');
+loadEnvKeyFromFile('AZURE_TENANT_ID', 'AZURE_TENANT_ID');
+loadEnvKeyFromFile('AZURE_CLIENT_ID', 'AZURE_CLIENT_ID');
+loadEnvKeyFromFile('AZURE_CLIENT_SECRET', 'AZURE_CLIENT_SECRET');
+loadEnvKeyFromFile('AZURE_EMAIL_FUNCTION_URL', 'AZURE_EMAIL_FUNCTION_URL');
+loadEnvKeyFromFile('AZURE_EMAIL_API_KEY', 'AZURE_EMAIL_API_KEY');
+
 console.log('[nexus] .env path:', envPath);
-console.log('[nexus] OneDrive Excel pull config:', {
+console.log('[nexus] Progress Notes / Graph env:', {
   CRM_API_KEY: process.env.CRM_API_KEY ? 'set' : 'NOT SET',
-  ONEDRIVE_ADMIN_USER_ID: process.env.ONEDRIVE_ADMIN_USER_ID ? 'set' : 'NOT SET',
+  ONEDRIVE_ADMIN_USER_ID: isLegacyOnedriveAdminConfigured() ? 'set' : 'NOT SET',
   AZURE_TENANT_ID: process.env.AZURE_TENANT_ID ? 'set' : 'NOT SET',
   AZURE_CLIENT_ID: process.env.AZURE_CLIENT_ID ? 'set' : 'NOT SET',
   AZURE_CLIENT_SECRET: process.env.AZURE_CLIENT_SECRET ? 'set' : 'NOT SET',
+});
+console.log('[nexus] Excel pull uses per-org Settings → OneDrive (delegated); ONEDRIVE_EXCEL_PATH optional relative path.');
+console.log('[nexus] Email relay:', {
+  AZURE_EMAIL_FUNCTION_URL: process.env.AZURE_EMAIL_FUNCTION_URL ? 'set' : 'NOT SET',
+  AZURE_EMAIL_API_KEY: process.env.AZURE_EMAIL_API_KEY ? 'set' : 'NOT SET',
 });
 
 // Ensure data directories exist (use DATA_DIR for Azure Files mount when set)
@@ -68,6 +92,8 @@ import coordinatorCasesRouter from './routes/coordinatorCases.js';
 import billingRouter from './routes/billing.js';
 import appShiftsRouter from './routes/appShifts.js';
 import syncFromExcelRouter from './routes/syncFromExcel.js';
+import progressAppWebhookRouter from './routes/progressAppWebhook.js';
+import xeroWebhookRouter from './routes/xeroWebhook.js';
 import receiptsRouter from './routes/receipts.js';
 import settingsRouter from './routes/settings.js';
 import learningRouter from './routes/learning.js';
@@ -98,6 +124,8 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use(cors({ origin: true, credentials: true }));
+// Xero webhooks require the raw body for HMAC verification (must be before express.json on this path).
+app.use('/api/webhooks/xero', express.raw({ limit: '2mb', type: '*/*' }), xeroWebhookRouter);
 app.use(express.json());
 const sessionFilesDir = join(dataDir, 'sessions');
 if (!existsSync(sessionFilesDir)) mkdirSync(sessionFilesDir, { recursive: true });
@@ -125,6 +153,8 @@ app.use('/api/integrations/microsoft-drive', orgMicrosoftDriveRouter);
 // Public staff onboarding form (token in URL, no login)
 app.use('/api/public/staff-onboarding', staffOnboardingPublicRouter);
 
+// Progress Notes App webhook (CRM_API_KEY only — no session)
+app.use('/api/webhooks', progressAppWebhookRouter);
 // Sync from OneDrive Excel (auth: session OR CRM_API_KEY for cron)
 app.use('/api/sync', syncFromExcelRouter);
 

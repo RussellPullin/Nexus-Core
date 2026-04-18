@@ -4,6 +4,8 @@
  * Requires session auth (coordinator) or optionally CRM_API_KEY for cron/scripts.
  */
 import { Router } from 'express';
+import { db } from '../db/index.js';
+import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { pullShiftsFromExcel } from '../services/excelPull.service.js';
 import { processShifts } from '../services/webhookProcessor.js';
 import { mirrorAllShiftsToNexusSupabase } from '../services/nexusPublicShiftsSync.service.js';
@@ -21,6 +23,36 @@ function hasValidApiKey(req) {
     return auth.slice(7).trim() === expected;
   }
   return false;
+}
+
+/**
+ * Sync org for Excel/Shifter: signed-in users are scoped to their org (super-admins may pass body/query org_id).
+ * CRM_API_KEY without a session must send org_id — intended for per-org cron jobs.
+ */
+function resolveSyncedOrgId(req) {
+  const bodyOrg =
+    typeof req.body?.org_id === 'string' && req.body.org_id.trim() ? req.body.org_id.trim() : null;
+  const queryOrg =
+    typeof req.query?.org_id === 'string' && req.query.org_id.trim() ? req.query.org_id.trim() : null;
+  const requested = bodyOrg || queryOrg || null;
+
+  const hasSession = !!req.session?.user;
+  if (hasValidApiKey(req) && !hasSession) {
+    return requested || null;
+  }
+
+  if (!hasSession) return null;
+
+  const uid = req.session.user.id;
+  const u = db.prepare('SELECT org_id, email FROM users WHERE id = ?').get(uid);
+  const sessionOrg = u?.org_id && String(u.org_id).trim() ? String(u.org_id).trim() : null;
+  const superA = isSuperAdminEmail(u?.email);
+
+  if (superA) {
+    if (requested) return requested;
+    return sessionOrg || null;
+  }
+  return sessionOrg || null;
 }
 
 /**
@@ -48,9 +80,18 @@ router.post('/from-excel', async (req, res) => {
       req.body?.useLlm !== 'false' &&
       req.query?.useLlm !== 'false';
 
+    const orgId = resolveSyncedOrgId(req);
+    if (!orgId) {
+      return res.status(400).json({
+        error:
+          'org_id is required. Each organisation uses its own Microsoft OneDrive under Settings. Sign in with a user that has org_id, or as super admin pass org_id, or use CRM_API_KEY with org_id in the body or query.',
+      });
+    }
+
     const { shifts, llmUsed } = await pullShiftsFromExcel({
       log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
       useLlm,
+      orgId,
     });
 
     if (!shifts || shifts.length === 0) {
@@ -69,7 +110,7 @@ router.post('/from-excel', async (req, res) => {
     log('Processing shifts', { count: shifts.length });
 
     const result = processShifts(shifts, {
-      orgId: null,
+      orgId,
       log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
       logWarn: (msg, data) => console.warn('[sync-from-excel]', msg, data || ''),
       logError: (msg, err) => console.error('[sync-from-excel]', msg, err),
@@ -85,7 +126,8 @@ router.post('/from-excel', async (req, res) => {
     });
   } catch (err) {
     console.error('[sync-from-excel]', err);
-    const hint = 'Check .env: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID, ONEDRIVE_EXCEL_PATH.';
+    const hint =
+      'Connect Microsoft OneDrive under Settings for this organisation (the account that owns the Progress Notes Excel file). Optional path: ONEDRIVE_EXCEL_PATH in server env.';
     res.status(500).json({
       error: err.message || 'Sync from Excel failed',
       errorDetail: hint,
@@ -96,7 +138,7 @@ router.post('/from-excel', async (req, res) => {
 /**
  * POST /api/sync/from-shifter
  * Pull shifts from Shifter Supabase (org-scoped) and process using webhook logic.
- * Auth: session (uses req.session.user.org_id) OR x-api-key / Bearer (CRM_API_KEY) with body/query org_id.
+ * Auth: session (scoped to user org; super admin may pass org_id) OR CRM_API_KEY with body/query org_id.
  * Optional body/query: from_date, to_date, limit
  */
 router.post('/from-shifter', async (req, res) => {
@@ -109,12 +151,11 @@ router.post('/from-shifter', async (req, res) => {
     });
   }
 
-  const sessionOrgId = req.session?.user?.org_id || null;
-  const requestedOrgId = req.body?.org_id || req.query?.org_id || null;
-  const orgId = sessionOrgId || requestedOrgId || null;
+  const orgId = resolveSyncedOrgId(req);
   if (!orgId) {
     return res.status(400).json({
-      error: 'org_id is required. Signed-in users need org_id on their account; API key callers must pass org_id.',
+      error:
+        'org_id is required. Shifter data is loaded per Nexus organisation (mapped to a Shifter org). Sign in with a user that has org_id, super admin pass org_id, or CRM_API_KEY with org_id.',
     });
   }
 
@@ -163,7 +204,7 @@ router.post('/from-shifter', async (req, res) => {
 /**
  * POST /api/sync/from-shifter/debug
  * Inspects Shifter shifts table/org-column candidates for this org and returns sample mapping.
- * Auth: session (uses req.session.user.org_id) OR x-api-key / Bearer (CRM_API_KEY) with body/query org_id.
+ * Auth: session (scoped to user org; super admin may pass org_id) OR CRM_API_KEY with body/query org_id.
  * Optional body/query: limit (default 10, max 100)
  */
 router.post('/from-shifter/debug', async (req, res) => {
@@ -175,12 +216,11 @@ router.post('/from-shifter/debug', async (req, res) => {
     });
   }
 
-  const sessionOrgId = req.session?.user?.org_id || null;
-  const requestedOrgId = req.body?.org_id || req.query?.org_id || null;
-  const orgId = sessionOrgId || requestedOrgId || null;
+  const orgId = resolveSyncedOrgId(req);
   if (!orgId) {
     return res.status(400).json({
-      error: 'org_id is required. Signed-in users need org_id on their account; API key callers must pass org_id.',
+      error:
+        'org_id is required. Sign in with a user that has org_id, super admin pass org_id, or CRM_API_KEY with org_id.',
     });
   }
 

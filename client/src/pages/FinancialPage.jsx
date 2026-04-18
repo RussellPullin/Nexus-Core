@@ -31,6 +31,9 @@ export default function FinancialPage() {
   const [invoicePaymentNote, setInvoicePaymentNote] = useState('');
   const [invoicePaymentSubmitting, setInvoicePaymentSubmitting] = useState(false);
   const [sendingBatchRef, setSendingBatchRef] = useState(null);
+  /** When set, the Invoice Batches table shows line items for that batch (invoices + outstanding). */
+  const [expandedBatchRef, setExpandedBatchRef] = useState(null);
+  const [xeroSyncingId, setXeroSyncingId] = useState(null);
 
   const loadDraft = async () => {
     setLoading(true);
@@ -92,7 +95,10 @@ export default function FinancialPage() {
 
   useEffect(() => {
     if (activeTab === 'invoices') loadAllInvoices();
-    if (activeTab === 'batches') loadBatches();
+    if (activeTab === 'batches') {
+      loadBatches();
+      loadBillingInvoices();
+    }
   }, [activeTab]);
 
   const toggleItem = (id) => {
@@ -102,6 +108,24 @@ export default function FinancialPage() {
       else next.add(id);
       return next;
     });
+  };
+
+  const handleSyncFromXero = async (inv) => {
+    if (!inv?.id) return;
+    setXeroSyncingId(inv.id);
+    try {
+      const r = await billing.syncFromXero(inv.id);
+      await Promise.all([loadBatches(), loadBillingInvoices()]);
+      const out = Number(r?.outstanding) || 0;
+      const msg = r?.payment_inserted
+        ? `Recorded $${Number(r.payment_inserted.amount).toFixed(2)} from Xero. Outstanding: $${out.toFixed(2)}`
+        : `Already in sync with Xero. Outstanding: $${out.toFixed(2)}`;
+      alert(msg);
+    } catch (e) {
+      alert(e.message || 'Sync from Xero failed');
+    } finally {
+      setXeroSyncingId(null);
+    }
   };
 
   const toggleParticipantSelection = (participantId) => {
@@ -390,7 +414,8 @@ export default function FinancialPage() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Invoice Batches</h3>
           <p style={{ color: '#64748b', marginBottom: '1rem' }}>
-            Draft batches: <strong>Send batch to Xero</strong> creates an <em>authorised</em> accounts-receivable invoice in Xero for each participant (using your chart of accounts). Link Xero under Settings first. Nexus then marks each invoice sent and stores the Xero ID. Record payments in Nexus or reconcile in Xero.
+            Draft batches: <strong>Send batch to Xero</strong> creates an <em>authorised</em> accounts-receivable invoice in Xero for each participant (using your chart of accounts). Link Xero under Settings first. Nexus then marks each invoice sent and stores the Xero ID. Payments applied in Xero can update outstanding here via the Settings → Xero webhook, or use <strong>Sync from Xero</strong> on a line; you can still record payments manually in Nexus.{' '}
+            <strong>Click a batch row</strong> to see each invoice in that batch and what is still outstanding.
           </p>
           {batchesLoading ? (
             <p>Loading...</p>
@@ -423,51 +448,178 @@ export default function FinancialPage() {
                       const h12 = h % 12 || 12;
                       return `${day}/${month}/${year} ${h12}:${String(m).padStart(2, '0')}${ampm}`;
                     })() : '';
+                    const idSet = new Set((batch.invoice_ids || []).map((x) => String(x)));
+                    const batchInvoices = billingInvoices
+                      .filter((inv) => idSet.has(String(inv.id)))
+                      .slice()
+                      .sort((a, b) => String(a.invoice_number || '').localeCompare(String(b.invoice_number || '')));
+                    const expanded = expandedBatchRef === batch.batch_ref;
+                    const outstandingCount = batchInvoices.filter((inv) => (Number(inv.outstanding) || 0) > 0.005).length;
+
                     return (
-                      <tr key={batch.reference}>
-                        <td>
-                          <span className={`badge badge-${batch.status === 'finalised' ? 'success' : 'secondary'}`}>
-                            {batch.status === 'finalised' ? 'Finalised' : 'Draft'}
-                          </span>
-                        </td>
-                        <td><strong>{batch.reference}</strong></td>
-                        <td style={{ color: '#64748b' }}>{createdDate}</td>
-                        <td style={{ textAlign: 'right' }}>${batch.total.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          {batch.outstanding === 0 ? '–' : `$${batch.outstanding.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                        </td>
-                        <td>
-                          {batch.status === 'draft' && (
-                            <button
-                              type="button"
-                              className="btn btn-primary"
-                              style={{ fontSize: '0.8rem' }}
-                              disabled={sendingBatchRef === batch.batch_ref}
-                              onClick={async () => {
-                                setSendingBatchRef(batch.batch_ref);
-                                try {
-                                  const r = await billing.sendBatch(batch.batch_ref);
-                                  await Promise.all([loadBatches(), loadBillingInvoices()]);
-                                  if (r?.errors?.length) {
-                                    const detail = r.errors
-                                      .map((e) => `${e.invoice_number || e.billing_invoice_id}: ${e.error}`)
-                                      .join('\n');
-                                    alert(`${r.message || 'Some invoices failed in Xero.'}\n\n${detail}`);
-                                  } else if (r?.message) {
-                                    alert(r.message);
+                      <Fragment key={batch.reference}>
+                        <tr
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setExpandedBatchRef((prev) => (prev === batch.batch_ref ? null : batch.batch_ref))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setExpandedBatchRef((prev) => (prev === batch.batch_ref ? null : batch.batch_ref));
+                            }
+                          }}
+                          style={{ cursor: 'pointer', background: expanded ? 'rgba(37, 99, 235, 0.06)' : undefined }}
+                        >
+                          <td>
+                            <span className={`badge badge-${batch.status === 'finalised' ? 'success' : 'secondary'}`}>
+                              {batch.status === 'finalised' ? 'Finalised' : 'Draft'}
+                            </span>
+                          </td>
+                          <td><strong>{batch.reference}</strong></td>
+                          <td style={{ color: '#64748b' }}>{createdDate}</td>
+                          <td style={{ textAlign: 'right' }}>${batch.total.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            {batch.outstanding === 0 ? '–' : `$${batch.outstanding.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            {batch.status === 'draft' && (
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ fontSize: '0.8rem' }}
+                                disabled={sendingBatchRef === batch.batch_ref}
+                                onClick={async () => {
+                                  setSendingBatchRef(batch.batch_ref);
+                                  try {
+                                    const r = await billing.sendBatch(batch.batch_ref);
+                                    await Promise.all([loadBatches(), loadBillingInvoices()]);
+                                    if (r?.errors?.length) {
+                                      const detail = r.errors
+                                        .map((e) => `${e.invoice_number || e.billing_invoice_id}: ${e.error}`)
+                                        .join('\n');
+                                      alert(`${r.message || 'Some invoices failed in Xero.'}\n\n${detail}`);
+                                    } else if (r?.message) {
+                                      alert(r.message);
+                                    }
+                                  } catch (e) {
+                                    alert(e.message || 'Failed to send batch to Xero');
+                                  } finally {
+                                    setSendingBatchRef(null);
                                   }
-                                } catch (e) {
-                                  alert(e.message || 'Failed to send batch to Xero');
-                                } finally {
-                                  setSendingBatchRef(null);
-                                }
-                              }}
-                            >
-                              {sendingBatchRef === batch.batch_ref ? 'Sending to Xero…' : 'Send batch to Xero'}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
+                                }}
+                              >
+                                {sendingBatchRef === batch.batch_ref ? 'Sending to Xero…' : 'Send batch to Xero'}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr>
+                            <td colSpan={6} style={{ padding: 0, borderTop: 'none', background: '#f8fafc' }}>
+                              <div style={{ padding: '0.75rem 1rem 1rem' }}>
+                                <p style={{ margin: '0 0 0.5rem', fontSize: '0.85rem', color: '#64748b' }}>
+                                  Invoices in {batch.reference}
+                                  {batchInvoices.length > 0 && (
+                                    <span>
+                                      {' · '}
+                                      {outstandingCount === 0
+                                        ? 'All paid'
+                                        : `${outstandingCount} with balance owing`}
+                                    </span>
+                                  )}
+                                </p>
+                                {batchInvoices.length === 0 ? (
+                                  <p className="muted" style={{ margin: 0, fontSize: '0.9rem' }}>
+                                    No invoice details loaded yet, or this batch has no matching records.
+                                  </p>
+                                ) : (
+                                  <div className="table-wrap" style={{ margin: 0 }}>
+                                    <table style={{ fontSize: '0.9rem' }}>
+                                      <thead>
+                                        <tr>
+                                          <th>Invoice #</th>
+                                          <th>Participant</th>
+                                          <th style={{ textAlign: 'right' }}>Total</th>
+                                          <th style={{ textAlign: 'right' }}>Paid</th>
+                                          <th style={{ textAlign: 'right' }}>Outstanding</th>
+                                          <th>Status</th>
+                                          <th style={{ width: 200 }} />
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {batchInvoices.map((inv) => {
+                                          const total = Number(inv.total) || 0;
+                                          const paid = Number(inv.paid) || 0;
+                                          const outstanding = Number(inv.outstanding) || 0;
+                                          const isOwing = outstanding > 0.005;
+                                          return (
+                                            <tr key={inv.id}>
+                                              <td>{inv.invoice_number}</td>
+                                              <td>{inv.participant_name}</td>
+                                              <td style={{ textAlign: 'right' }}>
+                                                ${total.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                              </td>
+                                              <td style={{ textAlign: 'right' }}>
+                                                ${paid.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                              </td>
+                                              <td
+                                                style={{
+                                                  textAlign: 'right',
+                                                  fontWeight: isOwing ? 600 : 400,
+                                                  color: isOwing ? '#b45309' : undefined
+                                                }}
+                                              >
+                                                {isOwing
+                                                  ? `$${outstanding.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                  : '–'}
+                                              </td>
+                                              <td>
+                                                <span className={`badge badge-${inv.status === 'paid' ? 'paid' : inv.status}`}>{inv.status}</span>
+                                              </td>
+                                              <td onClick={(e) => e.stopPropagation()}>
+                                                <a
+                                                  href={billing.pdfUrl(inv.id)}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  className="btn btn-secondary"
+                                                  style={{ fontSize: '0.75rem', marginRight: '0.25rem' }}
+                                                >
+                                                  PDF
+                                                </a>
+                                                {inv.xero_invoice_id && (
+                                                  <button
+                                                    type="button"
+                                                    className="btn btn-secondary"
+                                                    style={{ fontSize: '0.75rem', marginRight: '0.25rem' }}
+                                                    disabled={xeroSyncingId === inv.id}
+                                                    onClick={() => handleSyncFromXero(inv)}
+                                                  >
+                                                    {xeroSyncingId === inv.id ? 'Syncing…' : 'Sync from Xero'}
+                                                  </button>
+                                                )}
+                                                {isOwing && (
+                                                  <button
+                                                    type="button"
+                                                    className="btn btn-primary"
+                                                    style={{ fontSize: '0.75rem' }}
+                                                    onClick={() => openRecordInvoicePayment(inv)}
+                                                  >
+                                                    Record payment
+                                                  </button>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -522,7 +674,7 @@ export default function FinancialPage() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Invoices</h3>
           <p style={{ color: '#64748b', marginBottom: '1rem' }}>
-            Batch invoices show total (GST-inclusive), paid, and outstanding per invoice. Use Record payment to match remittances; when fully paid, status becomes paid.
+            Batch invoices show total (GST-inclusive), paid, and outstanding per invoice. Record payments in Nexus, or sync amounts from Xero (webhook or <strong>Sync from Xero</strong> per invoice). When fully paid, status becomes paid.
           </p>
           {invoicesLoading ? (
             <p>Loading...</p>
@@ -565,6 +717,17 @@ export default function FinancialPage() {
                       <td><span className={`badge badge-${inv.status === 'paid' ? 'paid' : inv.status}`}>{inv.status}</span></td>
                       <td>
                         <a href={billing.pdfUrl(inv.id)} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ fontSize: '0.8rem', marginRight: '0.25rem' }}>PDF</a>
+                        {inv.xero_invoice_id && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.8rem', marginRight: '0.25rem' }}
+                            disabled={xeroSyncingId === inv.id}
+                            onClick={() => handleSyncFromXero(inv)}
+                          >
+                            {xeroSyncingId === inv.id ? 'Syncing…' : 'Sync from Xero'}
+                          </button>
+                        )}
                         {outstanding > 0 && (
                           <button
                             type="button"

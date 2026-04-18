@@ -12,9 +12,10 @@ import {
   requireCoordinatorOrAdmin,
   getProviderOrgIdForUser,
   includeNullProviderParticipantsForUser,
+  includeNullProviderParticipantsForOrgId,
+  resolveParticipantListScope,
   getSingleDistinctUserOrgId
 } from '../middleware/roles.js';
-import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { recordBudgetLineItemSelection } from '../services/preferenceLearning.service.js';
 import * as llm from '../services/llm.service.js';
 import { extractPlanFromText } from '../services/ai/planExtractor.js';
@@ -869,20 +870,24 @@ router.get('/', (req, res) => {
     const userId = req.session?.user?.id;
     const assignedIds = userId ? getAssignedParticipantIds(userId) : null;
 
-    const dbUser = userId ? db.prepare('SELECT role, org_id, email FROM users WHERE id = ?').get(userId) : null;
-    const orgScoped = Boolean(dbUser?.org_id) && !isSuperAdminEmail(dbUser?.email);
+    const scope = resolveParticipantListScope(req);
+    if (scope.mode === 'none') return res.json([]);
 
     let sql = `
       SELECT p.*, o.name as plan_manager_name
       FROM participants p
       LEFT JOIN organisations o ON p.plan_manager_id = o.id`;
     const params = [];
-    if (orgScoped) {
-      const legacyNull = includeNullProviderParticipantsForUser(dbUser);
+    if (scope.mode === 'scoped') {
+      const dbUser = scope.dbUser;
+      const legacyNull =
+        scope.orgId === dbUser?.org_id
+          ? includeNullProviderParticipantsForUser(dbUser)
+          : includeNullProviderParticipantsForOrgId(scope.orgId);
       sql += legacyNull
         ? ' WHERE (p.provider_org_id = ? OR p.provider_org_id IS NULL)'
         : ' WHERE p.provider_org_id = ?';
-      params.push(dbUser.org_id);
+      params.push(scope.orgId);
     }
     sql += ' ORDER BY p.name';
     let participants = db.prepare(sql).all(...params);

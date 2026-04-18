@@ -1735,6 +1735,71 @@ textarea {
   align-self: start;
 }
 
+.settings-collapsible {
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-collapsible__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  width: 100%;
+  margin: 0;
+  padding: 1rem 1.25rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  border-radius: inherit;
+  box-sizing: border-box;
+}
+
+.settings-collapsible__header:hover {
+  background: #f8fafc;
+}
+
+.settings-collapsible__chevron {
+  flex-shrink: 0;
+  width: 1.1rem;
+  font-size: 0.65rem;
+  line-height: 1.6;
+  color: #64748b;
+  user-select: none;
+}
+
+.settings-collapsible__header-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.settings-collapsible__title {
+  margin: 0 !important;
+  font-size: 1.1rem;
+  color: #334155;
+}
+
+.settings-collapsible__summary {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.settings-collapsible__body {
+  padding: 0 1.25rem 1.25rem;
+  border-top: 1px solid #f1f5f9;
+}
+
+.settings-collapsible__body > .settings-desc:first-child {
+  margin-top: 0;
+}
+
 .settings-section-title {
   margin: 2rem 0 1rem;
   font-size: 1.1rem;

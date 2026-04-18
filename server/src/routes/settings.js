@@ -564,6 +564,24 @@ router.post('/xero/test-invoice', requireAdminOrDelegate, async (req, res) => {
   }
 });
 
+// Webhook URL + config hints for developer.xero.com → Webhooks
+router.get('/xero/webhook-info', requireAdminOrDelegate, (req, res) => {
+  try {
+    const base = (process.env.NEXUS_PUBLIC_API_URL || '').replace(/\/$/, '');
+    const key = process.env.XERO_WEBHOOK_KEY?.trim?.() || process.env.XERO_WEBHOOK_KEY || '';
+    res.json({
+      webhook_path: '/api/webhooks/xero',
+      webhook_full_url: base ? `${base}/api/webhooks/xero` : null,
+      webhook_key_configured: !!key,
+      hint: base
+        ? null
+        : 'Set NEXUS_PUBLIC_API_URL to your public API base (e.g. https://crm.example.com) so the full webhook URL is shown.',
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/settings/xero/disconnect - remove Xero connection
 router.post('/xero/disconnect', requireAdminOrDelegate, (req, res) => {
   try {

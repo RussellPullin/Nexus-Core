@@ -8,6 +8,7 @@ export const settings = {
   xeroSaveAndConnect: (data) => fetchApi('/settings/xero/save-and-connect', { method: 'POST', body: JSON.stringify(data) }),
   xeroDisconnect: () => fetchApi('/settings/xero/disconnect', { method: 'POST' }),
   xeroTestInvoice: () => fetchApi('/settings/xero/test-invoice', { method: 'POST' }),
+  xeroWebhookInfo: () => fetchApi('/settings/xero/webhook-info'),
   uploadLogo: async (file) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -159,7 +160,15 @@ async function postMultipartWithSessionRetry(path, formData) {
 }
 
 export const participants = {
-  list: (search, includeArchived) => fetchApi(`/participants${search ? `?search=${encodeURIComponent(search)}` : ''}${includeArchived ? `${search ? '&' : '?'}include_archived=true` : ''}`),
+  /** @param {boolean} [allOrgs] Super admin: set true for every tenant in one DB. */
+  list: (search, includeArchived, allOrgs) => {
+    const p = new URLSearchParams();
+    if (search) p.set('search', search);
+    if (includeArchived) p.set('include_archived', 'true');
+    if (allOrgs) p.set('all_orgs', 'true');
+    const q = p.toString();
+    return fetchApi(`/participants${q ? `?${q}` : ''}`);
+  },
   get: (id) => fetchApi(`/participants/${id}`),
   create: (data) => fetchApi('/participants', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => fetchApi(`/participants/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -280,7 +289,14 @@ export const organisations = {
 };
 
 export const staff = {
-  list: (includeArchived) => fetchApi(`/staff${includeArchived ? '?include_archived=true' : ''}`),
+  /** @param {boolean} [includeArchived] @param {boolean} [allOrgs] Super admin: set true for every tenant (same DB). */
+  list: (includeArchived, allOrgs) => {
+    const p = new URLSearchParams();
+    if (includeArchived) p.set('include_archived', 'true');
+    if (allOrgs) p.set('all_orgs', 'true');
+    const q = p.toString();
+    return fetchApi(`/staff${q ? `?${q}` : ''}`);
+  },
   get: (id) => fetchApi(`/staff/${id}`),
   create: (data) => fetchApi('/staff', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => fetchApi(`/staff/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -456,6 +472,8 @@ export const billing = {
   recordBatchPayment: (batchRef, data) => fetchApi(`/billing/batches/${encodeURIComponent(batchRef)}/payments`, { method: 'POST', body: JSON.stringify(data) }),
   recordInvoicePayment: (invoiceId, data) =>
     fetchApi(`/billing/${encodeURIComponent(invoiceId)}/payments`, { method: 'POST', body: JSON.stringify(data) }),
+  syncFromXero: (invoiceId) =>
+    fetchApi(`/billing/${encodeURIComponent(invoiceId)}/sync-from-xero`, { method: 'POST', body: JSON.stringify({}) }),
   get: (id) => fetchApi(`/billing/${id}`),
   pdfUrl: (id) => `${API}/billing/${id}/pdf`,
   updateStatus: (id, status) => fetchApi(`/billing/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),

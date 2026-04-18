@@ -8,6 +8,31 @@ import { formatDate } from '../lib/dateUtils';
 const SIGNATURE_WIDTH = 300;
 const SIGNATURE_HEIGHT = 120;
 
+function SettingsSection({ title, summary, defaultOpen = false, children, className = '' }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={`card settings-collapsible ${className}`.trim()}>
+      <button
+        type="button"
+        className="settings-collapsible__header"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span className="settings-collapsible__chevron" aria-hidden>
+          {open ? '▼' : '▶'}
+        </span>
+        <span className="settings-collapsible__header-text">
+          <span className="settings-section-title settings-collapsible__title">{title}</span>
+          {!open && summary ? (
+            <span className="settings-collapsible__summary">{summary}</span>
+          ) : null}
+        </span>
+      </button>
+      {open ? <div className="settings-collapsible__body">{children}</div> : null}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { user, updateSettings, refreshUser, canManageUsers, isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -245,8 +270,11 @@ export default function SettingsPage() {
       <h2>Settings</h2>
 
       <div className="settings-cards-grid">
-      <div className="card">
-        <h3 className="settings-section-title">Connect your email</h3>
+      <SettingsSection
+        title="Connect your email"
+        summary="Roster emails and staff messages are sent from your address — choose a provider and sign in once."
+        defaultOpen={!!user?.email_reconnect_required}
+      >
         <p className="settings-desc">
           Roster emails and staff messages are sent from <strong>your</strong> address. Choose your email provider and sign in once.
         </p>
@@ -309,9 +337,12 @@ export default function SettingsPage() {
             {testResult}
           </div>
         )}
-      </div>
+      </SettingsSection>
 
-      <div className="card">
+      <SettingsSection
+        title="Profile & company"
+        summary="Billing interval, default coordinator, and signature for documents."
+      >
       <form onSubmit={handleSubmit} className="settings-form">
         <h3 className="settings-section-title">Company setup</h3>
         <p className="settings-desc">Company-wide settings used for billing and invoicing.</p>
@@ -399,10 +430,12 @@ export default function SettingsPage() {
           </button>
         </div>
       </form>
-      </div>
+      </SettingsSection>
 
-      <div className="card">
-        <h3 className="settings-section-title">AI (Ollama)</h3>
+      <SettingsSection
+        title="AI (Ollama)"
+        summary="Local AI for plans, intake, and CSV mapping — data stays on this machine."
+      >
         <p className="settings-desc">Local AI for NDIS plan extraction, intake forms, and CSV mapping. Patient data never leaves this machine.</p>
         {aiStatus?.available ? (
           <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: '1rem' }}>
@@ -463,11 +496,13 @@ export default function SettingsPage() {
           </>
         )}
         <small className="form-hint" style={{ display: 'block', marginTop: '0.5rem' }}>Server admins: set OLLAMA_MODEL to any model name (e.g. gemma3, qwen2.5:14b). OLLAMA_BASE_URL defaults to 127.0.0.1:11434. If OLLAMA_MODEL is not set, the first model in Ollama is used.</small>
-      </div>
+      </SettingsSection>
 
       {isAdmin && (
-        <div className="settings-section" style={{ marginBottom: '1.5rem' }}>
-          <h3>Document archive (Microsoft 365)</h3>
+        <SettingsSection
+          title="Document archive (Microsoft 365)"
+          summary="OneDrive folder for participant and staff documents — connect a Microsoft work account."
+        >
           <p className="settings-desc">
             Connect a Microsoft work account (typically the practice admin). The app creates a <strong>Nexus Core</strong> folder on that user&apos;s OneDrive
             and copies new participant and staff documents there. Files are never deleted by Nexus; each upload gets a new timestamped name.
@@ -517,7 +552,7 @@ export default function SettingsPage() {
             Azure app needs delegated <code>Files.ReadWrite.All</code> and redirect URI{' '}
             <code>{`${window.location.origin}/api/integrations/microsoft-drive/callback`}</code> (use <code>OAUTH_PUBLIC_URL</code> on the server if the API host differs).
           </p>
-        </div>
+        </SettingsSection>
       )}
 
       {canManageUsers && <ShifterOrgLinkCard />}
@@ -587,8 +622,10 @@ function ShifterOrgLinkCard() {
   };
 
   return (
-    <div className="card">
-      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Shifter organisation link</h3>
+    <SettingsSection
+      title="Shifter organisation link"
+      summary="Link your Nexus org to Shifter when you are ready."
+    >
       <p className="settings-desc">
         Your Nexus Core organisation is created independently. Link to Shifter here when you are ready.
       </p>
@@ -621,7 +658,7 @@ function ShifterOrgLinkCard() {
         </button>
       </div>
       {msg && <div className={msg.toLowerCase().includes('linked') && !msg.toLowerCase().includes('could not') ? 'settings-success' : 'settings-error'} style={{ marginTop: '0.75rem' }}>{msg}</div>}
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -642,8 +679,10 @@ function ScheduleShiftAppLinkCard() {
   };
 
   return (
-    <div className="card">
-      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Schedule Shift App Link</h3>
+    <SettingsSection
+      title="Schedule Shift App link"
+      summary="Webhook and Excel sync URLs for shift data."
+    >
       <p className="settings-desc">
         Use this URL in your external app when sending shift data into Nexus Core.
       </p>
@@ -678,7 +717,7 @@ function ScheduleShiftAppLinkCard() {
         You can always trigger the fallback manually from the Shifts page using <strong>Sync from Excel</strong>.
       </small>
       {copyMsg && <div className={copyMsg.includes('copied') ? 'settings-success' : 'settings-error'} style={{ marginTop: '0.75rem' }}>{copyMsg}</div>}
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -706,6 +745,15 @@ function BusinessSetup() {
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  const [xeroWebhookInfo, setXeroWebhookInfo] = useState(null);
+  useEffect(() => {
+    if (biz?.xero_linked) {
+      settings.xeroWebhookInfo().then(setXeroWebhookInfo).catch(() => setXeroWebhookInfo(null));
+    } else {
+      setXeroWebhookInfo(null);
+    }
+  }, [biz?.xero_linked]);
 
   const handleSave = async (e) => {
     e?.preventDefault();
@@ -778,8 +826,10 @@ function BusinessSetup() {
   if (!biz) return null;
 
   return (
-    <div className="card">
-      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Business setup</h3>
+    <SettingsSection
+      title="Business setup"
+      summary="Company details, logo, bank info, and Xero — shown on invoices."
+    >
       <p className="settings-desc">Company details and payment info shown on invoices.</p>
 
       <h4 className="settings-subsection-title">Business details</h4>
@@ -935,7 +985,8 @@ function BusinessSetup() {
       <h4 className="settings-subsection-title">Accounting software – Xero</h4>
       <p className="settings-desc">
         Link your Xero organisation. Use <strong>Financial → Invoice Batches → Send batch to Xero</strong> to post each participant invoice as an
-        authorised sales invoice (for payment / reconciliation). Set server env <code>XERO_SALES_ACCOUNT_CODE</code> (and tax type overrides if
+        authorised sales invoice (for payment / reconciliation). After linking, configure the webhook below so payments recorded in Xero update
+        outstanding in Nexus. Set server env <code>XERO_SALES_ACCOUNT_CODE</code> (and tax type overrides if
         needed) to match your chart of accounts. Create an app at{' '}
         <a href="https://developer.xero.com/app/manage" target="_blank" rel="noopener noreferrer">developer.xero.com</a>{' '}
         (Auth Code grant), then enter the details below and connect.
@@ -977,6 +1028,51 @@ function BusinessSetup() {
             >
               Disconnect
             </button>
+          </div>
+          <div style={{ marginTop: '0.75rem', fontSize: '0.9rem', color: '#166534' }}>
+            <strong>Payment sync from Xero</strong>
+            <p style={{ margin: '0.35rem 0 0.5rem', fontWeight: 400, color: '#15803d' }}>
+              When a payment is applied in Xero, Nexus can update outstanding amounts automatically. In the{' '}
+              <a href="https://developer.xero.com/app/manage" target="_blank" rel="noopener noreferrer">Xero developer app</a>, add a webhook
+              subscription for <strong>Invoice</strong> (create and update) pointing to the URL below. Set the same signing key in server env{' '}
+              <code style={{ background: 'rgba(255,255,255,0.6)', padding: '0 4px', borderRadius: 4 }}>XERO_WEBHOOK_KEY</code>.
+              {xeroWebhookInfo?.hint ? (
+                <span style={{ display: 'block', marginTop: '0.35rem' }}>{xeroWebhookInfo.hint}</span>
+              ) : null}
+            </p>
+            <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+              <label style={{ color: '#166534' }}>Webhook URL</label>
+              <input
+                className="form-input"
+                readOnly
+                value={
+                  xeroWebhookInfo?.webhook_full_url ||
+                  `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/xero`
+                }
+              />
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={async () => {
+                  const v =
+                    xeroWebhookInfo?.webhook_full_url ||
+                    `${window.location.origin}/api/webhooks/xero`;
+                  try {
+                    await navigator.clipboard.writeText(v);
+                    setMsg('Webhook URL copied.');
+                  } catch {
+                    setMsg('Could not copy URL; select and copy manually.');
+                  }
+                }}
+              >
+                Copy webhook URL
+              </button>
+              <span style={{ fontSize: '0.85rem', color: '#166534' }}>
+                Signing key configured: {xeroWebhookInfo?.webhook_key_configured ? 'yes' : 'no (set XERO_WEBHOOK_KEY)'}
+              </span>
+            </div>
           </div>
         </div>
       ) : (
@@ -1054,7 +1150,7 @@ function BusinessSetup() {
           {saving ? 'Saving...' : 'Save business settings'}
         </button>
       </div>
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -1098,8 +1194,10 @@ function LearningSettings() {
   const acc = metrics?.suggestions;
 
   return (
-    <div className="card">
-      <h3 className="settings-section-title" style={{ marginTop: 0 }}>Learning Layer</h3>
+    <SettingsSection
+      title="Learning layer"
+      summary="Shift-pattern suggestions — confirm before anything is applied."
+    >
       <p className="settings-desc">
         The CRM learns from shift patterns and usage to make suggestions. All suggestions require your confirmation before applying.
       </p>
@@ -1206,6 +1304,6 @@ function LearningSettings() {
           </button>
         </div>
       )}
-    </div>
+    </SettingsSection>
   );
 }

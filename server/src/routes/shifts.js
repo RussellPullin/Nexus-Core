@@ -215,6 +215,7 @@ router.get('/:id/refresh-expense', async (req, res) => {
   try {
     const shift = db.prepare(`
       SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
+             p.provider_org_id as participant_provider_org_id,
              p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
              st.name as staff_name, st.email as staff_email, st.phone as staff_phone
       FROM shifts s
@@ -226,7 +227,11 @@ router.get('/:id/refresh-expense', async (req, res) => {
     if (!shift.shifter_shift_id) {
       return res.json(shift);
     }
-    const { shifts } = await pullShiftsFromExcel({}).catch(() => ({ shifts: [] }));
+    const orgId = shift.participant_provider_org_id || null;
+    if (!orgId) {
+      return res.json(shift);
+    }
+    const { shifts } = await pullShiftsFromExcel({ orgId }).catch(() => ({ shifts: [] }));
     const excelShift = (shifts || []).find(
       (s) => String(s.shiftId || '').trim() === String(shift.shifter_shift_id).trim()
     );

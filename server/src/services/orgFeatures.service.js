@@ -48,7 +48,13 @@ export async function fetchFlagsForOrg(orgId) {
  */
 export async function fetchOrgFeatureMatrix() {
   const admin = getSupabaseServiceRoleClient();
-  const orgs = db.prepare('SELECT id, name FROM organisations ORDER BY name COLLATE NOCASE').all();
+  const orgs = db
+    .prepare(
+      `SELECT id, name FROM organisations
+       WHERE owner_org_id IS NOT NULL AND id = owner_org_id
+       ORDER BY name COLLATE NOCASE`
+    )
+    .all();
 
   const feature_defs = FEATURE_FLAG_KEYS.map(({ key, label }) => ({ key, label: label || key }));
   const matrix = {};
@@ -97,7 +103,12 @@ export async function upsertOrgFeature(orgId, featureKey, enabled) {
     throw err;
   }
 
-  const org = db.prepare('SELECT id FROM organisations WHERE id = ?').get(orgId);
+  const org = db
+    .prepare(
+      `SELECT id FROM organisations WHERE id = ?
+       AND owner_org_id IS NOT NULL AND id = owner_org_id`
+    )
+    .get(orgId);
   if (!org) {
     const err = new Error('Organisation not found');
     err.code = 'ORG_NOT_FOUND';

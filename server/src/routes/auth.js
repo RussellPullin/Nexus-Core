@@ -6,6 +6,7 @@ import { normalizeAppRole } from '../../../shared/appRoles.js';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
+import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 
 const USER_SELECT = `id, email, name, role, org_id, auth_uid, billing_interval_minutes, staff_id, signature_data,
   email_provider, email_connected_address, email_reconnect_required`;
@@ -205,9 +206,17 @@ router.put('/password', requireAuth, (req, res) => {
 
 router.post('/test-email', requireAuth, async (req, res) => {
   try {
-    const { sendEmailViaRelay, isEmailConfiguredForUser } = await import('../services/notification.service.js');
+    const { sendEmailViaRelay } = await import('../services/notification.service.js');
     const userId = req.session.user.id;
-    if (!isEmailConfiguredForUser(userId)) {
+    if (!getRelayConfigFromEnv()?.url) {
+      return res.status(400).json({
+        ok: false,
+        code: 'EMAIL_RELAY_NOT_CONFIGURED',
+        error:
+          'Email sending is not configured on the server. The administrator must set AZURE_EMAIL_FUNCTION_URL (Azure sendEmail function URL).'
+      });
+    }
+    if (!getEmailConfigForUser(userId)) {
       return res.status(400).json({
         ok: false,
         code: 'EMAIL_NOT_CONNECTED',

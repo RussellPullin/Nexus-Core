@@ -2,14 +2,17 @@ import { db } from '../src/db/index.js';
 import ExcelJS from 'exceljs';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
+import { getLegacyOnedriveAdminUserId } from '../src/lib/onedriveLegacyUser.js';
 
 const tenant = process.env.AZURE_TENANT_ID;
 const clientId = process.env.AZURE_CLIENT_ID;
 const clientSecret = process.env.AZURE_CLIENT_SECRET;
-const adminUserId = process.env.ONEDRIVE_ADMIN_USER_ID;
+const adminUserId = getLegacyOnedriveAdminUserId();
 
 if (!tenant || !clientId || !clientSecret || !adminUserId) {
-  throw new Error('Missing required env vars: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, ONEDRIVE_ADMIN_USER_ID');
+  throw new Error(
+    'Missing required env vars: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, and OneDrive owner UPN (ONEDRIVE_ADMIN_USER_ID or alias ADMIN_USER_ID / ONEDRIVE_USER_EMAIL / MICROSOFT_GRAPH_USER_ID)'
+  );
 }
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';

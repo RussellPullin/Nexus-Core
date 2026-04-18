@@ -6,6 +6,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { basename } from 'path';
+import { getLegacyOnedriveAdminUserId } from '../lib/onedriveLegacyUser.js';
 
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
 
@@ -110,9 +111,11 @@ async function ensureFolder(adminUserId, relativePath, accessToken) {
  * Returns uploaded item id or null if OneDrive not configured.
  */
 export async function uploadFileToStaffFolder(staffName, relativeFilePath, localPath, filename) {
-  const adminUserId = getEnv('ONEDRIVE_ADMIN_USER_ID');
+  const adminUserId = getLegacyOnedriveAdminUserId();
   if (!adminUserId) {
-    console.warn('[oneDriveUpload] ONEDRIVE_ADMIN_USER_ID not set; skipping upload');
+    console.warn(
+      '[oneDriveUpload] OneDrive admin user not set (ONEDRIVE_ADMIN_USER_ID or alias ADMIN_USER_ID / ONEDRIVE_USER_EMAIL / MICROSOFT_GRAPH_USER_ID); skipping upload'
+    );
     return null;
   }
   if (!existsSync(localPath)) {
