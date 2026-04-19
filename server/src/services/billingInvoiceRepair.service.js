@@ -4,8 +4,8 @@
  */
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
-import { isNf2fTask } from '../lib/billingConstants.js';
 import { syncShiftLineItemsWithProgressNote } from './shiftLineItems.service.js';
+import { buildBillingLinePayloadForScDayBucket, ALL_BUCKETS } from './coordinatorTasks.service.js';
 import { getDefaultLineItemForParticipant } from './progressNoteMatcher.js';
 
 export function rebuildBillingInvoiceLineItems(invoiceId) {
@@ -32,59 +32,40 @@ export function rebuildBillingInvoiceLineItems(invoiceId) {
     )
     .all(invoiceId);
 
-  const nf2fByDate = new Map();
-  const nonNf2f = [];
+  const travelKmItem = db
+    .prepare('SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?')
+    .get('07_799%');
+
+  const byDate = new Map();
   for (const t of tasks) {
-    if (isNf2fTask(t.task_type)) {
-      const k = t.activity_date || '';
-      if (!nf2fByDate.has(k)) nf2fByDate.set(k, []);
-      nf2fByDate.get(k).push(t);
-    } else {
-      nonNf2f.push(t);
+    const k = t.activity_date || '';
+    if (!byDate.has(k)) byDate.set(k, []);
+    byDate.get(k).push(t);
+  }
+
+  for (const [, dayTasks] of byDate) {
+    if (dayTasks.length === 0) continue;
+    for (const b of ALL_BUCKETS) {
+      const payload = buildBillingLinePayloadForScDayBucket(dayTasks, b, travelKmItem, 15);
+      if (!payload) continue;
+      const lineDateStr = String(payload.line_date || dayTasks[0].activity_date).slice(0, 10);
+      insLine.run(
+        uuidv4(),
+        invoiceId,
+        'task',
+        payload.source_task_id,
+        null,
+        null,
+        payload.ndis_line_item_id,
+        payload.support_item_number || '-',
+        payload.description,
+        payload.quantity,
+        payload.unit_price,
+        payload.unit,
+        lineDateStr,
+        JSON.stringify(payload.source_task_ids)
+      );
     }
-  }
-
-  for (const [, group] of nf2fByDate) {
-    if (group.length === 0) continue;
-    const first = group[0];
-    const totalQty = group.reduce((s, t) => s + (Number(t.quantity) || 0), 0);
-    const taskIds = group.map((t) => t.id);
-    insLine.run(
-      uuidv4(),
-      invoiceId,
-      'task',
-      first.id,
-      null,
-      null,
-      first.ndis_line_item_id,
-      first.support_item_number || '-',
-      'Non-face-to-face (consolidated)',
-      totalQty,
-      Number(first.unit_price) || 0,
-      'hour',
-      first.activity_date,
-      JSON.stringify(taskIds)
-    );
-  }
-
-  for (const t of nonNf2f) {
-    const desc = t.description || t.task_type;
-    insLine.run(
-      uuidv4(),
-      invoiceId,
-      'task',
-      t.id,
-      null,
-      null,
-      t.ndis_line_item_id,
-      t.support_item_number || '-',
-      desc,
-      Number(t.quantity) || 0,
-      Number(t.unit_price) || 0,
-      'hour',
-      t.activity_date,
-      null
-    );
   }
 
   const shiftIds = db.prepare('SELECT id FROM shifts WHERE billing_invoice_id = ?').all(invoiceId).map((r) => r.id);

@@ -1,12 +1,13 @@
 import { Router } from 'express';
-import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
+import { participantInvoiceIncludesGst, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { getAssignedParticipantIds, canAccessParticipant } from '../middleware/roles.js';
 import { tenantParticipantAndStaffClause } from '../lib/orgScopeSql.js';
 import {
   getSupportCoordLineItem,
-  roundToBillableUnits
+  roundToBillableUnits,
+  buildTaskInvoiceLineItems
 } from '../services/coordinatorTasks.service.js';
 import PDFDocument from 'pdfkit';
 
@@ -381,38 +382,13 @@ router.get('/task-invoices/:id', (req, res) => {
 
     const travelItem = db.prepare('SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?').get('07_799%');
 
+    const billingUser = db.prepare('SELECT billing_interval_minutes FROM users WHERE staff_id = ? LIMIT 1').get(
+      invoice.staff_id
+    );
+    const billingInterval = billingUser?.billing_interval_minutes ?? 15;
+
     const includesGst = participantInvoiceIncludesGst(invoice.invoice_includes_gst);
-    let subtotal = 0;
-    const lineItems = [];
-    for (const t of tasks) {
-      const amt = roundMoney((t.quantity || 0) * (t.unit_price || 0));
-      subtotal += amt;
-      lineItems.push({
-        support_item_number: t.support_item_number,
-        description: t.ndis_description || t.task_type,
-        quantity: t.quantity,
-        unit: t.unit || 'hour',
-        unit_price: t.unit_price,
-        total: amt,
-        task_type: t.task_type,
-        activity_date: t.activity_date
-      });
-      if (t.includes_travel && t.travel_km > 0 && travelItem) {
-        const travelAmt = roundMoney(t.travel_km * (travelItem.rate || 1));
-        subtotal += travelAmt;
-        lineItems.push({
-          support_item_number: travelItem.support_item_number,
-          description: travelItem.description || 'Provider travel',
-          quantity: t.travel_km,
-          unit: travelItem.unit || 'km',
-          unit_price: travelItem.rate || 1,
-          total: travelAmt,
-          task_type: 'travel',
-          activity_date: t.activity_date
-        });
-      }
-    }
-    subtotal = roundMoney(subtotal);
+    const { lineItems, subtotal } = buildTaskInvoiceLineItems(tasks, travelItem, billingInterval);
     const { gst_amount: gstAmount, total_incl_gst: totalInclGst } = gstBreakdownFromSubtotal(subtotal, includesGst);
 
     res.json({
@@ -456,34 +432,13 @@ router.get('/task-invoices/:id/pdf', async (req, res) => {
 
     const travelItem = db.prepare('SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?').get('07_799%');
 
+    const billingUserPdf = db.prepare('SELECT billing_interval_minutes FROM users WHERE staff_id = ? LIMIT 1').get(
+      invoice.staff_id
+    );
+    const billingIntervalPdf = billingUserPdf?.billing_interval_minutes ?? 15;
+
     const includesGst = participantInvoiceIncludesGst(invoice.invoice_includes_gst);
-    let subtotal = 0;
-    const lineItems = [];
-    for (const t of tasks) {
-      const amt = roundMoney((t.quantity || 0) * (t.unit_price || 0));
-      subtotal += amt;
-      lineItems.push({
-        support_item_number: t.support_item_number,
-        description: t.ndis_description || t.task_type,
-        quantity: t.quantity,
-        unit: t.unit || 'hour',
-        unit_price: t.unit_price,
-        total: amt
-      });
-      if (t.includes_travel && t.travel_km > 0 && travelItem) {
-        const travelAmt = roundMoney(t.travel_km * (travelItem.rate || 1));
-        subtotal += travelAmt;
-        lineItems.push({
-          support_item_number: travelItem.support_item_number,
-          description: travelItem.description || 'Provider travel',
-          quantity: t.travel_km,
-          unit: travelItem.unit || 'km',
-          unit_price: travelItem.rate || 1,
-          total: travelAmt
-        });
-      }
-    }
-    subtotal = roundMoney(subtotal);
+    const { lineItems, subtotal } = buildTaskInvoiceLineItems(tasks, travelItem, billingIntervalPdf);
     const { gst_amount: gstAmount, total_incl_gst: grandTotal } = gstBreakdownFromSubtotal(subtotal, includesGst);
 
     const doc = new PDFDocument({ margin: 50 });

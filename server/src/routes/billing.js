@@ -14,7 +14,6 @@ import {
 import { getOnedriveLinkRow } from '../services/orgOnedriveTokens.service.js';
 import { getDefaultLineItemForParticipant } from '../services/progressNoteMatcher.js';
 import { syncShiftLineItemsWithProgressNote } from '../services/shiftLineItems.service.js';
-import { isNf2fTask, NF2F_TASK_TYPES } from '../lib/billingConstants.js';
 import {
   participantInvoiceIncludesGst,
   roundMoney,
@@ -35,6 +34,12 @@ import {
   tenantParticipantAndStaffClause,
   tenantParticipantClause,
 } from '../lib/orgScopeSql.js';
+import {
+  parseTaskScDaySelectionId,
+  buildScDayDraftLineItems,
+  buildBillingLinePayloadForScDayBucket,
+  ALL_BUCKETS
+} from '../services/coordinatorTasks.service.js';
 
 const router = Router();
 
@@ -149,6 +154,7 @@ router.get('/draft-batch', (req, res) => {
     const tasks = db.prepare(`
       SELECT ct.id, ct.participant_id, ct.activity_date, ct.description, ct.task_type,
              ct.quantity, ct.unit_price, ct.ndis_line_item_id, ct.duration_minutes,
+             ct.includes_travel, ct.travel_km, ct.travel_time_min,
              p.name as participant_name, p.ndis_number,
              nli.support_item_number, nli.description as ndis_description
       FROM coordinator_tasks ct
@@ -175,55 +181,21 @@ router.get('/draft-batch', (req, res) => {
     `).all(...shiftScope.params, `${from_date}T00:00:00`, `${to_date}T23:59:59`);
 
     const lineItems = [];
-    const TASK_TYPE_LABELS = { email: 'Email', meeting_f2f: 'Meeting f2f', meeting_non_f2f: 'Meeting', phone: 'Phone', other: 'Other' };
 
-    const nf2fTasks = tasks.filter((t) => isNf2fTask(t.task_type));
-    const nonNf2fTasks = tasks.filter((t) => !isNf2fTask(t.task_type));
+    const travelKmItemDraft = db.prepare(
+      'SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?'
+    ).get('07_799%');
 
-    const nf2fByKey = {};
-    nf2fTasks.forEach((t) => {
+    /** Support coordination: up to four draft rows per participant per day (F2F, non-F2F, travel time, km). */
+    const scByDay = {};
+    tasks.forEach((t) => {
       const key = `${t.participant_id}|${t.activity_date}`;
-      if (!nf2fByKey[key]) nf2fByKey[key] = [];
-      nf2fByKey[key].push(t);
+      if (!scByDay[key]) scByDay[key] = [];
+      scByDay[key].push(t);
     });
-    Object.entries(nf2fByKey).forEach(([, group]) => {
-      const first = group[0];
-      const totalQty = group.reduce((s, t) => s + (t.quantity || 0), 0);
-      const totalAmt = group.reduce((s, t) => s + (t.quantity || 0) * (t.unit_price || 0), 0);
-      lineItems.push({
-        id: `task-nf2f-${first.participant_id}-${first.activity_date}`,
-        source_type: 'task',
-        source_task_ids: group.map((t) => t.id),
-        participant_id: first.participant_id,
-        participant_name: first.participant_name,
-        ndis_number: first.ndis_number,
-        line_date: first.activity_date,
-        support_item_number: first.support_item_number || '-',
-        description: 'Non-face-to-face (consolidated)',
-        quantity: totalQty,
-        unit_price: first.unit_price,
-        unit: 'hour',
-        total: totalAmt
-      });
-    });
-
-    nonNf2fTasks.forEach((t) => {
-      const desc = t.description || TASK_TYPE_LABELS[t.task_type] || t.task_type;
-      lineItems.push({
-        id: `task-${t.id}`,
-        source_type: 'task',
-        source_id: t.id,
-        participant_id: t.participant_id,
-        participant_name: t.participant_name,
-        ndis_number: t.ndis_number,
-        line_date: t.activity_date,
-        support_item_number: t.support_item_number || '-',
-        description: desc,
-        quantity: t.quantity,
-        unit_price: t.unit_price,
-        unit: 'hour',
-        total: (t.quantity || 0) * (t.unit_price || 0)
-      });
+    Object.entries(scByDay).forEach(([, group]) => {
+      const rows = buildScDayDraftLineItems(group, travelKmItemDraft, 15);
+      rows.forEach((row) => lineItems.push(row));
     });
 
     shifts.forEach((s) => {
@@ -319,8 +291,30 @@ router.post('/create-batch', (req, res) => {
       return res.status(400).json({ error: 'from_date, to_date, and selected_ids (array) required' });
     }
 
-    const nf2fSelectedIds = selected_ids.filter((id) => id.startsWith('task-nf2f-'));
-    const singleTaskIds = selected_ids.filter((id) => id.startsWith('task-') && !id.startsWith('task-nf2f-')).map((id) => id.replace('task-', ''));
+    const scSelections = [];
+    for (const id of selected_ids) {
+      const p = parseTaskScDaySelectionId(id);
+      if (p) scSelections.push(p);
+    }
+    const scDayBucketMap = new Map();
+    for (const p of scSelections) {
+      const k = `${p.participantId}|${p.lineDate}`;
+      if (!scDayBucketMap.has(k)) scDayBucketMap.set(k, new Set());
+      if (p.bucket === 'all') {
+        ALL_BUCKETS.forEach((b) => scDayBucketMap.get(k).add(b));
+      } else {
+        scDayBucketMap.get(k).add(p.bucket);
+      }
+    }
+
+    const singleTaskIds = selected_ids
+      .filter(
+        (id) =>
+          id.startsWith('task-') &&
+          !id.startsWith('task-nf2f-') &&
+          !id.startsWith('task-sc-day-')
+      )
+      .map((id) => id.replace('task-', ''));
     const shiftLineKeys = selected_ids
       .filter((id) => id.startsWith('shift-'))
       .map((id) => {
@@ -342,20 +336,15 @@ router.post('/create-batch', (req, res) => {
         return res.status(403).json({ error: 'One or more selected shifts are not in your organisation.' });
       }
     }
-    for (const id of nf2fSelectedIds) {
-      const rest = id.replace('task-nf2f-', '');
-      const participantId = rest.slice(0, -11);
-      if (participantId && !isParticipantInRequesterTenant(participantId, userId)) {
+    for (const p of scSelections) {
+      if (p.participantId && !isParticipantInRequesterTenant(p.participantId, userId)) {
         return res.status(403).json({ error: 'One or more selected items are not in your organisation.' });
       }
     }
 
     const participants = new Set();
-    nf2fSelectedIds.forEach((id) => {
-      const rest = id.replace('task-nf2f-', '');
-      const date = rest.slice(-10);
-      const participantId = rest.slice(0, -11);
-      if (date.length === 10 && participantId) participants.add(participantId);
+    scSelections.forEach((p) => {
+      if (p.lineDate?.length === 10 && p.participantId) participants.add(p.participantId);
     });
     const tasksStmt = db.prepare('SELECT id, participant_id FROM coordinator_tasks WHERE id = ?');
     singleTaskIds.forEach((tid) => {
@@ -371,11 +360,7 @@ router.post('/create-batch', (req, res) => {
     const participantLineCount = new Map();
     for (const participantId of participants) {
       let count = 0;
-      const nf2fForParticipant = nf2fSelectedIds.filter((id) => {
-        const rest = id.replace('task-nf2f-', '');
-        return rest.slice(0, -11) === participantId;
-      });
-      count += nf2fForParticipant.length;
+      count += scSelections.filter((p) => p.participantId === participantId).length;
       const participantTasks = singleTaskIds.filter((tid) => {
         const t = tasksStmt.get(tid);
         return t?.participant_id === participantId;
@@ -416,10 +401,6 @@ router.post('/create-batch', (req, res) => {
         VALUES (?, ?, ?, ?, ?, 'draft')
       `).run(invId, participantId, invNum, from_date, to_date);
 
-      const participantNf2fIds = nf2fSelectedIds.filter((id) => {
-        const rest = id.replace('task-nf2f-', '');
-        return rest.slice(0, -11) === participantId;
-      });
       const participantTasks = singleTaskIds.filter((tid) => {
         const t = tasksStmt.get(tid);
         return t?.participant_id === participantId;
@@ -434,28 +415,49 @@ router.post('/create-batch', (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
-      participantNf2fIds.forEach((nf2fId) => {
-        const rest = nf2fId.replace('task-nf2f-', '');
-        const lineDate = rest.slice(-10);
-        const nf2fParticipantId = rest.slice(0, -11);
-        if (nf2fParticipantId !== participantId || lineDate.length !== 10) return;
-        const placeholders = NF2F_TASK_TYPES.map(() => '?').join(',');
-        const nf2fGroup = db.prepare(`
+      const travelKmItem = db.prepare(
+        'SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?'
+      ).get('07_799%');
+
+      const updateTaskBilling = db.prepare('UPDATE coordinator_tasks SET billing_invoice_id = ? WHERE id = ?');
+      for (const [dayKey, bucketSet] of scDayBucketMap) {
+        const [pid, lineDate] = dayKey.split('|');
+        if (pid !== participantId) continue;
+        const dayGroup = db.prepare(`
           SELECT ct.id, ct.participant_id, ct.activity_date, ct.quantity, ct.unit_price, ct.ndis_line_item_id, ct.description, ct.task_type,
-                 nli.support_item_number
+                 ct.includes_travel, ct.travel_km, ct.travel_time_min,
+                 nli.support_item_number, nli.description as ndis_desc
           FROM coordinator_tasks ct
           LEFT JOIN ndis_line_items nli ON nli.id = ct.ndis_line_item_id
           WHERE ct.participant_id = ? AND ct.activity_date = ? AND ct.task_invoice_id IS NULL AND ct.billing_invoice_id IS NULL
-            AND ct.task_type IN (${placeholders})
-        `).all(nf2fParticipantId, lineDate, ...NF2F_TASK_TYPES);
-        if (nf2fGroup.length === 0) return;
-        const first = nf2fGroup[0];
-        const totalQty = nf2fGroup.reduce((s, t) => s + (t.quantity || 0), 0);
-        const taskIds = nf2fGroup.map((t) => t.id);
-        insLine.run(uuidv4(), invId, 'task', first.id, null, null, first.ndis_line_item_id, first.support_item_number || '-', 'Non-face-to-face (consolidated)', totalQty, first.unit_price, 'hour', lineDate, JSON.stringify(taskIds));
-        const updateTask = db.prepare('UPDATE coordinator_tasks SET billing_invoice_id = ? WHERE id = ?');
-        taskIds.forEach((tid) => updateTask.run(invId, tid));
-      });
+        `).all(pid, lineDate);
+        if (dayGroup.length === 0) continue;
+        const touched = new Set();
+        const orderedBuckets = ALL_BUCKETS.filter((b) => bucketSet.has(b));
+        for (const b of orderedBuckets) {
+          const payload = buildBillingLinePayloadForScDayBucket(dayGroup, b, travelKmItem, 15);
+          if (!payload) continue;
+          const lineDateStr = String(payload.line_date || lineDate).slice(0, 10);
+          insLine.run(
+            uuidv4(),
+            invId,
+            'task',
+            payload.source_task_id,
+            null,
+            null,
+            payload.ndis_line_item_id,
+            payload.support_item_number || '-',
+            payload.description,
+            payload.quantity,
+            payload.unit_price,
+            payload.unit,
+            lineDateStr,
+            JSON.stringify(payload.source_task_ids)
+          );
+          payload.source_task_ids.forEach((tid) => touched.add(tid));
+        }
+        touched.forEach((tid) => updateTaskBilling.run(invId, tid));
+      }
 
       participantTasks.forEach((tid) => {
         const t = db.prepare(`
