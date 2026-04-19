@@ -22,11 +22,26 @@ export async function fetchFlagsForOrg(orgId) {
   }
 
   const keys = listFeatureFlagKeys();
-  const { data, error } = await admin
-    .from('org_features')
-    .select('feature_key, enabled')
-    .eq('org_id', orgId)
-    .in('feature_key', keys);
+  const timeoutMs = Math.min(120_000, Math.max(3_000, Number(process.env.ORG_FEATURES_FETCH_TIMEOUT_MS) || 12_000));
+
+  let data;
+  let error;
+  try {
+    const res = await Promise.race([
+      admin.from('org_features').select('feature_key, enabled').eq('org_id', orgId).in('feature_key', keys),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(Object.assign(new Error('org_features timeout'), { code: 'TIMEOUT' })), timeoutMs)
+      )
+    ]);
+    data = res.data;
+    error = res.error;
+  } catch (e) {
+    if (e?.code === 'TIMEOUT') {
+      console.warn('[org_features] Supabase query timed out after', timeoutMs, 'ms; using default flags');
+      return { configured: true, flags: emptyFlagsMap() };
+    }
+    throw e;
+  }
 
   if (error) {
     const err = new Error(error.message || 'org_features query failed');

@@ -40,9 +40,21 @@ export async function isAvailable() {
  */
 export async function getConnectionStatus() {
   if (!AI_ENABLED) return { available: false, error: 'AI is disabled (AI_ENABLED=false)' };
+  // Cloud (e.g. Fly): default OLLAMA_URL is localhost — probing wastes a request and up to several seconds per /api/ai/status.
+  if (
+    process.env.NODE_ENV === 'production' &&
+    ollamaBaseLooksLikeLocalhost() &&
+    process.env.AI_PROBE_SERVER_OLLAMA !== 'true'
+  ) {
+    return {
+      available: false,
+      error:
+        'Server-side Ollama is not used on this host (localhost). Use per-computer Ollama in Settings if enabled, or set OLLAMA_BASE_URL to an Ollama the API can reach. Set AI_PROBE_SERVER_OLLAMA=true to force a probe.'
+    };
+  }
   const url = `${OLLAMA_BASE_URL}/api/tags`;
   try {
-    const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) });
+    const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(2500) });
     if (res.ok) {
       const data = await res.json();
       const models = data?.models;

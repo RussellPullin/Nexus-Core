@@ -131,7 +131,6 @@ import appShiftsRouter from './routes/appShifts.js';
 import syncFromExcelRouter from './routes/syncFromExcel.js';
 import webhooksPublicRouter from './routes/webhooksPublic.js';
 import xeroWebhookRouter from './routes/xeroWebhook.js';
-import xeroWebhookRouter from './routes/xeroWebhook.js';
 import receiptsRouter from './routes/receipts.js';
 import settingsRouter from './routes/settings.js';
 import learningRouter from './routes/learning.js';
@@ -206,13 +205,17 @@ app.use('/api/organisations', requireAuth, organisationsRouter);
 
 app.get('/api/ai/status', requireAuth, async (req, res) => {
   try {
-    const status = await llm.getConnectionStatus?.();
-    const available = status?.available ?? await llm.isAvailable();
-    const config = llm.getConfig?.() || {};
     const orgId = req.session?.user?.org_id || null;
-    const { flags } = await fetchFlagsForOrg(orgId);
+    const userId = req.session.user.id;
+    const [status, flagsResult, u] = await Promise.all([
+      llm.getConnectionStatus?.(),
+      fetchFlagsForOrg(orgId),
+      Promise.resolve(db.prepare('SELECT ollama_local_base_url FROM users WHERE id = ?').get(userId))
+    ]);
+    const available = Boolean(status?.available);
+    const config = llm.getConfig?.() || {};
+    const { flags } = flagsResult;
     const orgAllowsLocalOllama = Boolean(flags.ai_staff_local_ollama);
-    const u = db.prepare('SELECT ollama_local_base_url FROM users WHERE id = ?').get(req.session.user.id);
     res.json({
       server: {
         available,
