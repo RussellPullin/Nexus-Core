@@ -80,6 +80,21 @@ function pickStatus(record: Record<string, unknown>): unknown {
   return record.status ?? null;
 }
 
+function pickActualStart(record: Record<string, unknown>): unknown {
+  return record.actual_start ?? record.scheduled_start ?? record.start_time ?? null;
+}
+
+function pickActualEnd(record: Record<string, unknown>): unknown {
+  return record.actual_end ?? record.scheduled_end ?? record.end_time ?? null;
+}
+
+function isCompletedStatusStr(status: unknown): boolean {
+  const t = String(status ?? "")
+    .trim()
+    .toLowerCase();
+  return t === "completed" || t === "complete";
+}
+
 /** Shifter columns are text-friendly; adjust if your Shifter schema uses jsonb/uuid types only. */
 function coerceShifterField(v: unknown): string | null {
   if (v === null || v === undefined) return null;
@@ -288,7 +303,7 @@ Deno.serve(async (req) => {
     }
 
     const statusStr = coerceShifterField(pickStatus(record));
-    const upsertRow = {
+    const upsertRow: Record<string, unknown> = {
       nexuscore_shift_id: shiftRowId,
       worker_id: workerId,
       scheduled_start: scheduledStart,
@@ -298,6 +313,15 @@ Deno.serve(async (req) => {
       status:
         statusStr === null || statusStr === "" ? "scheduled" : statusStr,
     };
+
+    if (isCompletedStatusStr(record.status)) {
+      const actualStart = pickActualStart(record);
+      const actualEnd = pickActualEnd(record);
+      if (actualStart != null && actualEnd != null) {
+        upsertRow.actual_start = actualStart;
+        upsertRow.actual_end = actualEnd;
+      }
+    }
 
     const { error: upsertErr } = await shifter.from("shifts").upsert(upsertRow, {
       onConflict: "nexuscore_shift_id",

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
 
 let _admin = null;
 let _shifterAdmin = null;
@@ -220,6 +221,63 @@ export async function resolveEffectiveShifterOrgIdForNexusOrg(nexusOrgId) {
   const nexusAdmin = getAdminClient();
   if (!nexusAdmin || !nexusOrgId) return nexusOrgId || null;
   return resolveEffectiveShifterOrgId(nexusAdmin, nexusOrgId);
+}
+
+/** Short-lived cache: Nexus org id → mirror timezone spec from Shifter public.organizations (or null). */
+const _shifterOrgTzCache = new Map();
+const SHIFTER_ORG_TZ_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Read timezone from the Shifter Supabase org row (same org Nexus links to Shifter).
+ * Tries common column names so existing Shifter schemas keep working.
+ * @param {string} nexusOrgId - Nexus public.organizations.id
+ * @returns {Promise<{ kind: 'iana', zone: string } | { kind: 'fixed', offsetMinutes: number } | null>}
+ */
+export async function getShifterOrgTimezoneSpecForNexusOrg(nexusOrgId) {
+  const key = String(nexusOrgId || '').trim();
+  if (!key) return null;
+
+  const now = Date.now();
+  const hit = _shifterOrgTzCache.get(key);
+  if (hit && hit.exp > now) return hit.value;
+
+  const shifter = getShifterAdminClient();
+  if (!shifter) {
+    _shifterOrgTzCache.set(key, { value: null, exp: now + 60_000 });
+    return null;
+  }
+
+  let shifterOrgId;
+  try {
+    shifterOrgId = await resolveEffectiveShifterOrgIdForNexusOrg(key);
+  } catch (e) {
+    console.warn('[shifter-org-tz] resolve shifter org failed', e?.message || e);
+    _shifterOrgTzCache.set(key, { value: null, exp: now + 60_000 });
+    return null;
+  }
+  if (!shifterOrgId) {
+    _shifterOrgTzCache.set(key, { value: null, exp: now + 60_000 });
+    return null;
+  }
+
+  const cols = ['timezone', 'time_zone', 'iana_timezone', 'org_timezone'];
+  for (const col of cols) {
+    const { data, error } = await shifter.from('organizations').select(col).eq('id', shifterOrgId).maybeSingle();
+    if (error) {
+      if (/column .* does not exist/i.test(String(error.message || ''))) continue;
+      console.warn('[shifter-org-tz] organizations read:', error.message);
+      break;
+    }
+    const raw = data?.[col];
+    const spec = normalizeOrgTimezoneRaw(raw);
+    if (spec) {
+      _shifterOrgTzCache.set(key, { value: spec, exp: now + SHIFTER_ORG_TZ_TTL_MS });
+      return spec;
+    }
+  }
+
+  _shifterOrgTzCache.set(key, { value: null, exp: now + SHIFTER_ORG_TZ_TTL_MS });
+  return null;
 }
 
 function joinShifterProgressNotesPath(folderRaw, filenameRaw) {

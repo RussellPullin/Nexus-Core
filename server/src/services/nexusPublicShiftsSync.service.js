@@ -2,10 +2,13 @@
  * Mirrors SQLite shifts to Nexus Core Supabase public.shifts so Database Webhooks
  * (e.g. push-shift-to-shifter) can run. staff_id is set to public.profiles.id (matched by staff email).
  */
+import { sqliteNaiveToUtcIso, normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
 import { db } from '../db/index.js';
 import {
   getSupabaseServiceRoleClient,
+  getShifterOrgTimezoneSpecForNexusOrg,
   getShifterServiceRoleClient,
+  isShifterRemoteConfigured,
   provisionNexusSupabaseProfileForStaff,
   resolveEffectiveShifterOrgIdForNexusOrg,
   resolveShifterWorkerProfileIdForEmail,
@@ -25,15 +28,6 @@ function isUuid(s) {
     typeof s === 'string' &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim())
   );
-}
-
-/** SQLite / CRM datetime string → ISO for timestamptz */
-function sqliteTimeToIso(s) {
-  if (s == null || typeof s !== 'string') return null;
-  const t = s.trim().replace(' ', 'T');
-  const d = new Date(t);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
 }
 
 async function findNexusProfileIdByStaffEmail(admin, emailRaw) {
@@ -158,11 +152,20 @@ async function findShifterClientIdByName(shifter, clientNameRaw, shifterOrgId, c
   return null;
 }
 
+function isCompletedShiftStatus(status) {
+  const t = String(status || '')
+    .trim()
+    .toLowerCase();
+  return t === 'completed' || t === 'complete';
+}
+
 async function upsertShiftDirectlyToShifter({
   shiftId,
   workerProfileId,
   scheduledStartIso,
   scheduledEndIso,
+  actualStartIso,
+  actualEndIso,
   clientName,
   clientEmail,
   nexusOrgId,
@@ -198,6 +201,15 @@ async function upsertShiftDirectlyToShifter({
     status: status || 'scheduled',
   };
 
+  if (
+    isCompletedShiftStatus(status) &&
+    actualStartIso &&
+    actualEndIso
+  ) {
+    upsertRow.actual_start = actualStartIso;
+    upsertRow.actual_end = actualEndIso;
+  }
+
   const cleanupForSchemaMismatch = (payload, msg) => {
     if (msg.includes("Could not find the 'client' column")) {
       delete payload.client;
@@ -213,6 +225,14 @@ async function upsertShiftDirectlyToShifter({
     }
     if (msg.includes("Could not find the 'org_id' column")) {
       delete payload.org_id;
+      return true;
+    }
+    if (msg.includes("Could not find the 'actual_start' column")) {
+      delete payload.actual_start;
+      return true;
+    }
+    if (msg.includes("Could not find the 'actual_end' column")) {
+      delete payload.actual_end;
       return true;
     }
     return false;
@@ -294,8 +314,18 @@ export async function mirrorShiftToNexusSupabase(shiftId) {
 
   if (!row) return { ok: false, skipped: true, reason: 'shift_not_found' };
 
-  const startIso = sqliteTimeToIso(row.start_time);
-  const endIso = sqliteTimeToIso(row.end_time);
+  const nexusOrgForTz =
+    isUuid(row.provider_org_id) ? row.provider_org_id.trim() : isUuid(row.staff_org_id) ? row.staff_org_id.trim() : null;
+  let shiftTzSpec = nexusOrgForTz ? await getShifterOrgTimezoneSpecForNexusOrg(nexusOrgForTz) : null;
+  if (!shiftTzSpec) {
+    shiftTzSpec = normalizeOrgTimezoneRaw(process.env.NEXUS_SHIFT_TIMEZONE_FALLBACK);
+  }
+  if (!shiftTzSpec && isShifterRemoteConfigured()) {
+    shiftTzSpec = { kind: 'iana', zone: 'Australia/Sydney' };
+  }
+
+  const startIso = sqliteNaiveToUtcIso(row.start_time, shiftTzSpec);
+  const endIso = sqliteNaiveToUtcIso(row.end_time, shiftTzSpec);
   if (!startIso || !endIso) {
     console.warn('[nexus-public-shifts] invalid times', shiftId, row.start_time, row.end_time);
     return { ok: false, skipped: true, reason: 'invalid_times' };
@@ -410,6 +440,8 @@ export async function mirrorShiftToNexusSupabase(shiftId) {
     workerProfileId: shifterWorkerProfileId,
     scheduledStartIso: startIso,
     scheduledEndIso: endIso,
+    actualStartIso: payload.actual_start ?? null,
+    actualEndIso: payload.actual_end ?? null,
     clientName: row.participant_name || null,
     clientEmail: row.participant_email || null,
     nexusOrgId: row.provider_org_id || row.staff_org_id || null,
