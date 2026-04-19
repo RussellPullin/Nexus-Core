@@ -5,6 +5,7 @@
 import { db } from '../db/index.js';
 import { tenantParticipantClause } from '../lib/orgScopeSql.js';
 import { getShiftDayType, getShiftTimeBand } from '../lib/ndisDay.js';
+import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 
 /**
  * Check if an NDIS line item is an establishment fee (one-off, not hourly).
@@ -143,10 +144,18 @@ export function buildDateTime(dateStr, timeStr) {
   return `${date}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
 }
 
-function getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime) {
-  const endMins = parseTimeToMinutes(String(shiftEndTime || '').slice(11, 16));
-  if (endMins != null && endMins >= 20 * 60) {
-    return 'evening';
+/**
+ * Evening uplift from end time (after 20:00) applies on weekdays only.
+ * Saturday, Sunday, and public holiday rates supersede evening for line-item matching.
+ */
+function getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime, dayType) {
+  const premiumDay =
+    dayType === 'saturday' || dayType === 'sunday' || dayType === 'public_holiday';
+  if (!premiumDay) {
+    const endMins = parseTimeToMinutes(String(shiftEndTime || '').slice(11, 16));
+    if (endMins != null && endMins >= 20 * 60) {
+      return 'evening';
+    }
   }
   return getShiftTimeBand(shiftStartTime);
 }
@@ -246,17 +255,12 @@ export function findMatchingShift({ participantId, staffId, supportDate, startTi
  */
 export function getDefaultLineItemForParticipant(participantId, shiftStartTime, supportDate, shiftEndTime = null) {
   const dayType = getShiftDayType(shiftStartTime);
-  const timeBand = getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime);
+  const timeBand = getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime, dayType);
   const dateStr = supportDate || (shiftStartTime ? shiftStartTime.slice(0, 10) : null) || new Date().toISOString().slice(0, 10);
-
-  const getRate = (item, remoteness) =>
-    remoteness === 'very_remote' ? (item.rate_very_remote ?? item.rate)
-      : remoteness === 'remote' ? (item.rate_remote ?? item.rate)
-      : item.rate;
 
   const toResult = (item, remoteness) => ({
     id: item.id,
-    rate: Number(getRate(item, remoteness)) || 0,
+    rate: Number(getEffectiveNdisRate(item, remoteness)) || 0,
     unit: (item.unit || 'hour').toLowerCase() === 'hr' ? 'hour' : (item.unit || 'hour')
   });
 

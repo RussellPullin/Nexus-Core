@@ -15,6 +15,7 @@ import {
 import { scheduleMirrorShiftToNexusSupabase } from '../services/nexusPublicShiftsSync.service.js';
 import { syncCaseNoteFromShift } from '../services/shiftCaseNoteSync.service.js';
 import { parseTravelKm, parseTravelTimeMinutes, populateShiftLineItems } from '../services/shiftLineItems.service.js';
+import { resolveProgressNoteDurationHours } from '../lib/shiftDuration.js';
 import { getProviderOrgIdForUser } from '../middleware/roles.js';
 import { isParticipantInRequesterTenant, tenantParticipantAndStaffClause } from '../lib/orgScopeSql.js';
 
@@ -100,27 +101,20 @@ router.post('/', (req, res) => {
       return res.status(400).json({ error: 'Invalid shift_date format (use DD/MM/YYYY or YYYY-MM-DD)' });
     }
 
+    const explicitStart = start_time != null && String(start_time).trim() !== '';
+    const explicitEnd = finish_time != null && String(finish_time).trim() !== '';
     const startTimeStr = start_time || '09:00';
     const endTimeStr = finish_time || '17:00';
     const startDateTime = buildDateTime(shift_date, startTimeStr);
     const endDateTime = buildDateTime(shift_date, endTimeStr);
 
-    let durationHours = duration;
-    if (durationHours == null || durationHours === '') {
-      const startMins = startTimeStr ? startTimeStr.match(/(\d+):(\d+)/) : null;
-      const endMins = endTimeStr ? endTimeStr.match(/(\d+):(\d+)/) : null;
-      if (startMins && endMins) {
-        const s = parseInt(startMins[1], 10) * 60 + parseInt(startMins[2], 10);
-        const e = parseInt(endMins[1], 10) * 60 + parseInt(endMins[2], 10);
-        durationHours = Math.max(0, (e - s) / 60);
-      } else {
-        durationHours = 0;
-      }
-    }
-    durationHours = typeof durationHours === 'number' ? durationHours : parseFloat(durationHours) || 0;
-    if (durationHours > 24) {
-      durationHours = durationHours / 60;
-    }
+    const durationHours = resolveProgressNoteDurationHours({
+      startTimeStr,
+      endTimeStr,
+      explicitStart,
+      explicitEnd,
+      duration
+    });
 
     const matchingShift = findMatchingShift({
       participantId,
@@ -136,11 +130,17 @@ router.post('/', (req, res) => {
 
     if (matchingShift) {
       shiftId = matchingShift.id;
+      const nextStart = startDateTime || `${supportDate}T09:00:00`;
+      const nextEnd = endDateTime || `${supportDate}T17:00:00`;
       db.prepare(`
-        UPDATE shifts SET status = 'completed', notes = ?, updated_at = datetime('now')
+        UPDATE shifts SET status = 'completed', notes = ?,
+          start_time = ?, end_time = ?,
+          updated_at = datetime('now')
         WHERE id = ?
       `).run(
         [matchingShift.notes || '', session_details || ''].filter(Boolean).join('\n\n'),
+        nextStart,
+        nextEnd,
         shiftId
       );
     } else {

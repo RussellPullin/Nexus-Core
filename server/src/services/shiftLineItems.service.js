@@ -5,6 +5,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { getDefaultLineItemForParticipant } from './progressNoteMatcher.js';
+import { hoursBetweenIsoDateTimes } from '../lib/shiftDuration.js';
 
 /**
  * Parse travel time from various formats: 60, "60", "60mins", "60 min", "1 hour", etc.
@@ -196,10 +197,13 @@ export function syncShiftLineItemsWithProgressNote(shiftId) {
   const shiftEnd = shift?.end_time;
 
   if (lineCount.c === 0) {
+    const fromShiftTimes = hoursBetweenIsoDateTimes(shiftStart, shiftEnd);
+    const durationHours =
+      fromShiftTimes != null ? fromShiftTimes : (parseFloat(progressNote.duration_hours) || 0);
     populateShiftLineItems(
       shiftId,
       progressNote.participant_id,
-      progressNote.duration_hours || 0,
+      durationHours,
       shiftStart,
       shiftEnd,
       progressNote.support_date,

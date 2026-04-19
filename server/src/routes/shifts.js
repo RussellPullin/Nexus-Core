@@ -17,6 +17,7 @@ import {
   isShiftInRequesterTenant,
   tenantParticipantAndStaffClause,
 } from '../lib/orgScopeSql.js';
+import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 
 const router = Router();
 
@@ -262,6 +263,7 @@ router.get('/:id', (req, res) => {
     const shift = db.prepare(`
       SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
              p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
+             p.remoteness as participant_remoteness,
              st.name as staff_name, st.email as staff_email, st.phone as staff_phone
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
@@ -284,6 +286,7 @@ router.get('/:id/refresh-expense', async (req, res) => {
       SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
              p.provider_org_id as participant_provider_org_id,
              p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
+             p.remoteness as participant_remoteness,
              st.name as staff_name, st.email as staff_email, st.phone as staff_phone
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
@@ -307,6 +310,7 @@ router.get('/:id/refresh-expense', async (req, res) => {
       const updated = db.prepare(`
         SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
                p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
+               p.remoteness as participant_remoteness,
                st.name as staff_name, st.email as staff_email, st.phone as staff_phone
         FROM shifts s
         JOIN participants p ON s.participant_id = p.id
@@ -521,13 +525,19 @@ router.post('/:id/line-items', (req, res) => {
     if (!isShiftInRequesterTenant(req.params.id, req.session?.user?.id)) {
       return res.status(404).json({ error: 'Shift not found' });
     }
-    const shift = db.prepare('SELECT id, participant_id, start_time FROM shifts WHERE id = ?').get(req.params.id);
+    const shift = db.prepare(`
+      SELECT s.id, s.participant_id, s.start_time, p.remoteness as participant_remoteness
+      FROM shifts s
+      JOIN participants p ON p.id = s.participant_id
+      WHERE s.id = ?
+    `).get(req.params.id);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
     const { ndis_line_item_id, quantity, unit_price, claim_type } = req.body;
     if (!ndis_line_item_id) return res.status(400).json({ error: 'ndis_line_item_id is required' });
     const ndis = db.prepare('SELECT id, rate, rate_remote, rate_very_remote FROM ndis_line_items WHERE id = ?').get(ndis_line_item_id);
     if (!ndis) return res.status(400).json({ error: 'NDIS line item not found' });
-    const effectiveRate = ndis.rate_remote ?? ndis.rate_very_remote ?? ndis.rate;
+    const remoteness = shift.participant_remoteness || 'standard';
+    const effectiveRate = getEffectiveNdisRate(ndis, remoteness);
     const isQuotable = (effectiveRate == null || Number(effectiveRate) === 0);
     if (isQuotable && (unit_price == null || unit_price === '')) {
       return res.status(400).json({ error: 'This is a quotable support (no set price). Please enter the agreed unit price.' });

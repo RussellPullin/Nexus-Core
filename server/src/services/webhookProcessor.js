@@ -18,6 +18,7 @@ import { updateAggregatesForShift } from './featureStore.service.js';
 import { scheduleMirrorShiftToNexusSupabase } from './nexusPublicShiftsSync.service.js';
 import { syncCaseNoteFromShift } from './shiftCaseNoteSync.service.js';
 import { populateShiftLineItems } from './shiftLineItems.service.js';
+import { resolveProgressNoteDurationHours } from '../lib/shiftDuration.js';
 
 function normNameShifts(n) {
   return String(n || '')
@@ -92,8 +93,12 @@ export function processShifts(shiftsArray, options = {}) {
 
     const staffName = String(s.staffName ?? s.staff_name ?? '').trim();
     const clientName = String(s.clientName ?? s.client_name ?? '').trim();
-    const startTime = String(s.startTime ?? s.start_time ?? '').trim() || '09:00';
-    const finishTime = String(s.finishTime ?? s.finish_time ?? '').trim() || '17:00';
+    const rawStart = s.startTime ?? s.start_time;
+    const rawFinish = s.finishTime ?? s.finish_time;
+    const hasStart = rawStart != null && String(rawStart).trim() !== '';
+    const hasFinish = rawFinish != null && String(rawFinish).trim() !== '';
+    const startTime = String(rawStart ?? '').trim() || '09:00';
+    const finishTime = String(rawFinish ?? '').trim() || '17:00';
     const duration = s.duration;
     const travelKm = s.travelKm ?? s.travel_km ?? null;
     const travelTimeMin = s.travelTimeMinutes ?? s.travel_time_minutes ?? s.travel_time_min ?? null;
@@ -118,20 +123,13 @@ export function processShifts(shiftsArray, options = {}) {
         const startDateTime = buildDateTime(supportDate, startTime) || `${supportDate}T09:00:00`;
         const endDateTime = buildDateTime(supportDate, finishTime) || `${supportDate}T17:00:00`;
 
-        let durationHours = duration;
-        if (durationHours == null || durationHours === '') {
-          const startMins = startTime.match(/(\d+):(\d+)/);
-          const endMins = finishTime.match(/(\d+):(\d+)/);
-          if (startMins && endMins) {
-            const sm = parseInt(startMins[1], 10) * 60 + parseInt(startMins[2], 10);
-            const em = parseInt(endMins[1], 10) * 60 + parseInt(endMins[2], 10);
-            durationHours = Math.max(0, (em - sm) / 60);
-          } else {
-            durationHours = 0;
-          }
-        }
-        durationHours = typeof durationHours === 'number' ? durationHours : parseFloat(durationHours) || 0;
-        if (durationHours > 24) durationHours = durationHours / 60;
+        const durationHours = resolveProgressNoteDurationHours({
+          startTimeStr: startTime,
+          endTimeStr: finishTime,
+          explicitStart: hasStart,
+          explicitEnd: hasFinish,
+          duration
+        });
 
         // Prevent duplicate shifts: 1) same participant + staff + date + time (primary), 2) same import ID, 3) scheduled shift overlap.
         let matchingShift = findShiftByParticipantStaffAndStartTime(participant.id, staff.id, startDateTime);

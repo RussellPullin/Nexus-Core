@@ -164,7 +164,8 @@ export function computeHoursFromShifts(shifts, options = {}) {
     const category = getShiftCategory(dateStr);
 
     row[category] = (row[category] || 0) + shiftAndTravel;
-    if (isEveningShift(finishTimeStr)) {
+    // Evening hours only on weekdays; Sat/Sun/PH use the premium day bucket instead.
+    if (category === 'weekday' && isEveningShift(finishTimeStr)) {
       row.evening += shiftAndTravel;
     }
     row.travel += travelMin;

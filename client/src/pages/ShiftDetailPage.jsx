@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { shifts, ndis, invoices } from '../lib/api';
 import { formatDate, formatDateLocal } from '../lib/dateUtils';
+import { getEffectiveNdisRate } from '../lib/ndisRates';
 
 function mondayOfWeekContaining(d) {
   const day = d.getDay();
@@ -214,7 +215,8 @@ export default function ShiftDetailPage() {
     const selected = ndisItems.find((n) => n.id === addChargeForm.ndis_line_item_id);
     const wholeUnit = selected && ['each', 'day', 'week', 'year'].includes((selected.unit || '').toLowerCase());
     if (wholeUnit) qty = Math.round(qty);
-    const effectiveRate = selected && (selected.rate_remote ?? selected.rate_very_remote ?? selected.rate);
+    const remoteness = shift?.participant_remoteness || 'standard';
+    const effectiveRate = selected && getEffectiveNdisRate(selected, remoteness);
     const isQuotable = effectiveRate == null || Number(effectiveRate) === 0;
     if (isQuotable && (!addChargeForm.unit_price || String(addChargeForm.unit_price).trim() === '')) {
       alert('This is a quotable support (no set price). Please enter the agreed unit price.');
@@ -692,7 +694,7 @@ export default function ShiftDetailPage() {
                 >
                   <option value="">Select...</option>
                   {displayNdisItems.map((n) => {
-                    const effRate = n.rate_remote ?? n.rate_very_remote ?? n.rate;
+                    const effRate = getEffectiveNdisRate(n, shift?.participant_remoteness || 'standard');
                     const quotable = effRate == null || Number(effRate) === 0;
                     return (
                       <option key={n.id} value={n.id}>
@@ -717,7 +719,7 @@ export default function ShiftDetailPage() {
               </div>
               {(() => {
                 const selected = ndisItems.find((n) => n.id === addChargeForm.ndis_line_item_id);
-                const effRate = selected && (selected.rate_remote ?? selected.rate_very_remote ?? selected.rate);
+                const effRate = selected && getEffectiveNdisRate(selected, shift?.participant_remoteness || 'standard');
                 const isQuotable = selected && (effRate == null || Number(effRate) === 0);
                 return isQuotable ? (
                   <div className="form-group">
