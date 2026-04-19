@@ -22,6 +22,7 @@ Self-hosting (customer runs their own Railway) is optional; use the checklist in
 3. **Supabase** — Create a dedicated Supabase project, run migrations under `supabase/migrations/`, and put URL/keys in `.env` and `client/.env` as documented in `.env.example`.
 4. **Production**
    - Set **`NODE_ENV=production`** and build the SPA before or during deploy: **`npm run deploy:build`** (or your CI equivalent).
+   - **Fly.io** — From branch **`main`**, **`npm run deploy:fly`** auto-commits uncommitted work (except gitignored secrets), then deploys. **`npm run deploy:fly:no-commit`** skips that commit; **`npm run deploy:fly:push`** also pushes to **`origin/main`** after commit.
    - Start the API + static UI: **`npm run deploy:start`** (or `NODE_ENV=production npm run start:prod`).
    - Set a strong **`SESSION_SECRET`** (32+ characters); the server **refuses to start** in production without it.
    - Set **`OAUTH_PUBLIC_URL`** and **`FRONTEND_ORIGIN`** to your real public HTTPS URLs so OAuth and email links work.

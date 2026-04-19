@@ -116,11 +116,37 @@ export default function FinancialPage() {
     try {
       const r = await billing.syncFromXero(inv.id);
       await Promise.all([loadBatches(), loadBillingInvoices()]);
-      const out = Number(r?.outstanding) || 0;
-      const msg = r?.payment_inserted
-        ? `Recorded $${Number(r.payment_inserted.amount).toFixed(2)} from Xero. Outstanding: $${out.toFixed(2)}`
-        : `Already in sync with Xero. Outstanding: $${out.toFixed(2)}`;
-      alert(msg);
+      const out = Number(r?.outstanding_after ?? r?.outstanding) || 0;
+      if (r?.payment_id && Number(r.amount_added) > 0) {
+        alert(`Recorded $${Number(r.amount_added).toFixed(2)} from Xero. Outstanding: $${out.toFixed(2)}`);
+        return;
+      }
+      if (r?.skipped) {
+        const reason = r.reason || '';
+        let msg;
+        if (reason === 'already_in_sync') {
+          msg = `No new payment to add: Nexus recorded $${Number(r.nexus_paid).toFixed(2)} and Xero shows $${Number(r.xero_amount_paid).toFixed(2)} paid.`;
+          if (r.xero_invoice_number) {
+            msg += ` Linked Xero invoice #${r.xero_invoice_number}.`;
+          }
+          const nTot = Number(r.total_incl_gst);
+          const xTot = Number(r.xero_total);
+          if (Number.isFinite(nTot) && Number.isFinite(xTot) && Math.abs(nTot - xTot) > 0.05) {
+            msg += ` Invoice totals differ (Nexus incl. GST $${nTot.toFixed(2)} vs Xero $${xTot.toFixed(2)}), which can block reconciliation — check GST on the participant and line items.`;
+          }
+        } else if (reason === 'no_allocatable_outstanding') {
+          msg = `Nexus has $0 outstanding on this invoice but Xero shows more received. Nexus total incl. GST $${Number(r.total_incl_gst).toFixed(2)}, Xero total $${Number(r.xero_total).toFixed(2)}. Adjust line items or record a payment manually if needed.`;
+        } else if (reason === 'void_invoice') {
+          msg = 'This Nexus invoice is void — sync skipped.';
+        } else if (reason === 'xero_voided') {
+          msg = 'This invoice is voided in Xero — sync skipped.';
+        } else {
+          msg = `Sync skipped (${reason}).`;
+        }
+        alert(`${msg} Outstanding: $${out.toFixed(2)}`);
+        return;
+      }
+      alert(`Sync finished. Outstanding: $${out.toFixed(2)}`);
     } catch (e) {
       alert(e.message || 'Sync from Xero failed');
     } finally {
@@ -455,7 +481,7 @@ export default function FinancialPage() {
                       .slice()
                       .sort((a, b) => String(a.invoice_number || '').localeCompare(String(b.invoice_number || '')));
                     const expanded = expandedBatchRef === batch.batch_ref;
-                    const outstandingCount = batchInvoices.filter((inv) => (Number(inv.outstanding) || 0) > 0.005).length;
+                    const outstandingCount = batchInvoices.filter((inv) => (Number(inv.outstanding) || 0) > 0.01).length;
 
                     return (
                       <tr key={batch.reference}>

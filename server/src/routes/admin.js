@@ -294,7 +294,7 @@ router.get('/pay-summary', (req, res) => {
       return res.json([]);
     }
     const staffRows = db
-      .prepare(`SELECT id, name FROM staff WHERE (${sf.sql}) ORDER BY name COLLATE NOCASE`)
+      .prepare(`SELECT st.id, st.name FROM staff st WHERE (${sf.sql}) ORDER BY st.name COLLATE NOCASE`)
       .all(...sf.params);
     const shiftStmt = db.prepare(`
       SELECT s.id, s.start_time, s.end_time, s.expenses,

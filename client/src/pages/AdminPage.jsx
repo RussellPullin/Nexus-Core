@@ -153,6 +153,13 @@ export default function AdminPage() {
     return t;
   }, [payFilteredRows, payEdits]);
 
+  const subcontractorPayRows = useMemo(() => {
+    return payFilteredRows.filter((r) => {
+      const s = staffList.find((x) => String(x.id) === String(r.staff_id));
+      return s?.employment_type === 'subcontractor';
+    });
+  }, [payFilteredRows, staffList]);
+
   const downloadPayCsv = () => {
     const headers = [
       'Staff Name',
@@ -193,6 +200,67 @@ export default function AdminPage() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `pay-summary-xero-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** Labor = profile hourly rate × total hours (same buckets as above; single rate from Staff profile). */
+  const downloadSubcontractorPayCsv = () => {
+    const headers = [
+      'Staff Name',
+      'Nexus staff ID',
+      'Pay period start',
+      'Pay period end',
+      'Total hours',
+      'Weekday hours',
+      'Saturday hours',
+      'Sunday hours',
+      'Public holiday hours',
+      'Evening hours',
+      'Travel hours',
+      'Hourly rate ($)',
+      'Labor ($)',
+      'Expenses ($)',
+      'Total pay ($)',
+      'Total km',
+    ];
+    const lines = [headers.map(escapeCsvCell).join(',')];
+    subcontractorPayRows.forEach((r) => {
+      const st = staffList.find((x) => String(x.id) === String(r.staff_id));
+      const rateRaw = st?.hourly_rate;
+      const rateNum = rateRaw != null && rateRaw !== '' ? Number(rateRaw) : NaN;
+      const totalH = getPayCell(r, 'totalHours');
+      const th = Number.isFinite(totalH) ? totalH : 0;
+      const labor =
+        Number.isFinite(rateNum) && Number.isFinite(th) ? Math.round(th * rateNum * 100) / 100 : 0;
+      const expVal = getPayCell(r, 'totalExpenses');
+      const expNum = Number.isFinite(expVal) ? expVal : 0;
+      const totalPay = Math.round((labor + expNum) * 100) / 100;
+      const vals = [
+        r.staffName,
+        r.staff_id ?? '',
+        r.periodStart,
+        r.periodEnd,
+        getPayCell(r, 'totalHours'),
+        getPayCell(r, 'weekdayHours'),
+        getPayCell(r, 'saturdayHours'),
+        getPayCell(r, 'sundayHours'),
+        getPayCell(r, 'holidayHours'),
+        getPayCell(r, 'eveningHours'),
+        getPayCell(r, 'travelHours'),
+        Number.isFinite(rateNum) ? rateNum : '',
+        labor,
+        expNum,
+        totalPay,
+        getPayCell(r, 'totalKm'),
+      ];
+      lines.push(vals.map(escapeCsvCell).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `subcontractor-pay-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -474,7 +542,9 @@ export default function AdminPage() {
             Pay periods and hour breakdowns use only <strong>completed</strong> shifts (including those marked completed by admin)—same rules as each staff profile&apos;s Hours Summary. Travel time and km use linked progress notes when available. Use this to check a pay run before entering or importing figures into Xero. Total hours include travel time; the travel column is for reference.
           </p>
           <p style={{ color: '#64748b', marginBottom: '1rem', fontSize: '0.9rem', maxWidth: '48rem' }}>
-            Download CSV for a spreadsheet-friendly file you can adjust and then use in Xero (manual timesheets or your payroll import).
+            Download CSV for a spreadsheet-friendly file you can adjust and then use in Xero (manual timesheets or your payroll import).{' '}
+            <strong>Subcontractor CSV</strong> includes only staff with Employment type Subcontractor; <strong>Labor ($)</strong> is hourly rate from their
+            profile × total hours, and <strong>Total pay ($)</strong> adds expenses (reimbursements) on top.
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
             <label>
@@ -504,6 +574,19 @@ export default function AdminPage() {
             </button>
             <button type="button" className="btn btn-primary" onClick={downloadPayCsv} disabled={paySummaryLoading || !payFilteredRows.length}>
               Download CSV
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={downloadSubcontractorPayCsv}
+              disabled={paySummaryLoading || !subcontractorPayRows.length}
+              title={
+                !subcontractorPayRows.length
+                  ? 'No subcontractor rows in the current filter (set staff to Subcontractor and ensure they have shifts).'
+                  : undefined
+              }
+            >
+              Download subcontractor CSV ($)
             </button>
             {payAdjustMode && Object.keys(payEdits).length > 0 && (
               <button

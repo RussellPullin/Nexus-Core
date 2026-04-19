@@ -8,7 +8,12 @@ import {
   parseXeroApiBodyOrThrow,
   XERO_API_BASE
 } from '../routes/settings.js';
-import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
+import {
+  participantInvoiceIncludesGst,
+  roundMoney,
+  gstBreakdownFromSubtotal,
+  MONEY_ZERO_EPS
+} from '../lib/invoiceGst.js';
 import { resolveOrgIdForBillingParticipant } from './orgOnedriveSync.service.js';
 
 function xeroHeaders(accessToken, tenantId) {
@@ -122,9 +127,19 @@ export async function syncBillingInvoiceFromXero(billingInvoiceId, requesterOrgI
     throw err;
   }
 
+  const xeroTotal = roundMoney(Number(xi.Total) || 0);
+  const xeroInvoiceNumber = xi.InvoiceNumber != null ? String(xi.InvoiceNumber) : null;
+
   const status = String(xi.Status || '').toUpperCase();
   if (status === 'VOIDED') {
-    return { ok: true, skipped: true, reason: 'xero_voided', xero_status: status };
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'xero_voided',
+      xero_status: status,
+      xero_total: xeroTotal,
+      xero_invoice_number: xeroInvoiceNumber
+    };
   }
 
   const xeroPaid = roundMoney(Number(xi.AmountPaid) || 0);
@@ -134,7 +149,13 @@ export async function syncBillingInvoiceFromXero(billingInvoiceId, requesterOrgI
 
   const delta = roundMoney(xeroPaid - nexusPaid);
 
-  if (delta <= 0.005) {
+  if (delta < MONEY_ZERO_EPS) {
+    const rem = Math.max(0, roundMoney(total - nexusPaid));
+    let syncStatus = inv.status;
+    if (inv.status !== 'draft' && rem <= MONEY_ZERO_EPS && inv.status !== 'paid') {
+      db.prepare(`UPDATE billing_invoices SET status = 'paid', updated_at = datetime('now') WHERE id = ?`).run(inv.id);
+      syncStatus = 'paid';
+    }
     return {
       ok: true,
       skipped: true,
@@ -142,12 +163,16 @@ export async function syncBillingInvoiceFromXero(billingInvoiceId, requesterOrgI
       xero_amount_paid: xeroPaid,
       nexus_paid: nexusPaid,
       total_incl_gst: total,
-      xero_status: status
+      xero_total: xeroTotal,
+      xero_invoice_number: xeroInvoiceNumber,
+      xero_status: status,
+      outstanding_after: rem,
+      status: syncStatus
     };
   }
 
-  const amountToAdd = roundMoney(Math.min(delta, Math.max(outstanding, 0) + 0.02));
-  if (amountToAdd <= 0.005) {
+  const amountToAdd = roundMoney(Math.min(delta, Math.max(outstanding, 0) + MONEY_ZERO_EPS * 2));
+  if (amountToAdd < MONEY_ZERO_EPS) {
     return {
       ok: true,
       skipped: true,
@@ -155,7 +180,10 @@ export async function syncBillingInvoiceFromXero(billingInvoiceId, requesterOrgI
       xero_amount_paid: xeroPaid,
       nexus_paid: nexusPaid,
       total_incl_gst: total,
+      xero_total: xeroTotal,
+      outstanding,
       delta,
+      xero_invoice_number: xeroInvoiceNumber,
       xero_status: status
     };
   }
@@ -174,7 +202,7 @@ export async function syncBillingInvoiceFromXero(billingInvoiceId, requesterOrgI
   const newPaid = roundMoney(nexusPaid + amountToAdd);
   const newOut = Math.max(0, roundMoney(total - newPaid));
   let newStatus = inv.status;
-  if (newOut <= 0.005 && inv.status !== 'draft') {
+  if (newOut <= MONEY_ZERO_EPS && inv.status !== 'draft') {
     db.prepare(`UPDATE billing_invoices SET status = 'paid', updated_at = datetime('now') WHERE id = ?`).run(inv.id);
     newStatus = 'paid';
   }
@@ -187,6 +215,8 @@ export async function syncBillingInvoiceFromXero(billingInvoiceId, requesterOrgI
     nexus_paid_before: nexusPaid,
     nexus_paid_after: newPaid,
     total_incl_gst: total,
+    xero_total: xeroTotal,
+    xero_invoice_number: xeroInvoiceNumber,
     outstanding_after: newOut,
     status: newStatus,
     xero_status: status

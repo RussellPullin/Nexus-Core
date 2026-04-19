@@ -13,6 +13,10 @@
 #   SKIP_DEPLOY_GIT_CHECKS=1  — bypass all git safety checks (not recommended)
 #   ALLOW_UNCOMMITTED_DEPLOY=1 — deploy with a dirty working tree (risky)
 #   ALLOW_BEHIND_REMOTE_DEPLOY=1 — deploy when local HEAD is behind origin (dangerous)
+#   DEPLOY_AUTO_COMMIT=1 — if the tree is dirty, run `git add -A` and commit before checks
+#                          (still obeys .gitignore; does not run unless you opt in)
+#   DEPLOY_COMMIT_MESSAGE — optional message for that commit (default: timestamped deploy snapshot)
+#   DEPLOY_AUTO_PUSH=1 — after a successful auto-commit, `git push` to NEXUS_DEPLOY_REMOTE/BRANCH
 #
 # Code rollbacks: `fly releases rollback` swaps the app image; SQLite stays on the volume.
 #
@@ -24,6 +28,37 @@ cd "$REPO_ROOT"
 APP="${FLY_APP_NAME:-nexus-core-crm}"
 DEPLOY_BRANCH="${NEXUS_DEPLOY_BRANCH:-main}"
 DEPLOY_REMOTE="${NEXUS_DEPLOY_REMOTE:-origin}"
+
+maybe_auto_commit_before_deploy() {
+  if [[ "${SKIP_DEPLOY_GIT_CHECKS:-}" == "1" ]]; then
+    return 0
+  fi
+  if [[ "${DEPLOY_AUTO_COMMIT:-}" != "1" ]]; then
+    return 0
+  fi
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ -z "$(git status --porcelain 2>/dev/null)" ]]; then
+    return 0
+  fi
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+  echo "DEPLOY_AUTO_COMMIT=1 — staging all changes (honours .gitignore) and committing…" >&2
+  git add -A
+  local msg="${DEPLOY_COMMIT_MESSAGE:-deploy: snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  if ! git commit -m "$msg"; then
+    echo "REFUSING TO DEPLOY: auto-commit failed. Fix the issue or commit manually." >&2
+    exit 1
+  fi
+  if [[ "${DEPLOY_AUTO_PUSH:-}" == "1" ]]; then
+    echo "DEPLOY_AUTO_PUSH=1 — pushing to $DEPLOY_REMOTE $DEPLOY_BRANCH…" >&2
+    if ! git push "$DEPLOY_REMOTE" "$DEPLOY_BRANCH"; then
+      echo "Warning: git push failed (no upstream, auth, or network). Deploy continues with local commit only." >&2
+    fi
+  fi
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+}
 
 check_allowed_origin() {
   local f="$REPO_ROOT/scripts/deploy-allowed-origin.txt"
@@ -121,6 +156,7 @@ run_deploy_git_checks() {
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
+maybe_auto_commit_before_deploy
 run_deploy_git_checks
 
 echo "=== Server JS syntax (node --check all server/src) ==="

@@ -15,7 +15,12 @@ import { getOnedriveLinkRow } from '../services/orgOnedriveTokens.service.js';
 import { getDefaultLineItemForParticipant } from '../services/progressNoteMatcher.js';
 import { syncShiftLineItemsWithProgressNote } from '../services/shiftLineItems.service.js';
 import { isNf2fTask, NF2F_TASK_TYPES } from '../lib/billingConstants.js';
-import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
+import {
+  participantInvoiceIncludesGst,
+  roundMoney,
+  gstBreakdownFromSubtotal,
+  MONEY_ZERO_EPS
+} from '../lib/invoiceGst.js';
 import { sendBillingBatch } from '../services/billingBatchSend.service.js';
 import { generateBillingInvoicePdfBuffer } from '../services/billingInvoicePdf.service.js';
 import { rebuildBillingInvoiceLineItems } from '../services/billingInvoiceRepair.service.js';
@@ -110,7 +115,7 @@ function recordBatchPaymentProportional(batchRef, paidPool, paidAt, note, userId
       const total = billingInvoiceTotalInclGst(db, t.id, invMeta?.invoice_includes_gst);
       const paid = billingInvoicePaidSum(db, t.id);
       const out = Math.max(0, roundMoney(total - paid));
-      if (out <= 0.005) {
+      if (out <= MONEY_ZERO_EPS) {
         const st = db.prepare('SELECT status FROM billing_invoices WHERE id = ?').get(t.id);
         if (st?.status && st.status !== 'draft') {
           db.prepare(`UPDATE billing_invoices SET status = 'paid', updated_at = datetime('now') WHERE id = ?`).run(t.id);
@@ -759,7 +764,7 @@ router.post('/:id/void', (req, res) => {
       return res.status(400).json({ error: 'Invoice is already void' });
     }
     const paid = billingInvoicePaidSum(db, id);
-    if (paid > 0.005) {
+    if (paid > 0) {
       return res.status(400).json({
         error:
           'Cannot void an invoice that has recorded payments. Adjust or remove payment records first if appropriate.'
@@ -862,7 +867,7 @@ router.post('/:id/payments', (req, res) => {
     const newPaid = roundMoney(paidSoFar + payAmt);
     const newOut = Math.max(0, roundMoney(total - newPaid));
     let newStatus = inv.status;
-    if (newOut <= 0.005 && inv.status !== 'draft') {
+    if (newOut <= MONEY_ZERO_EPS && inv.status !== 'draft') {
       db.prepare(`UPDATE billing_invoices SET status = 'paid', updated_at = datetime('now') WHERE id = ?`).run(inv.id);
       newStatus = 'paid';
     }
