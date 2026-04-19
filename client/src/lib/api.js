@@ -73,7 +73,13 @@ export const microsoftDrive = {
 export const auth = {
   me: () => fetchApi('/auth/me'),
   login: (email, password) => fetchApi('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-  register: (email, password, name) => fetchApi('/auth/register', { method: 'POST', body: JSON.stringify({ email, password, name }) }),
+  registrationInfo: () => fetchApi('/auth/registration-info'),
+  /** Local sign-up: `organization_name` is required (creates org for first user, or joins existing tenant by name). */
+  register: (email, password, name, organization_name) =>
+    fetchApi('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name, organization_name: organization_name || undefined })
+    }),
   logout: () => fetchApi('/auth/logout', { method: 'POST' }),
   updateSettings: (data) => fetchApi('/auth/settings', { method: 'PUT', body: JSON.stringify(data) }),
   changePassword: (currentPassword, newPassword) => fetchApi('/auth/password', { method: 'PUT', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),

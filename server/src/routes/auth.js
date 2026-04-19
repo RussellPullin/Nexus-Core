@@ -70,6 +70,16 @@ const router = Router();
 
 router.get('/ping', (req, res) => res.json({ ok: true }));
 
+/** Public: whether local email/password registration will create the first (admin) account — needs organisation name. */
+router.get('/registration-info', (req, res) => {
+  try {
+    const anyUser = db.prepare('SELECT id FROM users LIMIT 1').get();
+    res.json({ first_account: !anyUser });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/login', (req, res) => {
   try {
     const { email, password } = req.body;
@@ -156,7 +166,7 @@ router.post('/emergency-login', (req, res) => {
 
 router.post('/register', (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { email, password, name, organization_name, org_name } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password required' });
     }
@@ -166,14 +176,54 @@ router.post('/register', (req, res) => {
     if (existing) {
       return res.status(400).json({ error: 'Email already registered' });
     }
+    const orgLabelRaw = organization_name ?? org_name;
+    const orgLabel = String(orgLabelRaw ?? '').trim();
+    if (!orgLabel) {
+      return res.status(400).json({ error: 'Organisation name is required.' });
+    }
+    if (orgLabel.length > 256) {
+      return res.status(400).json({ error: 'Organisation name is too long.' });
+    }
+
     const anyUser = db.prepare('SELECT id FROM users LIMIT 1').get();
     const role = anyUser ? 'support_coordinator' : 'admin';
     const id = uuid();
     const hash = bcrypt.hashSync(passwordNorm, 10);
+
+    let orgIdForUser = null;
+    if (!anyUser) {
+      const orgId = uuid();
+      db.prepare(`
+        INSERT INTO organisations (id, owner_org_id, name, type, created_at, updated_at)
+        VALUES (?, ?, ?, 'provider', datetime('now'), datetime('now'))
+      `).run(orgId, orgId, orgLabel);
+      orgIdForUser = orgId;
+    } else {
+      const anchor = db
+        .prepare(
+          `
+        SELECT id FROM organisations
+        WHERE owner_org_id IS NOT NULL AND id = owner_org_id
+          AND lower(trim(name)) = lower(?)
+        LIMIT 1
+      `
+        )
+        .get(orgLabel);
+      if (!anchor) {
+        return res.status(400).json({
+          error:
+            'No organisation matches that name. Use the exact name your administrator gave you, or ask them to invite you.',
+          code: 'ORG_NOT_FOUND'
+        });
+      }
+      orgIdForUser = anchor.id;
+    }
+
     db.prepare(`
-      INSERT INTO users (id, email, password_hash, name, role)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, emailNorm, hash, name || null, role);
+      INSERT INTO users (id, email, password_hash, name, role, org_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, emailNorm, hash, name || null, role, orgIdForUser);
+
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     req.session.user = { id: user.id, email: user.email, name: user.name, role: normalizeAppRole(user.role), org_id: user.org_id || null };
     const u = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(id);

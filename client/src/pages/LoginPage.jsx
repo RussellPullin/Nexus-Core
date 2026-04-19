@@ -23,6 +23,7 @@ export default function LoginPage() {
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [organizationName, setOrganizationName] = useState('');
   const attemptedTokenRef = useRef('');
 
   const hasSupabaseCallbackParams = useCallback(() => {
@@ -346,7 +347,12 @@ export default function LoginPage() {
       }
 
       if (isRegister) {
-        await register(email, password, name);
+        const orgTrim = organizationName.trim();
+        if (!useCloudAuth && !orgTrim) {
+          setError('Enter your organisation name.');
+          return;
+        }
+        await register(email, password, name, useCloudAuth ? undefined : orgTrim);
       } else {
         await login(email, password);
       }
@@ -387,7 +393,6 @@ export default function LoginPage() {
   const supabaseConfigured = Boolean(
     import.meta.env.VITE_SUPABASE_URL?.trim() && import.meta.env.VITE_SUPABASE_ANON_KEY?.trim(),
   );
-
   return (
     <div className="login-page">
       <div className="login-card">
@@ -428,6 +433,23 @@ export default function LoginPage() {
               className="login-input"
               autoComplete="name"
             />
+          )}
+          {isRegister && !isRecoveryMode && !useCloudAuth && (
+            <>
+              <input
+                type="text"
+                placeholder="Organisation name"
+                value={organizationName}
+                onChange={(e) => setOrganizationName(e.target.value)}
+                className="login-input"
+                required
+                autoComplete="organization"
+              />
+              <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.25rem' }}>
+                Required: if you are the first user on this server, this creates your organisation. Otherwise enter the
+                exact name your administrator uses.
+              </p>
+            </>
           )}
           {!isRecoveryMode ? (
             <>
@@ -508,7 +530,12 @@ export default function LoginPage() {
           <button
             type="button"
             className="login-toggle"
-            onClick={() => { setIsRegister(!isRegister); setError(''); setInfo(''); }}
+            onClick={() => {
+              setIsRegister(!isRegister);
+              setError('');
+              setInfo('');
+              setOrganizationName('');
+            }}
           >
             {isRegister ? 'Already have an account? Sign in' : 'Need an account? Register'}
           </button>
