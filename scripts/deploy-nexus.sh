@@ -52,8 +52,11 @@ maybe_auto_commit_before_deploy() {
     exit 1
   fi
   if [[ "${DEPLOY_AUTO_PUSH:-}" == "1" ]]; then
-    echo "DEPLOY_AUTO_PUSH=1 — pushing to $DEPLOY_REMOTE $DEPLOY_BRANCH…" >&2
-    if ! git push "$DEPLOY_REMOTE" "$DEPLOY_BRANCH"; then
+    # Use ${var} and ASCII punctuation: bash 3.2 + set -u can mis-parse $VAR immediately before UTF-8 ellipsis.
+    local push_remote="${DEPLOY_REMOTE:-origin}"
+    local push_branch="${DEPLOY_BRANCH:-main}"
+    echo "DEPLOY_AUTO_PUSH=1 -- pushing to ${push_remote} ${push_branch}..." >&2
+    if ! git push "${push_remote}" "${push_branch}"; then
       echo "Warning: git push failed (no upstream, auth, or network). Deploy continues with local commit only." >&2
     fi
   fi

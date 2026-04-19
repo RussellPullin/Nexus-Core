@@ -479,65 +479,158 @@ export default function FinancialPage() {
                     const batchInvoices = billingInvoices
                       .filter((inv) => idSet.has(String(inv.id)))
                       .slice()
-                      .sort((a, b) => String(a.invoice_number || '').localeCompare(String(b.invoice_number || '')));
-                    const expanded = expandedBatchRef === batch.batch_ref;
+                      .sort((a, b) => {
+                        const ao = Number(a.outstanding) || 0;
+                        const bo = Number(b.outstanding) || 0;
+                        const aUnpaid = ao > 0.01;
+                        const bUnpaid = bo > 0.01;
+                        if (aUnpaid !== bUnpaid) return aUnpaid ? -1 : 1;
+                        return String(a.invoice_number || '').localeCompare(String(b.invoice_number || ''));
+                      });
+                    const batchRefKey = String(batch.batch_ref);
+                    const expanded = String(expandedBatchRef) === batchRefKey;
                     const outstandingCount = batchInvoices.filter((inv) => (Number(inv.outstanding) || 0) > 0.01).length;
 
                     return (
-                      <tr key={batch.reference}>
-                        <td>
-                          <span className={`badge badge-${batch.status === 'finalised' ? 'success' : 'secondary'}`}>
-                            {batch.status === 'finalised' ? 'Finalised' : 'Draft'}
-                          </span>
-                        </td>
-                        <td><strong>{batch.reference}</strong></td>
-                        <td style={{ color: '#64748b' }}>{createdDate}</td>
-                        <td style={{ textAlign: 'right' }}>${batch.total.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          {batch.outstanding === 0 ? '–' : `$${batch.outstanding.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                        </td>
-                        <td>
-                          {batch.status === 'draft' && (
-                            <button
-                              type="button"
-                              className="btn btn-primary"
-                              style={{ fontSize: '0.8rem' }}
-                              disabled={sendingBatchRef === batch.batch_ref}
-                              onClick={async () => {
-                                setSendingBatchRef(batch.batch_ref);
-                                try {
-                                  const r = await billing.sendBatch(batch.batch_ref);
-                                  await Promise.all([loadBatches(), loadBillingInvoices()]);
-                                  const lines = [];
-                                  if (r?.message) lines.push(r.message);
-                                  if (r?.errors?.length) {
-                                    lines.push(
-                                      r.errors
-                                        .map((e) => `${e.invoice_number || e.billing_invoice_id}: ${e.error}`)
-                                        .join('\n')
-                                    );
+                      <Fragment key={batch.reference}>
+                        <tr
+                          style={{ cursor: 'pointer', background: expanded ? 'var(--bg-subtle, #f8fafc)' : undefined }}
+                          onClick={() => setExpandedBatchRef(expanded ? null : batch.batch_ref)}
+                          title="Click to expand or collapse invoices in this batch"
+                        >
+                          <td>
+                            <span style={{ marginRight: '0.35rem', display: 'inline-block', transition: 'transform 0.15s', transform: expanded ? 'rotate(90deg)' : 'none', color: '#64748b' }} aria-hidden>
+                              ▶
+                            </span>
+                            <span className={`badge badge-${batch.status === 'finalised' ? 'success' : 'secondary'}`}>
+                              {batch.status === 'finalised' ? 'Finalised' : 'Draft'}
+                            </span>
+                          </td>
+                          <td><strong>{batch.reference}</strong></td>
+                          <td style={{ color: '#64748b' }}>{createdDate}</td>
+                          <td style={{ textAlign: 'right' }}>${batch.total.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            {batch.outstanding === 0 ? '–' : `$${batch.outstanding.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            {batch.status === 'draft' && (
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ fontSize: '0.8rem' }}
+                                disabled={sendingBatchRef === batch.batch_ref}
+                                onClick={async () => {
+                                  setSendingBatchRef(batch.batch_ref);
+                                  try {
+                                    const r = await billing.sendBatch(batch.batch_ref);
+                                    await Promise.all([loadBatches(), loadBillingInvoices()]);
+                                    const lines = [];
+                                    if (r?.message) lines.push(r.message);
+                                    if (r?.errors?.length) {
+                                      lines.push(
+                                        r.errors
+                                          .map((e) => `${e.invoice_number || e.billing_invoice_id}: ${e.error}`)
+                                          .join('\n')
+                                      );
+                                    }
+                                    if (r?.xero_warnings?.length) {
+                                      lines.push(
+                                        'Xero:',
+                                        ...r.xero_warnings.map(
+                                          (w) => `${w.invoice_number || w.billing_invoice_id}: ${w.error}`
+                                        )
+                                      );
+                                    }
+                                    if (lines.length) alert(lines.join('\n\n'));
+                                  } catch (e) {
+                                    alert(e.message || 'Failed to send invoices');
+                                  } finally {
+                                    setSendingBatchRef(null);
                                   }
-                                  if (r?.xero_warnings?.length) {
-                                    lines.push(
-                                      'Xero:',
-                                      ...r.xero_warnings.map(
-                                        (w) => `${w.invoice_number || w.billing_invoice_id}: ${w.error}`
-                                      )
-                                    );
-                                  }
-                                  if (lines.length) alert(lines.join('\n\n'));
-                                } catch (e) {
-                                  alert(e.message || 'Failed to send invoices');
-                                } finally {
-                                  setSendingBatchRef(null);
-                                }
-                              }}
-                            >
-                              {sendingBatchRef === batch.batch_ref ? 'Sending…' : 'Send invoices'}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
+                                }}
+                              >
+                                {sendingBatchRef === batch.batch_ref ? 'Sending…' : 'Send invoices'}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr>
+                            <td colSpan={6} style={{ padding: 0, verticalAlign: 'top', borderTop: 'none', background: 'var(--bg-subtle, #f8fafc)' }}>
+                              <div style={{ padding: '0.75rem 1rem 1rem 2rem', borderBottom: '1px solid #e2e8f0' }}>
+                                <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', fontWeight: 600 }}>
+                                  Invoices in this batch
+                                  {outstandingCount > 0 && (
+                                    <span style={{ fontWeight: 500, color: '#b45309', marginLeft: '0.5rem' }}>
+                                      ({outstandingCount} with balance due)
+                                    </span>
+                                  )}
+                                </p>
+                                {batchInvoices.length === 0 ? (
+                                  <p style={{ margin: 0, fontSize: '0.9rem', color: '#64748b' }}>Loading invoice details… switch to the Invoices tab or refresh if this persists.</p>
+                                ) : (
+                                  <table style={{ width: '100%', fontSize: '0.9rem' }}>
+                                    <thead>
+                                      <tr>
+                                        <th>Invoice #</th>
+                                        <th>Participant</th>
+                                        <th style={{ textAlign: 'right' }}>Total</th>
+                                        <th style={{ textAlign: 'right' }}>Paid</th>
+                                        <th style={{ textAlign: 'right' }}>Outstanding</th>
+                                        <th>Status</th>
+                                        <th style={{ width: 140 }} />
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {batchInvoices.map((inv) => {
+                                        const total = Number(inv.total) || 0;
+                                        const paid = Number(inv.paid) || 0;
+                                        const outstanding = Number(inv.outstanding) || 0;
+                                        const unpaid = outstanding > 0.01 && inv.status !== 'void';
+                                        return (
+                                          <tr key={inv.id} style={{ background: unpaid ? 'rgba(180, 83, 9, 0.06)' : undefined }}>
+                                            <td>{inv.invoice_number}</td>
+                                            <td>{inv.participant_name}</td>
+                                            <td style={{ textAlign: 'right' }}>${total.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                            <td style={{ textAlign: 'right' }}>${paid.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: unpaid ? 600 : 400 }}>
+                                              {unpaid
+                                                ? `$${outstanding.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                : '–'}
+                                            </td>
+                                            <td>
+                                              <span
+                                                className={`badge ${inv.status === 'paid' ? 'badge-paid' : inv.status === 'void' ? 'badge-secondary' : `badge-${inv.status}`}`}
+                                              >
+                                                {inv.status}
+                                              </span>
+                                            </td>
+                                            <td onClick={(e) => e.stopPropagation()}>
+                                              <a href={billing.pdfUrl(inv.id)} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }}>
+                                                PDF
+                                              </a>
+                                              {unpaid && (
+                                                <button
+                                                  type="button"
+                                                  className="btn btn-primary"
+                                                  style={{ fontSize: '0.75rem' }}
+                                                  onClick={() => openRecordInvoicePayment(inv)}
+                                                >
+                                                  Record payment
+                                                </button>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
