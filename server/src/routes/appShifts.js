@@ -22,12 +22,12 @@ router.get('/', (req, res) => {
     if (orgId) {
       if (single && String(single).trim() === String(orgId).trim()) {
         sql += ` AND (
-          lower(trim(coalesce(source_org_id,''))) = lower(trim(?))
-          OR source_org_id IS NULL OR trim(coalesce(source_org_id,'')) = ''
+          lower(trim(coalesce(source_org_id, ''))) = lower(trim(?))
+          OR source_org_id IS NULL OR trim(coalesce(source_org_id, '')) = ''
         )`;
         params.push(orgId);
       } else {
-        sql += ' AND lower(trim(coalesce(source_org_id,''))) = lower(trim(?))';
+        sql += ` AND lower(trim(coalesce(source_org_id, ''))) = lower(trim(?))`;
         params.push(orgId);
       }
     }

@@ -123,6 +123,9 @@ run_deploy_git_checks() {
 
 run_deploy_git_checks
 
+echo "=== Server JS syntax (node --check all server/src) ==="
+npm run verify:server-syntax
+
 if [[ "${SKIP_FLY_BACKUP:-}" != "1" ]]; then
   echo "=== Backing up production SQLite on Fly ($APP) ==="
   # fly ssh -C uses exec (no shell): use env(1) + absolute script path — not "cd …" (cd is not a binary).

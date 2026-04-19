@@ -6,7 +6,6 @@ import { mkdirSync, existsSync, readFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import fileStoreFactory from 'session-file-store';
-import { isLegacyOnedriveAdminConfigured } from './lib/onedriveLegacyUser.js';
 
 // Load .env from project root (parent of server/) so config works regardless of cwd
 const __filename = fileURLToPath(import.meta.url);

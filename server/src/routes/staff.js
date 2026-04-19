@@ -374,7 +374,6 @@ router.get('/:id/excel-summary', async (req, res) => {
     }
     const s = db.prepare('SELECT id, name FROM staff WHERE id = ? AND org_id = ?').get(req.params.id, orgId);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
-    const orgId = req.session?.user?.org_id || null;
     const { summaryRows } = await pullSummaryFromExcel({
       staffName: s.name,
       organizationId: orgId || undefined,

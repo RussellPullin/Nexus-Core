@@ -25,7 +25,8 @@
     "reset-password": "node server/scripts/reset-password.js",
     "verify:supabase-profile": "node server/scripts/verify-supabase-profile-lookup.mjs",
     "backup:sqlite": "node server/scripts/backup-sqlite.mjs",
-    "deploy:fly": "bash scripts/deploy-nexus.sh"
+    "deploy:fly": "bash scripts/deploy-nexus.sh",
+    "verify:server-syntax": "bash scripts/verify-server-syntax.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
