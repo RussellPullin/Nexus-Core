@@ -73,6 +73,16 @@ const BUDGET_COLORWAYS = [
   { cardBg: '#f0f2f0', headerBg: '#dce4dc', border: '#7a8b7a', text: '#2d3d2d', muted: '#5a6a5a' }
 ];
 
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(String(text ?? ''));
+    return true;
+  } catch (e) {
+    console.error(e);
+    return false;
+  }
+}
+
 export default function ParticipantProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -106,6 +116,17 @@ export default function ParticipantProfile() {
   const [onboardingState, setOnboardingState] = useState(null);
   const [expandedBudgetCards, setExpandedBudgetCards] = useState({});
   const [allNdisItems, setAllNdisItems] = useState([]);
+  const [copiedGoalKey, setCopiedGoalKey] = useState(null);
+
+  const copyGoalLine = async (key, text) => {
+    if (!String(text || '').trim()) return;
+    const ok = await copyTextToClipboard(text);
+    if (!ok) return;
+    setCopiedGoalKey(key);
+    window.setTimeout(() => {
+      setCopiedGoalKey((k) => (k === key ? null : k));
+    }, 1600);
+  };
 
   const formatManagementTypeLabel = (value) => {
     const v = String(value || '').toLowerCase();
@@ -1263,13 +1284,13 @@ export default function ParticipantProfile() {
               })()}
               <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.75rem', marginBottom: '0.9rem', background: '#fff' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <h4 style={{ margin: 0 }}>Parsed goals (separate from budgets)</h4>
+                  <h4 style={{ margin: 0 }}>Plan goals (participant goals section)</h4>
                   <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }} onClick={handleAddParsedGoal}>
                     + Add goal
                   </button>
                 </div>
                 <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.35rem 0 0.6rem 0' }}>
-                  These goals are independent of budget categories and will be added to the Goals page when you apply this plan.
+                  The participant goals section of an NDIS plan (statement of goals, your goals, etc.) is separate from the funding and budget breakdown. Text parsed here is taken from that goals section. When you apply the plan, these are stored on the participant Goals tab only—they are not attached to individual category budgets.
                 </p>
                 {(planBreakdownParsed.goals || []).length > 0 ? (
                   <div style={{ display: 'grid', gap: '0.45rem' }}>
@@ -1282,14 +1303,25 @@ export default function ParticipantProfile() {
                           placeholder="Goal description"
                           style={{ flex: 1, minHeight: 58 }}
                         />
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.72rem', padding: '0.08rem 0.3rem' }}
-                          onClick={() => handleRemoveParsedGoal(idx)}
-                        >
-                          Remove
-                        </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.72rem', padding: '0.08rem 0.35rem' }}
+                            title="Copy goal text for email or documents"
+                            onClick={() => copyGoalLine(`parsed-${idx}`, goal)}
+                          >
+                            {copiedGoalKey === `parsed-${idx}` ? 'Copied' : 'Copy'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.72rem', padding: '0.08rem 0.3rem' }}
+                            onClick={() => handleRemoveParsedGoal(idx)}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1946,12 +1978,23 @@ export default function ParticipantProfile() {
           {data.goals?.length ? (
             <table>
               <thead>
-                <tr><th>Description</th><th>Status</th><th>Target Date</th></tr>
+                <tr><th>Description</th><th style={{ width: 92 }}>Copy</th><th>Status</th><th>Target Date</th></tr>
               </thead>
               <tbody>
                 {data.goals.map((g) => (
                   <tr key={g.id}>
                     <td>{g.description}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.78rem', padding: '0.2rem 0.5rem' }}
+                        title="Copy goal text for email or documents"
+                        onClick={() => copyGoalLine(`saved-${g.id}`, g.description)}
+                      >
+                        {copiedGoalKey === `saved-${g.id}` ? 'Copied' : 'Copy'}
+                      </button>
+                    </td>
                     <td>{g.status}</td>
                     <td>{g.target_date ? formatDate(g.target_date) : '-'}</td>
                   </tr>

@@ -75,9 +75,17 @@ export async function probeLocalOllama(baseUrl = DEFAULT_BASE) {
     if (result?.ok) {
       return { ok: true, models: result.models };
     }
-    return { ok: false, error: "Couldn't connect." };
+    return {
+      ok: false,
+      error:
+        "Couldn't reach Ollama. Is it running? If this site is HTTPS, set OLLAMA_ORIGINS to this site's URL in Ollama's environment, then restart Ollama (see Settings → Ollama). Use Chrome or Edge."
+    };
   } catch {
-    return { ok: false, error: "Couldn't connect." };
+    return {
+      ok: false,
+      error:
+        "Couldn't reach Ollama. Is it running? If this site is HTTPS, set OLLAMA_ORIGINS to this site's URL in Ollama's environment, then restart Ollama (see Settings → Ollama). Use Chrome or Edge."
+    };
   }
 }
 

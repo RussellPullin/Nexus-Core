@@ -185,13 +185,14 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
           : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         category: 'Consent and service agreement'
       };
-      const transientId = await uploadTransientDocument(uploadBuf, consentFilename);
+      const transientId = await uploadTransientDocument(uploadBuf, consentFilename, organisationId);
       agreement = await createAgreementWithDocument({
         participantName: participant.name,
         participantEmail: participant.email,
         envelopeId: envelope.envelope_id,
         transientDocumentId: transientId,
-        documentName: 'Privacy Consent (NDIS)'
+        documentName: 'Privacy Consent (NDIS)',
+        orgId: organisationId
       });
     } else if (form.draft_document_path && existsSync(form.draft_document_path)) {
       const ext = form.draft_document_path.toLowerCase().endsWith('.docx') ? 'docx' : 'pdf';
@@ -206,20 +207,22 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
             : 'application/pdf',
         category: form.display_name || form.form_type || 'Service agreement'
       };
-      const transientId = await uploadTransientDocument(docBuffer, filename);
+      const transientId = await uploadTransientDocument(docBuffer, filename, organisationId);
       agreement = await createAgreementWithDocument({
         participantName: participant.name,
         participantEmail: participant.email,
         envelopeId: envelope.envelope_id,
         transientDocumentId: transientId,
-        documentName: form.display_name || form.form_type
+        documentName: form.display_name || form.form_type,
+        orgId: organisationId
       });
     } else {
       agreement = await createAgreementPacket({
         participantName: participant.name,
         participantEmail: participant.email,
         envelopeId: envelope.envelope_id,
-        forms: [form]
+        forms: [form],
+        orgId: organisationId
       });
     }
 
@@ -261,6 +264,8 @@ router.post('/participants/:id/send-signatures', async (req, res) => {
     const forms = getLatestGeneratedForms(onboarding.id);
     if (!forms.length) return res.status(400).json({ error: 'No generated forms to send. Generate form pack first.' });
 
+    const organisationId = onboarding.organisation_id || null;
+
     const packets = computeHybridPackets(forms);
     const envelopeRecords = createEnvelopeRecords({
       participantId: participant.id,
@@ -278,7 +283,8 @@ router.post('/participants/:id/send-signatures', async (req, res) => {
         participantName: participant.name,
         participantEmail: participant.email,
         envelopeId: envelope.envelope_id,
-        forms: packetForms
+        forms: packetForms,
+        orgId: organisationId
       });
       db.prepare(`
         UPDATE signature_envelopes

@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { frontendBaseUrl } from '../lib/frontendBaseUrl.js';
 import { oauthPublicApiOriginFromEnv } from '../lib/oauthPublicOrigin.js';
+import { exchangeAdobeAuthorizationCode } from '../services/adobeSign.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -83,6 +84,21 @@ function mergeWithEnv(row, options = {}) {
     xero_linked: noOrgRowYet ? false : !!(row?.xero_refresh_token && row?.xero_tenant_id),
     /** When true, Settings shows one-click Xero connect (credentials from server env). */
     xero_oauth_via_env: xeroOauthConfiguredViaEnv(),
+    adobe_sign_linked:
+      noOrgRowYet
+        ? false
+        : !!(row?.adobe_sign_refresh_token && row?.adobe_sign_api_access_point) ||
+          !!process.env.ADOBE_SIGN_ACCESS_TOKEN?.trim(),
+    adobe_sign_oauth_linked: noOrgRowYet ? false : !!(row?.adobe_sign_refresh_token && row?.adobe_sign_api_access_point),
+    /** Server has Acrobat Sign OAuth app + callback URL (Fly secrets). */
+    adobe_sign_oauth_via_env: adobeOauthConfiguredViaEnv(),
+    /** Only ADOBE_SIGN_ACCESS_TOKEN on host; no org OAuth row. */
+    adobe_sign_via_host_token_only:
+      noOrgRowYet
+        ? false
+        : !!process.env.ADOBE_SIGN_ACCESS_TOKEN?.trim() &&
+          !(row?.adobe_sign_refresh_token && row?.adobe_sign_api_access_point),
+    adobe_sign_web_access_point: noOrgRowYet ? null : (row?.adobe_sign_web_access_point ?? null)
   };
 }
 
@@ -112,6 +128,38 @@ function xeroOauthConfiguredViaEnv() {
   const secret = process.env.XERO_CLIENT_SECRET?.trim();
   const redirect = getEffectiveXeroRedirectUri();
   return !!(id && secret && redirect);
+}
+
+/** Callback URL registered on the Acrobat Sign API application (must match exactly). */
+function getEffectiveAdobeRedirectUri() {
+  const explicit = process.env.ADOBE_SIGN_REDIRECT_URI?.trim();
+  if (explicit) return explicit;
+  const origin = oauthPublicApiOriginFromEnv();
+  if (origin) return `${origin}/api/settings/adobe-sign-callback`;
+  return '';
+}
+
+function isAllowedAdobeRedirectUri(redirectUri) {
+  return isAllowedXeroRedirectUri(redirectUri);
+}
+
+/** One Acrobat Sign OAuth app for the deployment (Fly secrets); each org authorizes its own account. */
+function adobeOauthConfiguredViaEnv() {
+  const id = process.env.ADOBE_SIGN_CLIENT_ID?.trim();
+  const secret = process.env.ADOBE_SIGN_CLIENT_SECRET?.trim();
+  const redirect = getEffectiveAdobeRedirectUri();
+  return !!(id && secret && redirect);
+}
+
+function getAdobeOAuthAuthorizeBase() {
+  return process.env.ADOBE_SIGN_OAUTH_AUTHORIZE_BASE?.trim() || 'https://secure.echosign.com/public/oauth';
+}
+
+function getAdobeOAuthScopes() {
+  return (
+    process.env.ADOBE_SIGN_OAUTH_SCOPES?.trim() ||
+    'user_login:self agreement_read:self agreement_write:self agreement_send:self'
+  );
 }
 
 /**
@@ -697,6 +745,133 @@ router.post('/xero/disconnect', requireAdminOrDelegate, (req, res) => {
         accounting_provider = NULL, updated_at = datetime('now')
       WHERE org_id = ?
     `).run(orgId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Adobe Acrobat Sign OAuth (one app on the server; each org authorizes its own account) ──
+
+// POST /api/settings/adobe-sign/connect
+router.post('/adobe-sign/connect', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = resolveTargetOrgId(req);
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
+    if (!adobeOauthConfiguredViaEnv()) {
+      return res.status(400).json({
+        error:
+          'Adobe Sign OAuth is not configured on this server. Set ADOBE_SIGN_CLIENT_ID, ADOBE_SIGN_CLIENT_SECRET, and OAUTH_PUBLIC_URL (callback URL is OAUTH_PUBLIC_URL + /api/settings/adobe-sign-callback). Register that redirect URL on your Acrobat Sign API application.',
+      });
+    }
+    const redirectUri = getEffectiveAdobeRedirectUri();
+    if (!isAllowedAdobeRedirectUri(redirectUri)) {
+      return res.status(400).json({
+        error:
+          'Adobe redirect URI must use HTTPS, or http://localhost / http://127.0.0.1 for local dev. Set ADOBE_SIGN_REDIRECT_URI or fix OAUTH_PUBLIC_URL.',
+      });
+    }
+
+    if (!hasBusinessSettingsForOrg(orgId)) {
+      db.prepare(`INSERT INTO business_settings (id, org_id, updated_at) VALUES (?, ?, datetime('now'))`).run(orgId, orgId);
+    }
+
+    const state = randomBytes(24).toString('hex');
+    req.session.adobe_sign_oauth_state = state;
+    req.session.adobe_sign_oauth_org_id = orgId;
+
+    const base = getAdobeOAuthAuthorizeBase().replace(/\?+$/, '');
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: process.env.ADOBE_SIGN_CLIENT_ID.trim(),
+      redirect_uri: redirectUri,
+      scope: getAdobeOAuthScopes(),
+      state
+    });
+    const redirectUrl = `${base}?${params.toString()}`;
+    res.json({ redirectUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/settings/adobe-sign-callback
+router.get('/adobe-sign-callback', requireAdminOrDelegate, async (req, res) => {
+  const base = frontendBaseUrl(req);
+  const settingsUrl = base.replace(/\/api\/?$/, '').replace(/\/$/, '') + '/settings';
+
+  try {
+    const { code, state, error, api_access_point: apiAccessPointQ } = req.query || {};
+    if (error) {
+      return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent(String(error)));
+    }
+    if (req.session.adobe_sign_oauth_state !== state) {
+      return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent('Invalid state'));
+    }
+    delete req.session.adobe_sign_oauth_state;
+
+    if (!code) {
+      return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent('No authorization code'));
+    }
+
+    const orgId = req.session?.adobe_sign_oauth_org_id || resolveTargetOrgId(req);
+    if (!orgId) {
+      return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent('No organisation on your account.'));
+    }
+
+    let apiAccessPoint = apiAccessPointQ != null ? String(apiAccessPointQ) : '';
+    try {
+      apiAccessPoint = decodeURIComponent(apiAccessPoint).trim();
+    } catch {
+      apiAccessPoint = String(apiAccessPointQ).trim();
+    }
+    if (!apiAccessPoint) {
+      return res.redirect(
+        settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent('Missing api_access_point from Adobe (check redirect URL and app configuration).')
+      );
+    }
+
+    const redirectUri = getEffectiveAdobeRedirectUri();
+    const tokens = await exchangeAdobeAuthorizationCode({
+      code: String(code),
+      redirectUri,
+      apiAccessPoint
+    });
+
+    if (!hasBusinessSettingsForOrg(orgId)) {
+      db.prepare(`INSERT INTO business_settings (id, org_id, updated_at) VALUES (?, ?, datetime('now'))`).run(orgId, orgId);
+    }
+
+    db.prepare(
+      `UPDATE business_settings SET
+        adobe_sign_refresh_token = ?,
+        adobe_sign_api_access_point = ?,
+        adobe_sign_web_access_point = ?,
+        updated_at = datetime('now')
+      WHERE org_id = ?`
+    ).run(tokens.refresh_token, tokens.api_access_point, tokens.web_access_point, orgId);
+
+    if (req.session) delete req.session.adobe_sign_oauth_org_id;
+
+    return res.redirect(settingsUrl + '?adobe_sign=linked');
+  } catch (err) {
+    return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent(err.message || 'Unknown error'));
+  }
+});
+
+// POST /api/settings/adobe-sign/disconnect
+router.post('/adobe-sign/disconnect', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = resolveTargetOrgId(req);
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
+    db.prepare(
+      `UPDATE business_settings SET
+        adobe_sign_refresh_token = NULL,
+        adobe_sign_api_access_point = NULL,
+        adobe_sign_web_access_point = NULL,
+        updated_at = datetime('now')
+      WHERE org_id = ?`
+    ).run(orgId);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

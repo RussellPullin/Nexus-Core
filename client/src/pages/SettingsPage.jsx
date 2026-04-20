@@ -718,9 +718,15 @@ export default function SettingsPage() {
             )}
           </>
         ) : (
-          <p className="form-hint" style={{ margin: 0 }}>
-            Off
-          </p>
+          <div>
+            <p className="form-hint" style={{ margin: 0 }}>
+              Off for your organisation — per-device Ollama and browser-side CSV mapping stay disabled.
+            </p>
+            <p className="form-hint" style={{ margin: '0.5rem 0 0 0', fontSize: '0.9rem' }}>
+              Turn on <strong>AI: Ollama on staff computers</strong> in Admin → Feature flags (super admin), or set{' '}
+              <code style={{ fontSize: '0.85em' }}>AI_STAFF_LOCAL_OLLAMA=true</code> on the API server.
+            </p>
+          </div>
         )}
         </div>
       </details>
@@ -1165,6 +1171,7 @@ function BusinessSetup() {
 
   useEffect(() => {
     const xero = searchParams.get('xero');
+    const adobe = searchParams.get('adobe_sign');
     const message = searchParams.get('message');
     if (xero === 'linked') {
       setMsg('Successfully linked to Xero.');
@@ -1172,6 +1179,13 @@ function BusinessSetup() {
       settings.getBusiness().then(setBiz).catch(() => {});
     } else if (xero === 'error') {
       setMsg('Xero connection failed: ' + (message || 'Unknown error'));
+      setSearchParams({}, { replace: true });
+    } else if (adobe === 'linked') {
+      setMsg('Successfully linked to Adobe Acrobat Sign.');
+      setSearchParams({}, { replace: true });
+      settings.getBusiness().then(setBiz).catch(() => {});
+    } else if (adobe === 'error') {
+      setMsg('Adobe Sign connection failed: ' + (message || 'Unknown error'));
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -1260,7 +1274,7 @@ function BusinessSetup() {
       <summary className="settings-collapsible-summary">
         <span className="settings-collapsible-summary-main">
           <span className="settings-collapsible-title">Business setup</span>
-          <span className="settings-collapsible-hint">Company details, logo, bank details, Xero</span>
+          <span className="settings-collapsible-hint">Company details, logo, bank details, Xero, Adobe Sign</span>
         </span>
       </summary>
       <div className="settings-collapsible-body">
@@ -1553,7 +1567,111 @@ function BusinessSetup() {
         </div>
       )}
 
-      {msg && <div className={msg.includes('saved') || msg.includes('uploaded') || msg.includes('removed') || msg.includes('Disconnected') || msg.includes('created in Xero') || msg.includes('Invoice #') ? 'settings-success' : 'settings-error'}>{msg}</div>}
+      <h4 className="settings-subsection-title">Signatures – Adobe Acrobat Sign</h4>
+      <p className="settings-desc">
+        Connect once per Nexus organisation. An admin or delegate signs in to Acrobat Sign and approves access so participant onboarding agreements are sent from{' '}
+        <strong>your</strong> Adobe account (API calls use the correct regional host for that account). This replaces past setups that used a single access token in server env
+        only—both still work if your host sets{' '}
+        <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>ADOBE_SIGN_ACCESS_TOKEN</code>.
+      </p>
+      {biz.adobe_sign_linked ? (
+        <div style={{ padding: '1rem', background: '#f0f9ff', border: '1px solid #7dd3fc', borderRadius: 8, marginBottom: '1rem' }}>
+          <strong style={{ color: '#0369a1' }}>Adobe Sign is connected</strong>
+          {biz.adobe_sign_web_access_point ? (
+            <span style={{ marginLeft: '0.5rem', color: '#0c4a6e', fontSize: '0.9rem' }}>({biz.adobe_sign_web_access_point})</span>
+          ) : null}
+          <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', color: '#0369a1' }}>
+            {biz.adobe_sign_oauth_linked
+              ? 'OAuth tokens for this organisation are stored on the server and refreshed automatically.'
+              : 'Using access token from server environment (hosting configuration).'}
+          </p>
+          {biz.adobe_sign_oauth_linked ? (
+            <div style={{ marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={async () => {
+                  setMsg('');
+                  try {
+                    await settings.adobeSignDisconnect();
+                    const fresh = await settings.getBusiness();
+                    setBiz(fresh);
+                    setMsg('Disconnected from Adobe Sign.');
+                  } catch (err) {
+                    setMsg(err?.message || 'Failed to disconnect');
+                  }
+                }}
+              >
+                Disconnect Adobe Sign
+              </button>
+            </div>
+          ) : biz.adobe_sign_via_host_token_only ? (
+            <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', color: '#0c4a6e' }}>
+              To switch to “Connect to Adobe Sign” for this org, remove{' '}
+              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>ADOBE_SIGN_ACCESS_TOKEN</code> from the
+              server and use the button below, or keep using the host token.
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <div style={{ marginBottom: '1rem' }}>
+          {!biz.adobe_sign_oauth_via_env && (
+            <p
+              className="settings-desc"
+              style={{
+                marginBottom: '0.75rem',
+                color: '#b45309',
+                background: '#fffbeb',
+                border: '1px solid #fcd34d',
+                padding: '0.75rem 1rem',
+                borderRadius: 8,
+              }}
+            >
+              One-click Adobe Sign is not enabled on this server yet. Your administrator adds{' '}
+              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>ADOBE_SIGN_CLIENT_ID</code> and{' '}
+              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>ADOBE_SIGN_CLIENT_SECRET</code> to the API
+              host, registers the callback URL in the Acrobat Sign API application, and restarts the server.
+            </p>
+          )}
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!biz.adobe_sign_oauth_via_env}
+            onClick={async () => {
+              setMsg('');
+              try {
+                const { redirectUrl } = await settings.adobeSignConnect();
+                if (redirectUrl) window.location.href = redirectUrl;
+                else setMsg('No redirect URL returned.');
+              } catch (err) {
+                setMsg(err?.message || 'Failed to connect');
+              }
+            }}
+          >
+            Connect to Adobe Sign
+          </button>
+        </div>
+      )}
+
+      {msg && (
+        <div
+          className={
+            msg.includes('saved') ||
+            msg.includes('uploaded') ||
+            msg.includes('removed') ||
+            msg.includes('Disconnected') ||
+            msg.includes('Disconnected from Adobe') ||
+            msg.includes('created in Xero') ||
+            msg.includes('Invoice #') ||
+            msg.includes('Successfully linked to Adobe') ||
+            msg.includes('Successfully linked to Xero')
+              ? 'settings-success'
+              : 'settings-error'
+          }
+        >
+          {msg}
+        </div>
+      )}
       <div className="settings-buttons">
         <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? 'Saving...' : 'Save business settings'}

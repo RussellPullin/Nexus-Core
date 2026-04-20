@@ -1204,7 +1204,17 @@ try {
     if (!businessCols.some((c) => c.name === 'accounting_provider')) {
       db.exec('ALTER TABLE business_settings ADD COLUMN accounting_provider TEXT');
     }
-    for (const col of ['xero_client_id', 'xero_client_secret', 'xero_redirect_uri', 'xero_refresh_token', 'xero_tenant_id', 'xero_tenant_name']) {
+    for (const col of [
+      'xero_client_id',
+      'xero_client_secret',
+      'xero_redirect_uri',
+      'xero_refresh_token',
+      'xero_tenant_id',
+      'xero_tenant_name',
+      'adobe_sign_refresh_token',
+      'adobe_sign_api_access_point',
+      'adobe_sign_web_access_point'
+    ]) {
       businessCols = db.prepare("PRAGMA table_info(business_settings)").all();
       if (!businessCols.some((c) => c.name === col)) {
         db.exec(`ALTER TABLE business_settings ADD COLUMN ${col} TEXT`);

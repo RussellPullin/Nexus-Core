@@ -140,7 +140,7 @@ export default function AdminPage() {
   };
 
   const payTotals = useMemo(() => {
-    const fields = ['totalHours', 'weekdayHours', 'saturdayHours', 'sundayHours', 'holidayHours', 'eveningHours', 'travelHours', 'totalExpenses', 'totalKm'];
+    const fields = ['totalHours', 'weekdayHours', 'saturdayHours', 'sundayHours', 'holidayHours', 'eveningHours', 'totalExpenses', 'totalKm'];
     const t = Object.fromEntries(fields.map((f) => [f, 0]));
     payFilteredRows.forEach((r) => {
       const k = payRowKey(r);
@@ -172,7 +172,6 @@ export default function AdminPage() {
       'Sunday hours',
       'Public holiday hours',
       'Evening hours',
-      'Travel hours',
       'Total expenses',
       'Total km',
     ];
@@ -189,7 +188,6 @@ export default function AdminPage() {
         getPayCell(r, 'sundayHours'),
         getPayCell(r, 'holidayHours'),
         getPayCell(r, 'eveningHours'),
-        getPayCell(r, 'travelHours'),
         getPayCell(r, 'totalExpenses'),
         getPayCell(r, 'totalKm'),
       ];
@@ -217,7 +215,6 @@ export default function AdminPage() {
       'Sunday hours',
       'Public holiday hours',
       'Evening hours',
-      'Travel hours',
       'Hourly rate ($)',
       'Labor ($)',
       'Expenses ($)',
@@ -247,7 +244,6 @@ export default function AdminPage() {
         getPayCell(r, 'sundayHours'),
         getPayCell(r, 'holidayHours'),
         getPayCell(r, 'eveningHours'),
-        getPayCell(r, 'travelHours'),
         Number.isFinite(rateNum) ? rateNum : '',
         labor,
         expNum,
@@ -539,7 +535,7 @@ export default function AdminPage() {
         <div className="card">
           <h3>Staff pay summary (Xero)</h3>
           <p style={{ color: '#64748b', marginBottom: '0.75rem', maxWidth: '48rem' }}>
-            Pay periods and hour breakdowns use only <strong>completed</strong> shifts (including those marked completed by admin)—same rules as each staff profile&apos;s Hours Summary. Travel time and km use linked progress notes when available. Use this to check a pay run before entering or importing figures into Xero. Total hours include travel time; the travel column is for reference.
+            Pay periods and hour breakdowns use only <strong>completed</strong> shifts (including those marked completed by admin)—same rules as each staff profile&apos;s Hours Summary. Travel time from linked progress notes is included in the day-type hour buckets (and in total hours); km and expenses are shown separately. Use this to check a pay run before entering or importing figures into Xero.
           </p>
           <p style={{ color: '#64748b', marginBottom: '1rem', fontSize: '0.9rem', maxWidth: '48rem' }}>
             Download CSV for a spreadsheet-friendly file you can adjust and then use in Xero (manual timesheets or your payroll import).{' '}
@@ -618,7 +614,6 @@ export default function AdminPage() {
                     <th>Sun</th>
                     <th>PH</th>
                     <th>Evening</th>
-                    <th>Travel</th>
                     <th>Expenses</th>
                     <th>Km</th>
                   </tr>
@@ -626,7 +621,7 @@ export default function AdminPage() {
                 <tbody>
                   {payFilteredRows.map((r) => {
                     const k = payRowKey(r);
-                    const hourFields = ['totalHours', 'weekdayHours', 'saturdayHours', 'sundayHours', 'holidayHours', 'eveningHours', 'travelHours'];
+                    const hourFields = ['totalHours', 'weekdayHours', 'saturdayHours', 'sundayHours', 'holidayHours', 'eveningHours'];
                     const renderHour = (f) => {
                       const display = getPayCell(r, f);
                       if (!payAdjustMode) return <td key={f}>{Number.isFinite(display) ? display.toFixed(1) : '—'}</td>;
@@ -701,7 +696,6 @@ export default function AdminPage() {
                     <td>{payTotals.sundayHours.toFixed(1)}</td>
                     <td>{payTotals.holidayHours.toFixed(1)}</td>
                     <td>{payTotals.eveningHours.toFixed(1)}</td>
-                    <td>{payTotals.travelHours.toFixed(1)}</td>
                     <td>${payTotals.totalExpenses.toFixed(2)}</td>
                     <td>{payTotals.totalKm.toFixed(1)}</td>
                   </tr>

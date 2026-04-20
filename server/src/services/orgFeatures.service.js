@@ -9,10 +9,27 @@ function emptyFlagsMap() {
 }
 
 /**
+ * When true, all orgs get ai_staff_local_ollama (browser → localhost Ollama) without a Supabase row.
+ * Use for self-hosted APIs or to recover when org_features was never toggled.
+ */
+function applyAiStaffLocalOllamaEnvOverride(result) {
+  if (process.env.AI_STAFF_LOCAL_OLLAMA !== 'true') return result;
+  return {
+    ...result,
+    flags: { ...result.flags, ai_staff_local_ollama: true }
+  };
+}
+
+/**
  * @param {string | null | undefined} orgId
  * @returns {Promise<{ configured: boolean, flags: Record<string, boolean> }>}
  */
 export async function fetchFlagsForOrg(orgId) {
+  const base = await fetchFlagsForOrgFromSupabase(orgId);
+  return applyAiStaffLocalOllamaEnvOverride(base);
+}
+
+async function fetchFlagsForOrgFromSupabase(orgId) {
   const admin = getSupabaseServiceRoleClient();
   if (!admin) {
     return { configured: false, flags: emptyFlagsMap() };

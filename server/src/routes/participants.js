@@ -2308,7 +2308,7 @@ router.post('/:id/apply-plan-breakdown', (req, res) => {
       UPDATE participant_goals SET archived_at = datetime('now') WHERE participant_id = ? AND (archived_at IS NULL OR archived_at = '')
     `).run(req.params.id);
 
-    // Goals must come from the plan's goals section (parsed at upload). Never use budget narratives.
+    // Participant goals are a separate part of the NDIS plan from the budget table; they link to the plan only (not to plan_budgets).
     const requestedGoals = Array.isArray(goals) && goals.length > 0
       ? goals.map(cleanGoalText).filter((g) => g.length >= 12)
       : [];
