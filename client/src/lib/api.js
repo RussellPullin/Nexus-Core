@@ -9,7 +9,6 @@ export const settings = {
   xeroConnect: () => fetchApi('/settings/xero/connect', { method: 'POST' }),
   xeroDisconnect: () => fetchApi('/settings/xero/disconnect', { method: 'POST' }),
   xeroTestInvoice: () => fetchApi('/settings/xero/test-invoice', { method: 'POST' }),
-  xeroWebhookInfo: () => fetchApi('/settings/xero/webhook-info'),
   adobeSignConnect: () => fetchApi('/settings/adobe-sign/connect', { method: 'POST' }),
   adobeSignDisconnect: () => fetchApi('/settings/adobe-sign/disconnect', { method: 'POST' }),
   uploadLogo: async (file) => {

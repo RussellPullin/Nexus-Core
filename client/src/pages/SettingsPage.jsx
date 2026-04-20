@@ -1190,15 +1190,6 @@ function BusinessSetup() {
     }
   }, [searchParams, setSearchParams]);
 
-  const [xeroWebhookInfo, setXeroWebhookInfo] = useState(null);
-  useEffect(() => {
-    if (biz?.xero_linked) {
-      settings.xeroWebhookInfo().then(setXeroWebhookInfo).catch(() => setXeroWebhookInfo(null));
-    } else {
-      setXeroWebhookInfo(null);
-    }
-  }, [biz?.xero_linked]);
-
   const handleSave = async (e) => {
     e?.preventDefault();
     if (!biz) return;
@@ -1492,51 +1483,6 @@ function BusinessSetup() {
             >
               Disconnect
             </button>
-          </div>
-          <div style={{ marginTop: '0.75rem', fontSize: '0.9rem', color: '#166534' }}>
-            <strong>Payment sync from Xero</strong>
-            <p style={{ margin: '0.35rem 0 0.5rem', fontWeight: 400, color: '#15803d' }}>
-              When a payment is applied in Xero, Nexus can update outstanding amounts automatically. In the{' '}
-              <a href="https://developer.xero.com/app/manage" target="_blank" rel="noopener noreferrer">Xero developer app</a>, add a webhook
-              subscription for <strong>Invoice</strong> (create and update) pointing to the URL below. Set the same signing key in server env{' '}
-              <code style={{ background: 'rgba(255,255,255,0.6)', padding: '0 4px', borderRadius: 4 }}>XERO_WEBHOOK_KEY</code>.
-              {xeroWebhookInfo?.hint ? (
-                <span style={{ display: 'block', marginTop: '0.35rem' }}>{xeroWebhookInfo.hint}</span>
-              ) : null}
-            </p>
-            <div className="form-group" style={{ marginBottom: '0.5rem' }}>
-              <label style={{ color: '#166534' }}>Webhook URL</label>
-              <input
-                className="form-input"
-                readOnly
-                value={
-                  xeroWebhookInfo?.webhook_full_url ||
-                  `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/xero`
-                }
-              />
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={async () => {
-                  const v =
-                    xeroWebhookInfo?.webhook_full_url ||
-                    `${window.location.origin}/api/webhooks/xero`;
-                  try {
-                    await navigator.clipboard.writeText(v);
-                    setMsg('Webhook URL copied.');
-                  } catch {
-                    setMsg('Could not copy URL; select and copy manually.');
-                  }
-                }}
-              >
-                Copy webhook URL
-              </button>
-              <span style={{ fontSize: '0.85rem', color: '#166534' }}>
-                Signing key configured: {xeroWebhookInfo?.webhook_key_configured ? 'yes' : 'no (set XERO_WEBHOOK_KEY)'}
-              </span>
-            </div>
           </div>
         </div>
       ) : (
