@@ -20,6 +20,13 @@ import { fetchFlagsForOrg } from '../services/orgFeatures.service.js';
 import { buildParticipantsCsvColumnMapPrompt } from '../../../shared/participantsCsvColumnMapPrompt.js';
 import { extractPlanFromText } from '../services/ai/planExtractor.js';
 import { reconcilePlanExtraction } from '../services/ai/planReconciler.js';
+import { extractNdisPlanPdfText } from '../services/pdfOcrText.service.js';
+import {
+  parsePlanManagerStatementDocument,
+  applyPlanManagerStatement,
+  computeStatementTrends,
+  mergeStatementWithLocalData
+} from '../services/planManagerStatement.service.js';
 import { parseIntakeFormText } from '../services/intakeFormParser.service.js';
 import { initializeParticipantOnboarding, upsertIntakeFields } from '../services/onboarding.service.js';
 import { recordMapping } from '../services/csvMappingLearner.service.js';
@@ -320,19 +327,81 @@ function cleanGoalText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+/** Normalize pdf-parse output so deterministic matching works across Windows newlines, BOM, PUA bullets, and odd spaces. */
+function normalizeNdisPlanPdfText(text) {
+  return String(text || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\uE000-\uF8FF]/g, ' ');
+}
+
 // NDIS plans: goals section can appear before or after budget. PACE (adult) vs early childhood formats.
-const GOALS_SECTION_START = /\b(?:your\s+goals?\b|participant\s+goals?\b|^goals?\b|what'?s?\s+important\s+to\s+you\b|my\s+goals?\b|goals?\s+and\s+aspirations\b|plan\s+goals?\b|goals?\s+and\s+outcomes?\b|participant\s+statement\b|this\s+is\s+what\s+i\s+want\s+to\s+achieve\b)/im;
+// Note: the first "Your goals" in a PDF is often the table of contents (e.g. "4.Your goals" then "5.Your supports");
+// we must score multiple start matches and pick the real section (PACE blocks, intro text), not the TOC.
+const GOALS_SECTION_START = /\b(?:your\s+goals?\b|participant\s+goals?\b|^goals?\b|what'?s?\s+important\s+to\s+you\b|my\s+goals?\b|goals?\s+and\s+aspirations\b|plan\s+goals?\b|goals?\s+and\s+outcomes?\b|participant\s+statement\b|this\s+is\s+what\s+i\s+want\s+to\s+achieve\b|(?:^|\n)\s*\d+\.?\s*your\s+goals?\b)/im;
 const GOALS_SECTION_END = /\b(?:your\s+supports\b|your\s+current\s+informal\b|what\s+to\s+do\s+if\s+something\s+changes\b|new\s+informal,?\s+community\b|description\s+of\s+support\s*:|funded\s+supports\s+information\b|managing\s+my\s+ndis\s+funding\b)/im;
 
+function scoreCandidateGoalsSlice(slice) {
+  const s = String(slice || '');
+  if (s.length < 24) return -1e9;
+  const pace = (s.match(/\byour\s+goal\s*:/gi) || []).length;
+  const hasIntro = /\byour goals are set by you\b/i.test(s);
+  const firstLine = (s.split(/\n/).find((l) => l.trim()) || '').trim();
+  const tocOnly = /^\d+\.?\s*your\s+goals?\s*$/i.test(firstLine) && /^\d+\.\s*your\s+/im.test(s.slice(0, 120));
+  const tocPair = /^\d+\.?\s*your\s+goals?\s*\n\s*\d+\.\s*your\s+supports/i.test(s.slice(0, 200));
+  if (tocOnly || tocPair) return -1e9;
+  const midSentence =
+    /meet\s+your\s+goals\s+and\s+to\b|assisting\s+you\s+to\s+meet\s+your\s+goals\b|towards\s+your\s+goals\.?\s+to\s+learn\s+more/i.test(s.slice(0, 200)) &&
+    pace === 0 &&
+    !hasIntro;
+  if (midSentence) return -1e8;
+  // Narrative line "… your goals and to develop/build…" (common before the real goals heading) can contain the same
+  // PACE blocks but must not beat a slice that starts with the proper "Your goals" title — it confuses line parsing.
+  let score = Math.min(8000, s.length) + pace * 12000;
+  if (/\byour\s+goals\s+and\s+to\b/i.test(firstLine)) score -= 14000;
+  if (hasIntro) score += 4000;
+  if (/^\s*your\s+goals\s*$/im.test(firstLine)) score += 2000;
+  if (/\bshort-term\s+goal\b|\bmedium\s+or\s+long-term\s+goal\b/i.test(s)) score += 1500;
+  if (/\bNDIS website\b/i.test(s) && pace === 0 && s.length > 6000) score -= 25000;
+  return score;
+}
+
 function extractGoalsSectionText(fullText) {
-  const t = String(fullText || '');
-  const startMatch = t.match(GOALS_SECTION_START);
-  if (!startMatch || startMatch.index === undefined) return t;
-  const startIdx = startMatch.index;
-  const afterStart = t.slice(startIdx);
-  const endMatch = afterStart.match(GOALS_SECTION_END);
-  const endIdx = endMatch && endMatch.index !== undefined ? startIdx + endMatch.index : t.length;
-  return t.slice(startIdx, endIdx).trim();
+  const t = normalizeNdisPlanPdfText(String(fullText || ''));
+  const re = new RegExp(GOALS_SECTION_START.source, 'gim');
+  let bestSlice = '';
+  let bestScore = -Infinity;
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    const startIdx = m.index;
+    const afterStart = t.slice(startIdx);
+    const endMatch = afterStart.match(GOALS_SECTION_END);
+    const endIdx = endMatch && endMatch.index !== undefined ? startIdx + endMatch.index : t.length;
+    const slice = t.slice(startIdx, endIdx).trim();
+    const sc = scoreCandidateGoalsSlice(slice);
+    if (sc > bestScore) {
+      bestScore = sc;
+      bestSlice = slice;
+    }
+  }
+  if (bestSlice.length > 0 && bestScore > -1e7) return bestSlice;
+  return t;
+}
+
+/** PACE plans: each goal is "Your goal: …" until "How will you work towards this goal?" — extract verbatim from full text if section detection missed. */
+function extractPaceGoalsFromText(fullText) {
+  const t = normalizeNdisPlanPdfText(String(fullText || ''));
+  const out = [];
+  const re = /\byour\s+goal\s*:\s*([\s\S]*?)(?=\n\s*how\s+will\s+you\s+work\s+towards\s+this\s+goal\b|\n\s*your\s+goal\s*:|$)/gi;
+  let match;
+  while ((match = re.exec(t)) !== null) {
+    const body = fixHyphenatedLineBreaks(String(match[1] || '').trim());
+    const cleaned = cleanGoalText(body);
+    if (cleaned.length >= 12) out.push(cleaned);
+  }
+  return out;
 }
 
 function fixHyphenatedLineBreaks(s) {
@@ -340,13 +409,15 @@ function fixHyphenatedLineBreaks(s) {
 }
 
 function extractGoalsDeterministic(text) {
-  const goalsSectionOnly = extractGoalsSectionText(text);
+  const normalized = normalizeNdisPlanPdfText(text);
+  const goalsSectionOnly = extractGoalsSectionText(normalized);
   const lines = String(goalsSectionOnly || '').split(/\r?\n/).map((line) => line.trim());
   const collected = [];
   let inGoalsSection = false;
   let sectionLines = 0;
 
-  const headingRe = /^(participant\s+)?goals?\b[:\s-]*$|^participant\s+statement\b|^what'?s?\s+important\s+to\s+you\b|^my\s+goals?\b|^goals?\s+and\s+aspirations\b|^plan\s+goals?\b|^your\s+goals?\b|^goals?\s+and\s+outcomes?\b[:\s-]*$|^this\s+is\s+what\s+i\s+want\s+to\s+achieve\b$/i;
+  // Title lines only — do not use ^your\s+goals?\b without $ or "Your goals are set by you…" is mistaken for a heading and skipped.
+  const headingRe = /^(participant\s+)?goals?\s*:\s*$|^(?:participant\s+)?goals?\b[:\s-]*\s*$|^participant\s+statement\s*$|^what'?s?\s+important\s+to\s+you\s*$|^my\s+goals?\s*$|^goals?\s+and\s+aspirations\s*$|^plan\s+goals?\s*$|^your\s+goals?\s*$|^goals?\s+and\s+outcomes?\s*[:\s-]*\s*$|^this\s+is\s+what\s+i\s+want\s+to\s+achieve\s*$/i;
   const bulletRe = /^(?:[-*•]\s+|\d{1,2}[.)]\s+)(.+)$/;
   const inlineGoalRe = /^goal\s*\d*\s*[:.\-]\s*(.+)$/i;
   const yourGoalRe = /^your\s+goal\s*:\s*(.+)$/i;
@@ -472,6 +543,10 @@ function extractGoalsDeterministic(text) {
     if (cleaned.length >= 12) collected.push(cleaned);
   }
 
+  for (const g of extractPaceGoalsFromText(normalized)) {
+    collected.push(g);
+  }
+
   const seen = new Set();
   return collected
     .map(cleanGoalText)
@@ -531,7 +606,8 @@ ${textForLlm}
       ? ai.goals.map(cleanGoalText).filter((g) => g.length >= 12)
       : [];
 
-    const merged = aiGoals.length > 0 ? [...aiGoals, ...deterministic] : [...deterministic, ...aiGoals];
+    // Deterministic + PACE regex are verbatim from the PDF; prefer them over LLM wording when deduping.
+    const merged = [...deterministic, ...aiGoals];
     const seen = new Set();
     return merged.filter((g) => {
       const key = normalizeGoalText(g);
@@ -631,12 +707,46 @@ const PDF_CATEGORY_MAP = {
   'improved health and wellbeing (cb health & wellbeing)': '12',
   'cb health & wellbeing': '12',
   'cb health and wellbeing': '12',
-  'core supports': '01'
+  'core supports': '01',
+  // Plans often use NDIS line-item wording instead of the category title
+  'coordination of supports': '07',
+  'specialist support coordination': '07',
+  'support connection': '07',
+  'psychosocial recovery coach': '07',
+  'coordination budget': '07'
 };
+
+/**
+ * Fallback when dollar-scan misses a category (e.g. label and $ on separate lines). Longest labels first.
+ * Each pattern captures one amount after the category title line(s).
+ */
+const PDF_CATEGORY_LINE_AMOUNT_RULES = [
+  { cat: '04', name: 'Assistance with Social, Economic and Community Participation', re: /Assistance with Social, Economic and Community Participation\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  // Colon, hyphen, or en/em dash before $; "Coordination of Supports" is common NDIS wording for cat 07
+  {
+    cat: '07',
+    name: 'Support Coordination',
+    re: /(?:Support Coordination(?:\s+and\s+Psychosocial\s+Recovery\s+Coaches)?|Coordination\s+of\s+Supports|Specialist\s+Support\s+Coordination)\s*[:\u2013\u2014-]\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i
+  },
+  { cat: '15', name: 'Improved Daily Living Skills', re: /Improved Daily Living Skills\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '12', name: 'Improved Health and Wellbeing', re: /Improved Health and Wellbeing\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '01', name: 'Assistance with Daily Life', re: /Assistance with Daily Life\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '09', name: 'Increased Social and Community Participation', re: /Increased Social and Community Participation\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '03', name: 'Consumables', re: /Consumables\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '02', name: 'Transport', re: /Transport\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '14', name: 'Choice and Control', re: /Choice and Control\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '11', name: 'Improved Relationships', re: /Improved Relationships\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '10', name: 'Finding and Keeping a Job', re: /Finding and Keeping a Job\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '08', name: 'Improved Living Arrangements', re: /Improved Living Arrangements\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '13', name: 'Improved Learning', re: /Improved Learning\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '05', name: 'Assistive Technology', re: /Assistive Technology\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  { cat: '06', name: 'Home Modifications and SDA', re: /Home Modifications(?:\s+and\s+SDA)?\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i }
+];
 
 // Extract total plan budget from document (search full text for "Total funded supports", "Total plan budget", etc.)
 function extractPlanTotalFromText(text) {
   const patterns = [
+    /(?:your\s+total\s+budget\s+amount\s+is|total\s+budget\s+amount\s+is)\s*\$?([\d,]+(?:\.\d{2})?)/i,
     /(?:total\s+funded\s+supports|total\s+plan\s+budget|plan\s+total|total\s+funding|total\s+budget|plan\s+value)\s*[:\s]*\$?([\d,]+(?:\.\d{2})?)/i,
     /\$([\d,]+(?:\.\d{2})?)\s*(?:total\s+funded\s+supports|total\s+plan|plan\s+total)/i,
     /(?:your\s+plan\s+is\s+valued\s+at|valued\s+at)\s*\$?([\d,]+(?:\.\d{2})?)/i
@@ -727,6 +837,7 @@ const CAPACITY_CATS = new Set(['07', '08', '09', '10', '11', '12', '13', '14', '
 // Parse NDIS plan from PDF - DETERMINISTIC: scan from top, find $ figure, read what it's linked to, use EXACT amount.
 // No AI for amounts - accuracy to the cent is critical.
 function parsePlanFromPdfText(text) {
+  text = normalizeNdisPlanPdfText(text);
   const budgets = [];
   const planDates = extractPlanDatesFromPdf(text);
   const total_plan_budget = extractPlanTotalFromText(text);
@@ -744,9 +855,24 @@ function parsePlanFromPdfText(text) {
   // For each amount, find which section it belongs to (last section header before the amount)
   const getSectionAt = (pos) => {
     const tl = text.toLowerCase();
-    const lastCore = Math.max(tl.lastIndexOf('total core supports', pos), tl.lastIndexOf('core supports funding', pos), tl.lastIndexOf('core supports\n', pos));
-    const lastCapBuild = Math.max(tl.lastIndexOf('total capacity building', pos), tl.lastIndexOf('capacity building supports', pos), tl.lastIndexOf('capacity building\n', pos));
-    const lastCapital = Math.max(tl.lastIndexOf('capital supports', pos), tl.lastIndexOf('assistive technology', pos), tl.lastIndexOf('home modifications', pos));
+    const lastCore = Math.max(
+      tl.lastIndexOf('total core supports', pos),
+      tl.lastIndexOf('core supports funding', pos),
+      tl.lastIndexOf('flexible core', pos),
+      tl.lastIndexOf('core supports', pos)
+    );
+    const lastCapBuild = Math.max(
+      tl.lastIndexOf('total capacity building', pos),
+      tl.lastIndexOf('capacity building supports', pos),
+      tl.lastIndexOf('capacity building', pos)
+    );
+    // Do not use "assistive technology" / "home modifications" alone: those phrases often appear in
+    // Capacity Building narrative (before Support Coordination) and would wrongly set section to capital.
+    const lastCapital = Math.max(
+      tl.lastIndexOf('capital supports', pos),
+      tl.lastIndexOf('your capital supports', pos),
+      tl.lastIndexOf('capital funding', pos)
+    );
     const best = Math.max(lastCore, lastCapBuild, lastCapital);
     if (best < 0) return null;
     if (best === lastCapital) return 'capital';
@@ -754,17 +880,14 @@ function parsePlanFromPdfText(text) {
     return 'core';
   };
 
-  const withCents = text.match(/\$[\d,]+\.\d{2}/g) || [];
-  const noCents = text.match(/\$[\d,]+(?!\.)/g) || [];
-
-  // Match $X,XXX.XX OR $X,XXX (amounts without decimals, e.g. $4,620 for category 09)
-  const amountRe = /\$([\d,]+(?:\.\d{2})?)(?=\s|$|\)|\.\s|,|;)/g;
+  // Match $X,XXX.XX OR $X,XXX (amounts without decimals, e.g. $4,620 for category 09). Allow NBSP after amount.
+  const amountRe = /\$([\d,]+(?:\.\d{2})?)(?=[\s\u00A0\u202F]|[\n\r]|$|\)|\.\s|,|;)/g;
   let m;
   while ((m = amountRe.exec(text)) !== null) {
     const amountStr = m[1];
     const amount = parseAmountExact(amountStr);
     if (amount < 1) continue;
-    const start = Math.max(0, m.index - 250);
+    const start = Math.max(0, m.index - 420);
     const preceding = text.slice(start, m.index);
     const precedingLower = preceding.toLowerCase();
     const last60 = preceding.slice(-60);
@@ -797,6 +920,18 @@ function parsePlanFromPdfText(text) {
       CORE_CATS.forEach(c => allowedCats.add(c));
       CAPITAL_CATS.forEach(c => allowedCats.add(c));
       CAPACITY_CATS.forEach(c => allowedCats.add(c));
+    }
+
+    // Cat 07 is only ever Capacity; narrative "assistive technology" etc. can misclassify section as capital.
+    const tail = precedingLower.slice(-300);
+    if (
+      /\bsupport coordination\b/.test(tail) ||
+      /\bcoordination of supports\b/.test(tail) ||
+      /\bspecialist support coordination\b/.test(tail) ||
+      /\bpsychosocial recovery coach/.test(tail) ||
+      /\bcoordination budget\b/.test(tail)
+    ) {
+      allowedCats.add('07');
     }
 
     // Match category: prefer the key that appears CLOSEST to the amount (last in preceding)
@@ -851,7 +986,47 @@ function parsePlanFromPdfText(text) {
     });
   }
 
-  if (budgets.length === 0) return { format: 'pdf', budgets: [], plan_dates: planDates, total_plan_budget, error: 'Could not extract budget from PDF. Try uploading a CSV with the breakdown.' };
+  // Second pass: explicit "Category title: $amount" (amount may start on the next line after NDIS PDF line breaks).
+  for (const rule of PDF_CATEGORY_LINE_AMOUNT_RULES) {
+    if (seen.has(rule.cat)) continue;
+    const re = new RegExp(rule.re.source, rule.re.flags.includes('i') ? rule.re.flags : `${rule.re.flags}i`);
+    const labelMatch = re.exec(text);
+    if (!labelMatch || !labelMatch[1]) continue;
+    const amount = parseAmountExact(labelMatch[1]);
+    if (amount < 1) continue;
+    const matchIdx = labelMatch.index;
+    const section = getSectionAt(matchIdx);
+    const allowedCats = new Set();
+    if (section === 'core') CORE_CATS.forEach((c) => allowedCats.add(c));
+    else if (section === 'capital') CAPITAL_CATS.forEach((c) => allowedCats.add(c));
+    else if (section === 'capacity') CAPACITY_CATS.forEach((c) => allowedCats.add(c));
+    else {
+      CORE_CATS.forEach((c) => allowedCats.add(c));
+      CAPITAL_CATS.forEach((c) => allowedCats.add(c));
+      CAPACITY_CATS.forEach((c) => allowedCats.add(c));
+    }
+    // Second-pass regex only fires on 07-specific titles; section can still be misclassified as capital.
+    if (rule.cat === '07') allowedCats.add('07');
+    if (!allowedCats.has(rule.cat)) continue;
+    const win = text.slice(matchIdx, Math.min(text.length, matchIdx + 520)).toLowerCase();
+    const statedSupportNearby = containsStatedSupport(win) || containsStatedSupport(text.slice(Math.max(0, matchIdx - 260), matchIdx));
+    if (rule.cat === '03' && section === 'core' && /(?:includes?|including)\b/i.test(text.slice(Math.max(0, matchIdx - 220), matchIdx).toLowerCase()) && !statedSupportNearby) {
+      continue;
+    }
+    seen.add(rule.cat);
+    const lineItems = (text.slice(matchIdx, matchIdx + 120).match(/\d{2}_\d{3}_\d{4}_\d_\d/g) || []);
+    budgets.push({
+      category: rule.cat,
+      name: rule.name,
+      amount,
+      line_item_numbers: lineItems,
+      management_type: 'self',
+      is_stated_support: statedSupportNearby,
+      auto_budgeted: statedSupportNearby
+    });
+  }
+
+  if (budgets.length === 0) return { format: 'pdf', budgets: [], plan_dates: planDates, total_plan_budget, error: 'Could not extract category budgets from this PDF. Ensure amounts and categories are visible (text-based PDF, not image-only).' };
   return {
     format: 'pdf',
     budgets,
@@ -2353,11 +2528,13 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
     const ext = (req.file.originalname || '').toLowerCase();
     let parsed;
     let aiFundReleaseSchedule = null;
+    let planPdfOcrUsed = false;
     if (ext.endsWith('.pdf')) {
       try {
-        const pdfParse = require('pdf-parse');
-        const data = await pdfParse(req.file.buffer);
-        const pdfText = data?.text || '';
+        const forceOcr = req.body?.ocrFirst === 'true' || req.body?.ocrFirst === true;
+        const { text: rawPlanText, ocrUsed } = await extractNdisPlanPdfText(req.file.buffer, { forceOcr });
+        planPdfOcrUsed = ocrUsed;
+        const pdfText = normalizeNdisPlanPdfText(rawPlanText);
         // Deterministic baseline (strict amounts) + optional local LLM semantic read.
         const deterministic = parsePlanFromPdfText(pdfText);
         deterministic.budgets = (deterministic.budgets || []).map((b) => ({
@@ -2399,24 +2576,36 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
           goals,
           budgets: reconciled.budgets,
           validation_warning: [
+            ocrUsed ? 'Full-page OCR was used (scanned PDF or thin text layer). Verify dollar amounts against the original document.' : null,
             deterministic.validation_warning || null,
             droppedCount > 0 ? `${droppedCount} AI entries were rejected by validation rules.` : null,
             mismatchList.length > 0 ? `${mismatchList.length} categories need review due to AI/deterministic differences.` : null
           ].filter(Boolean).join(' ')
         };
+        // Deterministic pass may set `error` when it finds no line-item budgets; reconciliation can still fill budgets from the LLM. Do not surface stale error once we have budgets.
+        if (Array.isArray(parsed.budgets) && parsed.budgets.length > 0) {
+          delete parsed.error;
+        }
       } catch (e) {
         console.error('PDF parse error:', e);
         const msg = e?.message || String(e);
-        return res.status(400).json({ error: `PDF parsing failed: ${msg}. Try uploading a CSV instead.` });
+        return res.status(400).json({ error: `PDF parsing failed: ${msg}. Ensure the file is a valid, text-extractable NDIS plan PDF.` });
       }
     } else if (ext.endsWith('.csv') || ext.endsWith('.txt')) {
       parsed = parsePlanCsv(req.file.buffer);
       parsed.budgets = (parsed.budgets || []).map((b) => ({ ...b, source: 'table', needs_review: false }));
     } else {
-      return res.status(400).json({ error: 'Upload a CSV, TXT, or PDF file' });
+      return res.status(400).json({ error: 'Upload a NDIS plan PDF' });
     }
     if (parsed.error) {
-      return res.status(400).json({ error: parsed.error });
+      const noBudgets = !Array.isArray(parsed.budgets) || parsed.budgets.length === 0;
+      if (noBudgets) {
+        const hint = useAi
+          ? ' Enable local AI (Ollama) on the server and in your user Settings, then try again. Re-export the plan from the NDIS portal as a text-based PDF if it was scanned.'
+          : ' Re-export the plan from the NDIS portal as a text-based PDF with selectable text (not a photo scan).';
+        return res.status(400).json({ error: `${parsed.error}${hint}` });
+      }
+      delete parsed.error;
     }
     const participant = db.prepare('SELECT management_type, ndia_managed_services, plan_managed_services FROM participants WHERE id = ?').get(req.params.id);
     const participantManagement = normalizeManagementType(participant?.management_type, 'self');
@@ -2533,7 +2722,8 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
       const diff = Math.abs(budgets_sum - total_plan_budget);
       const pct = (diff / total_plan_budget) * 100;
       if (pct > 1) {
-        validation_warning = `Budget total ($${budgets_sum.toLocaleString()}) does not match plan total ($${total_plan_budget.toLocaleString()}). Check for missing or incorrect categories.`;
+        const mismatchMsg = `Budget total ($${budgets_sum.toLocaleString()}) does not match plan total ($${total_plan_budget.toLocaleString()}). Check for missing or incorrect categories.`;
+        validation_warning = [validation_warning, mismatchMsg].filter(Boolean).join(' ');
       }
     }
     try {
@@ -2548,12 +2738,111 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
       total_plan_budget,
       budgets_sum,
       validation_warning,
+      ocr_used: !!planPdfOcrUsed,
       goals: Array.isArray(parsed.goals) ? parsed.goals : [],
       budgets: result,
       fund_release_schedule: aiFundReleaseSchedule
     });
   } catch (err) {
     console.error('Parse plan error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function loadBudgetsWithAllocationsForPlan(planId) {
+  const budgetRows = db.prepare('SELECT * FROM plan_budgets WHERE plan_id = ?').all(planId);
+  const budgetIds = budgetRows.map((b) => b.id);
+  const implByBudget = {};
+  if (budgetIds.length > 0) {
+    const impls = db.prepare(`
+      SELECT i.*, o.name as provider_name
+      FROM implementations i
+      LEFT JOIN organisations o ON i.provider_type = 'organisation' AND i.provider_id = o.id
+      WHERE i.budget_id IN (${budgetIds.map(() => '?').join(',')})
+    `).all(...budgetIds);
+    impls.forEach((i) => {
+      if (!implByBudget[i.budget_id]) implByBudget[i.budget_id] = [];
+      implByBudget[i.budget_id].push(i);
+    });
+  }
+  return budgetRows.map((b) => ({ ...b, allocations: implByBudget[b.id] || [] }));
+}
+
+// Plan manager monthly statement — extract spend/remaining by category and provider; optional apply to budgets + allocations
+router.post('/:id/plans/:planId/parse-plan-manager-statement', memoryUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const ext = (req.file.originalname || '').toLowerCase();
+    if (!ext.endsWith('.pdf')) {
+      return res.status(400).json({ error: 'Upload a plan manager statement PDF' });
+    }
+    const useAi = req.body?.useAi === 'true' || req.body?.useAi === true;
+    const apply = req.body?.apply === 'true' || req.body?.apply === true;
+    const forceOcr = req.body?.ocrFirst === 'true' || req.body?.ocrFirst === true;
+
+    let statementOcrUsed = false;
+    let text;
+    try {
+      const extracted = await extractNdisPlanPdfText(req.file.buffer, { forceOcr });
+      statementOcrUsed = extracted.ocrUsed;
+      text = extracted.text;
+    } catch (e) {
+      const msg = e?.message || String(e);
+      return res.status(400).json({ error: `PDF read failed: ${msg}` });
+    }
+
+    const { parsed, hints, validation_warning } = await parsePlanManagerStatementDocument(text, useAi);
+    if (!parsed?.budgets?.length) {
+      return res.status(400).json({
+        error: validation_warning || 'Could not extract category rows from this PDF. Try OCR, a text-based export, or enable local AI.',
+        hints,
+        ocr_used: statementOcrUsed
+      });
+    }
+
+    const plan = db.prepare('SELECT * FROM ndis_plans WHERE id = ? AND participant_id = ?').get(req.params.planId, req.params.id);
+    if (!plan) {
+      return res.status(404).json({ error: 'Plan not found' });
+    }
+
+    let budgetsWithAlloc = loadBudgetsWithAllocationsForPlan(req.params.planId);
+    const trends = computeStatementTrends(parsed, plan.start_date, plan.end_date);
+
+    let applyResult = null;
+    if (apply) {
+      applyResult = applyPlanManagerStatement(db, {
+        participantId: req.params.id,
+        planId: req.params.planId,
+        parsed,
+        apply: true
+      });
+      if (applyResult.budgets_updated > 0 || applyResult.implementations_updated > 0) {
+        budgetsWithAlloc = loadBudgetsWithAllocationsForPlan(req.params.planId);
+      }
+    }
+
+    const merged = mergeStatementWithLocalData(parsed, trends, budgetsWithAlloc);
+
+    try {
+      saveUploadedDocumentFromBuffer(req.params.id, req.file, req.body?.documentCategory || 'Plan manager statement');
+    } catch (uploadErr) {
+      console.error('Plan manager statement document save warning:', uploadErr);
+    }
+
+    const warnParts = [validation_warning, ...(applyResult?.warnings || [])].filter(Boolean);
+    res.json({
+      ocr_used: statementOcrUsed,
+      hints,
+      validation_warning: warnParts.length ? warnParts.join(' ') : null,
+      parsed,
+      trends,
+      merged,
+      apply_result: applyResult
+    });
+  } catch (err) {
+    console.error('parse-plan-manager-statement error:', err);
     res.status(500).json({ error: err.message });
   }
 });

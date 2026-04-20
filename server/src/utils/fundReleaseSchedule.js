@@ -157,13 +157,16 @@ export function prepareFundReleaseScheduleForStorage(input, planStart, planEnd) 
     }
   }
   if (!raw || typeof raw !== 'object') return null;
+  const pm_statement_snapshot =
+    raw.pm_statement_snapshot && typeof raw.pm_statement_snapshot === 'object' ? raw.pm_statement_snapshot : null;
   const { releases, derived, warnings, meta } = normalizeFundReleaseSchedule(raw, planStart, planEnd);
   if (!releases.length) return null;
   return JSON.stringify({
     ...meta,
     releases,
     derived_dates_used: derived,
-    warnings: warnings.length ? warnings : undefined
+    warnings: warnings.length ? warnings : undefined,
+    ...(pm_statement_snapshot ? { pm_statement_snapshot } : {})
   });
 }
 

@@ -27,6 +27,9 @@ COPY --from=builder /app/client/dist /app/client/dist
 COPY --from=builder /app/database /app/database
 COPY --from=builder /app/package.json /app/package.json
 
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /data
 
 EXPOSE 8080

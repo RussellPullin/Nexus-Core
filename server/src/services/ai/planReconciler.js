@@ -24,6 +24,7 @@ function findSectionAt(textLower, pos) {
   const lastCore = Math.max(
     textLower.lastIndexOf('total core supports', pos),
     textLower.lastIndexOf('core supports funding', pos),
+    textLower.lastIndexOf('flexible core', pos),
     textLower.lastIndexOf('core supports', pos)
   );
   const lastCapBuild = Math.max(
@@ -33,8 +34,8 @@ function findSectionAt(textLower, pos) {
   );
   const lastCapital = Math.max(
     textLower.lastIndexOf('capital supports', pos),
-    textLower.lastIndexOf('assistive technology', pos),
-    textLower.lastIndexOf('home modifications', pos)
+    textLower.lastIndexOf('your capital supports', pos),
+    textLower.lastIndexOf('capital funding', pos)
   );
   const best = Math.max(lastCore, lastCapBuild, lastCapital);
   if (best < 0) return null;
@@ -110,7 +111,10 @@ export function reconcilePlanExtraction({ text, deterministicBudgets, llmBudgets
     }
 
     const section = findSectionAt(textLower, evidencePos);
-    if (!sectionAllows(section, category)) {
+    const coordinationEvidence =
+      category === '07' &&
+      /\bsupport coordination\b|\bcoordination of supports\b|\bspecialist support coordination\b/i.test(evidenceLower);
+    if (!coordinationEvidence && !sectionAllows(section, category)) {
       dropped.push({ category, reason: `category_not_allowed_in_${section || 'unknown'}_section` });
       continue;
     }

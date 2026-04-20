@@ -108,6 +108,12 @@ export default function ParticipantProfile() {
   const [planBreakdownParsed, setPlanBreakdownParsed] = useState(null);
   const [planBreakdownLoading, setPlanBreakdownLoading] = useState(false);
   const [planBreakdownApplyForm, setPlanBreakdownApplyForm] = useState({ start_date: '', end_date: '', is_pace: false });
+  const [planUploadForceOcr, setPlanUploadForceOcr] = useState(false);
+  const [planStatementPlanId, setPlanStatementPlanId] = useState('');
+  const [planStatementParsed, setPlanStatementParsed] = useState(null);
+  const [planStatementLoading, setPlanStatementLoading] = useState(false);
+  const [planStatementUseAi, setPlanStatementUseAi] = useState(true);
+  const [planStatementOcr, setPlanStatementOcr] = useState(false);
   const [showAllocationModal, setShowAllocationModal] = useState(false);
   const [allocationForm, setAllocationForm] = useState({ source: null, budget_id: '', budget_index: null, budget_name: '', budget_category: '', budget_amount: 0, provider_id: '', new_provider_name: '', ndis_line_item_id: '', hours_per_week: '', amount: '', frequency: 'weekly', service_name_choice: '', service_name_custom: '', service_name: '', description: '', scenario_shift_hours: 3 });
   const [editingAllocation, setEditingAllocation] = useState(null);
@@ -134,6 +140,17 @@ export default function ParticipantProfile() {
     if (v === 'ndia') return 'NDIA-managed';
     return 'Self-managed';
   };
+
+  useEffect(() => {
+    setPlanStatementParsed(null);
+  }, [id]);
+
+  useEffect(() => {
+    if (!data?.plans?.length) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const cur = data.plans.find((p) => p.start_date <= today && p.end_date >= today) || data.plans[0];
+    setPlanStatementPlanId((prev) => (prev && data.plans.some((p) => p.id === prev) ? prev : cur?.id || ''));
+  }, [data?.plans]);
 
   const load = async () => {
     setLoading(true);
@@ -259,7 +276,7 @@ export default function ParticipantProfile() {
       .catch(() => setNdisItemsForConfig([]));
   }, [showBudgetConfigModal, budgetConfigForm.category]);
 
-  // Auto-fill apply form dates from parsed plan dates (PDF or CSV)
+  // Auto-fill apply form dates from parsed plan dates (PDF)
   useEffect(() => {
     const pd = planBreakdownParsed?.plan_dates;
     if (!pd?.start_date && !pd?.end_date) return;
@@ -431,13 +448,33 @@ export default function ParticipantProfile() {
     }
   };
 
+  const handlePlanStatementUpload = async (e, apply) => {
+    const file = e.target.files?.[0];
+    if (!file || !planStatementPlanId) return;
+    setPlanStatementLoading(true);
+    setPlanStatementParsed(null);
+    try {
+      const result = await participants.parsePlanManagerStatement(id, planStatementPlanId, file, planStatementUseAi, apply, planStatementOcr);
+      setPlanStatementParsed(result);
+      if (apply) {
+        await load();
+        participants.budgetUtilization(id).then(setBudgetUtilization).catch(() => {});
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setPlanStatementLoading(false);
+      e.target.value = '';
+    }
+  };
+
   const handlePlanFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setPlanBreakdownLoading(true);
     setPlanBreakdownParsed(null);
     try {
-      const result = await participants.parsePlan(id, file, true);
+      const result = await participants.parsePlan(id, file, true, planUploadForceOcr);
       setPlanBreakdownParsed({
         ...result,
         goals: Array.isArray(result?.goals) ? result.goals : [],
@@ -1240,16 +1277,177 @@ export default function ParticipantProfile() {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
             <h3>NDIS Plans</h3>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#475569', marginRight: '0.25rem' }}>
+                <input
+                  type="checkbox"
+                  checked={planUploadForceOcr}
+                  onChange={(e) => setPlanUploadForceOcr(e.target.checked)}
+                  disabled={planBreakdownLoading}
+                />
+                Scanned PDF — full-page OCR
+              </label>
               <label className="btn btn-primary" style={{ marginBottom: 0, cursor: 'pointer' }}>
-                {planBreakdownLoading ? 'Parsing...' : 'Upload plan (CSV/PDF)'}
-                <input type="file" accept=".csv,.txt,.pdf" onChange={handlePlanFileUpload} disabled={planBreakdownLoading} style={{ display: 'none' }} />
+                {planBreakdownLoading ? 'Parsing…' : 'Upload plan (PDF)'}
+                <input type="file" accept=".pdf,application/pdf" onChange={handlePlanFileUpload} disabled={planBreakdownLoading} style={{ display: 'none' }} />
               </label>
               <button className="btn btn-secondary" onClick={() => setShowPlanModal(true)}>Add plan manually</button>
             </div>
           </div>
           <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '1rem' }}>
-            Upload a plan CSV or PDF to auto-extract budgets. Deterministic parsing is validated against local AI evidence before apply.
+            Upload the participant&apos;s NDIS plan as a PDF. Text is read from the file; if the plan is a scan or has little selectable text, the server rasterizes pages and runs OCR (requires poppler on the server). Check &quot;Scanned PDF&quot; to always run OCR on every page. Budgets and goals use deterministic rules; local AI is optional when available.
           </p>
+
+          <div style={{ marginBottom: '1.25rem', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fafafa' }}>
+            <h4 style={{ margin: '0 0 0.5rem 0' }}>Plan manager statement</h4>
+            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.75rem', lineHeight: 1.45 }}>
+              Monthly plan-manager statements show remaining funding by category and spending by provider. Use the same PDF text pipeline as plan upload (optional full-page OCR). Preview parses only; Parse &amp; apply sets each category budget to the <strong>remaining</strong> amount from the statement and records matched providers&apos; spend on coordinator allocations (stored on each allocation&apos;s details). Providers on the statement with no matching allocation still appear under the category. Trends estimate daily burn from the statement period and project when funds may run out.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.65rem' }}>
+              <label style={{ fontSize: '0.82rem', color: '#475569' }}>
+                Plan:
+                <select
+                  value={planStatementPlanId}
+                  onChange={(e) => setPlanStatementPlanId(e.target.value)}
+                  style={{ marginLeft: '0.35rem', padding: '0.25rem 0.4rem', maxWidth: 280 }}
+                >
+                  {(data?.plans || []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {formatDate(p.start_date)} – {formatDate(p.end_date)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#475569' }}>
+                <input type="checkbox" checked={planStatementUseAi} onChange={(e) => setPlanStatementUseAi(e.target.checked)} disabled={planStatementLoading} />
+                Local AI (recommended)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', color: '#475569' }}>
+                <input type="checkbox" checked={planStatementOcr} onChange={(e) => setPlanStatementOcr(e.target.checked)} disabled={planStatementLoading} />
+                Force OCR
+              </label>
+              <label className="btn btn-secondary" style={{ marginBottom: 0, cursor: planStatementLoading || !planStatementPlanId ? 'not-allowed' : 'pointer', opacity: planStatementLoading || !planStatementPlanId ? 0.6 : 1 }}>
+                {planStatementLoading ? 'Working…' : 'Preview statement'}
+                <input
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  disabled={planStatementLoading || !planStatementPlanId}
+                  onChange={(e) => handlePlanStatementUpload(e, false)}
+                  style={{ display: 'none' }}
+                />
+              </label>
+              <label className="btn btn-primary" style={{ marginBottom: 0, cursor: planStatementLoading || !planStatementPlanId ? 'not-allowed' : 'pointer', opacity: planStatementLoading || !planStatementPlanId ? 0.6 : 1 }}>
+                Parse &amp; apply
+                <input
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  disabled={planStatementLoading || !planStatementPlanId}
+                  onChange={(e) => handlePlanStatementUpload(e, true)}
+                  style={{ display: 'none' }}
+                />
+              </label>
+            </div>
+            {planStatementParsed && (
+              <div style={{ marginTop: '0.75rem', fontSize: '0.82rem' }}>
+                {planStatementParsed.ocr_used && (
+                  <div style={{ color: '#166534', marginBottom: '0.35rem' }}>OCR was used — verify dollar amounts against the original PDF.</div>
+                )}
+                {planStatementParsed.validation_warning && (
+                  <div style={{ padding: '0.5rem', background: '#fef3c7', color: '#92400e', borderRadius: 6, marginBottom: '0.5rem' }}>
+                    {planStatementParsed.validation_warning}
+                  </div>
+                )}
+                {planStatementParsed.apply_result && (
+                  <div style={{ marginBottom: '0.5rem', color: '#475569' }}>
+                    Apply: {planStatementParsed.apply_result.budgets_updated} budget(s) updated, {planStatementParsed.apply_result.implementations_updated} allocation(s) tagged with statement spend.
+                  </div>
+                )}
+                {planStatementParsed.merged?.plan_total?.from_statement && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', marginBottom: '0.5rem' }}>
+                    {planStatementParsed.merged.plan_total.from_statement.remaining != null && (
+                      <span><strong>Plan total remaining (statement):</strong> ${Number(planStatementParsed.merged.plan_total.from_statement.remaining).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</span>
+                    )}
+                    {planStatementParsed.merged.plan_total.from_statement.spent != null && (
+                      <span><strong>Plan total spent (statement):</strong> ${Number(planStatementParsed.merged.plan_total.from_statement.spent).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</span>
+                    )}
+                  </div>
+                )}
+                {planStatementParsed.merged?.plan_total?.trends?.projected_plan_depletion_date && (
+                  <div style={{ marginBottom: '0.5rem', color: '#334155' }}>
+                    <strong>Plan-wide trend:</strong> ~${Number(planStatementParsed.merged.plan_total.trends.avg_daily_spend_plan_to_date || 0).toFixed(2)}/day to date → if spending continues, remaining funds may last until{' '}
+                    {formatDate(planStatementParsed.merged.plan_total.trends.projected_plan_depletion_date)} (indicative).
+                  </div>
+                )}
+                {planStatementParsed.merged?.funding_release?.from_statement && (
+                  <div style={{ marginBottom: '0.5rem', padding: '0.5rem', background: '#f1f5f9', borderRadius: 6 }}>
+                    <strong>Funding release (statement):</strong>{' '}
+                    {planStatementParsed.merged.funding_release.from_statement.label || 'Current period'}
+                    {planStatementParsed.merged.funding_release.from_statement.remaining != null && (
+                      <> — remaining ${Number(planStatementParsed.merged.funding_release.from_statement.remaining).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</>
+                    )}
+                    {planStatementParsed.merged.funding_release.trends?.projected_release_depletion_date && (
+                      <span style={{ marginLeft: '0.5rem' }}>
+                        (trend: ~${Number(planStatementParsed.merged.funding_release.trends.avg_daily_spend || 0).toFixed(2)}/day in period → ~{formatDate(planStatementParsed.merged.funding_release.trends.projected_release_depletion_date)})
+                      </span>
+                    )}
+                  </div>
+                )}
+                {(planStatementParsed.merged?.rows || []).length > 0 && (
+                  <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    {planStatementParsed.merged.rows.map((row) => (
+                      <div key={row.category} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.6rem 0.75rem', background: '#fff' }}>
+                        <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                          {row.category} — {row.category_label}
+                          {row.local_budget_name && <span style={{ fontWeight: 400, color: '#64748b' }}> ({row.local_budget_name})</span>}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#475569', marginBottom: '0.35rem' }}>
+                          Statement: remaining{' '}
+                          {row.statement_remaining != null ? `$${Number(row.statement_remaining).toLocaleString('en-AU', { minimumFractionDigits: 2 })}` : '—'}
+                          {' · '}spent{' '}
+                          {row.statement_spent != null ? `$${Number(row.statement_spent).toLocaleString('en-AU', { minimumFractionDigits: 2 })}` : '—'}
+                          {row.local_amount_before != null && (
+                            <span> · local budget before apply: ${Number(row.local_amount_before).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</span>
+                          )}
+                        </div>
+                        {row.trends?.projected_depletion_date && row.statement_remaining != null && (
+                          <div style={{ fontSize: '0.76rem', color: '#64748b', marginBottom: '0.35rem' }}>
+                            Trend: ~${Number(row.trends.avg_daily_spend_statement_period || 0).toFixed(2)}/day (statement period) → remaining may last until {formatDate(row.trends.projected_depletion_date)} (indicative).
+                          </div>
+                        )}
+                        {(row.provider_rows || []).length > 0 && (
+                          <div style={{ marginTop: '0.35rem' }}>
+                            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: '#94a3b8' }}>Providers (matched to allocations)</div>
+                            <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0 }}>
+                              {row.provider_rows.map((pr) => (
+                                <li key={`${row.category}-${pr.allocation_id}`} style={{ marginBottom: '0.15rem' }}>
+                                  {pr.provider_name || pr.provider_statement_name}: statement spend ${Number(pr.statement_spend).toLocaleString('en-AU', { minimumFractionDigits: 2 })}
+                                  {pr.coordinator_annual_allocation != null && (
+                                    <span style={{ color: '#64748b' }}> · coordinator allocation ${Number(pr.coordinator_annual_allocation).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {(row.providers_not_matched_to_allocations || []).length > 0 && (
+                          <div style={{ marginTop: '0.35rem' }}>
+                            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: '#94a3b8' }}>Statement providers (no allocation match)</div>
+                            <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0 }}>
+                              {row.providers_not_matched_to_allocations.map((u) => (
+                                <li key={u.name}>
+                                  {u.name}: ${Number(u.spent).toLocaleString('en-AU', { minimumFractionDigits: 2 })}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {planBreakdownParsed && planBreakdownParsed.budgets?.length > 0 && (
             <div style={{ border: '1px solid #22c55e', borderRadius: 8, padding: '1rem', marginBottom: '1rem', background: '#f0fdf4' }}>
               <div style={{ marginBottom: '1rem', padding: '0.5rem', background: '#dcfce7', borderRadius: 6, fontSize: '0.95rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
@@ -1260,6 +1458,9 @@ export default function ParticipantProfile() {
                   <span><strong>Plan total (from document):</strong> ${planBreakdownParsed.total_plan_budget.toLocaleString()}</span>
                 )}
                 <span><strong>Breakdown total:</strong> ${planBreakdownParsed.budgets.reduce((s, b) => s + (b.amount || 0), 0).toLocaleString()}</span>
+                {planBreakdownParsed.ocr_used && (
+                  <span style={{ color: '#166534' }}><strong>OCR:</strong> full-page text extraction (verify figures)</span>
+                )}
               </div>
               {(() => {
                 const sum = planBreakdownParsed.budgets.reduce((s, b) => s + (b.amount || 0), 0);

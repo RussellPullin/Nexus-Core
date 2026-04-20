@@ -222,11 +222,26 @@ export const participants = {
   updateImplementation: (id, planId, implId, data) => fetchApi(`/participants/${id}/plans/${planId}/implementations/${implId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteImplementation: (id, planId, implId) => fetchApi(`/participants/${id}/plans/${planId}/implementations/${implId}`, { method: 'DELETE' }),
   budgetUtilization: (id) => fetchApi(`/participants/${id}/budget-utilization`),
-  parsePlan: async (id, file, useAi = true) => {
+  parsePlan: async (id, file, useAi = true, ocrFirst = false) => {
     const form = new FormData();
     form.append('file', file);
     form.append('useAi', useAi ? 'true' : 'false');
+    if (ocrFirst) form.append('ocrFirst', 'true');
     const res = await fetch(`${API}/participants/${id}/parse-plan`, { method: 'POST', body: form, credentials: 'include' });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Parse failed');
+    }
+    return text ? JSON.parse(text) : null;
+  },
+  parsePlanManagerStatement: async (participantId, planId, file, useAi = true, apply = false, ocrFirst = false) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('useAi', useAi ? 'true' : 'false');
+    form.append('apply', apply ? 'true' : 'false');
+    if (ocrFirst) form.append('ocrFirst', 'true');
+    const res = await postMultipartWithSessionRetry(`/participants/${participantId}/plans/${planId}/parse-plan-manager-statement`, form);
     const text = await res.text();
     if (!res.ok) {
       const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
