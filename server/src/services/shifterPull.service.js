@@ -412,50 +412,27 @@ function mapShifterRowToWebhookShift(row, lookups = null, tzSpec = null) {
   const isNexusShiftsRow =
     !!row &&
     typeof row === 'object' &&
-    (Object.prototype.hasOwnProperty.call(row, 'nexus_org_id') ||
+    (Object.prototype.hasOwnProperty.call(row, 'local_date') ||
+      Object.prototype.hasOwnProperty.call(row, 'local_start_time') ||
+      Object.prototype.hasOwnProperty.call(row, 'local_end_time') ||
+      Object.prototype.hasOwnProperty.call(row, 'nexus_org_id') ||
       Object.prototype.hasOwnProperty.call(row, 'nexus_org') ||
       Object.prototype.hasOwnProperty.call(row, 'nexuscore_org_id') ||
       Object.prototype.hasOwnProperty.call(row, 'nexuscore_shift_id'));
 
-  // For nexus_shifts, prefer explicit local date/time fields when present.
+  // For nexus_shifts, prefer explicit local date/time fields.
   const date = isNexusShiftsRow
-    ? toIsoDate(
-        pickString(row, ['shift_date', 'local_date', 'date_local', 'date', 'support_date']) ||
-          dateFromDateOrTimestamp(row, tzSpec),
-      )
+    ? toIsoDate(pickString(row, ['local_date', 'shift_date', 'support_date', 'date_local', 'date']) || '')
     : dateFromDateOrTimestamp(row, tzSpec);
 
   const startTime = isNexusShiftsRow
-    ? toHm(
-        pickString(row, [
-          'start_time_local',
-          'local_start_time',
-          'start_local',
-          'scheduled_start_local',
-          'start_time',
-          'scheduled_start',
-          'start_at',
-        ]),
-        tzSpec,
-      ) || '09:00'
+    ? toHm(pickString(row, ['local_start_time', 'start_time_local', 'start_time', 'scheduled_start_time', 'scheduled_start']), tzSpec) ||
+      '09:00'
     : toHm(pickString(row, ['start_time', 'scheduled_start', 'start_at']), tzSpec) || '09:00';
 
   const finishTime = isNexusShiftsRow
-    ? toHm(
-        pickString(row, [
-          'end_time_local',
-          'finish_time_local',
-          'local_finish_time',
-          'local_end_time',
-          'finish_local',
-          'end_local',
-          'scheduled_end_local',
-          'end_time',
-          'scheduled_end',
-          'end_at',
-        ]),
-        tzSpec,
-      ) || '17:00'
+    ? toHm(pickString(row, ['local_end_time', 'end_time_local', 'end_time', 'scheduled_end_time', 'scheduled_end', 'finish_time']), tzSpec) ||
+      '17:00'
     : toHm(pickString(row, ['end_time', 'scheduled_end', 'end_at']), tzSpec) || '17:00';
   let staffName = pickString(row, ['staff_name', 'worker_name', 'carer_name']);
   if (!staffName && profileById?.size) {

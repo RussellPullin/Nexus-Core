@@ -82,7 +82,7 @@ function getNonProviderKmItemForCategory(cat, thirdCodeGroup) {
       .prepare(
         `
         SELECT id, rate FROM ndis_line_items
-        WHERE support_item_number LIKE ?
+        WHERE support_item_number GLOB ?
           AND support_item_number NOT LIKE '%_799_%'
           AND support_item_number NOT LIKE '02_051%'
           AND (
@@ -96,21 +96,21 @@ function getNonProviderKmItemForCategory(cat, thirdCodeGroup) {
         ORDER BY support_item_number LIMIT 1
       `
       )
-      .get(`${cat}\\_%\\_${thirdCodeGroup}\\_%`);
+      .get(`${cat}_*_${thirdCodeGroup}_*`);
     if (explicitKmMatchingThird) return explicitKmMatchingThird;
 
     const fallback799MatchingThird = db
       .prepare(
         `
         SELECT id, rate FROM ndis_line_items
-        WHERE support_item_number LIKE ?
+        WHERE support_item_number GLOB ?
           AND support_item_number LIKE '%_799_%'
           AND support_item_number NOT LIKE '02_051%'
           AND (LOWER(unit) = 'each' OR LOWER(description) LIKE '%travel%')
         ORDER BY support_item_number LIMIT 1
       `
       )
-      .get(`${cat}\\_%\\_${thirdCodeGroup}\\_%`);
+      .get(`${cat}_*_${thirdCodeGroup}_*`);
     if (fallback799MatchingThird) return fallback799MatchingThird;
   }
 
@@ -205,10 +205,15 @@ export function supplementShiftTravelLineItemsFromProgressNote(shiftId) {
   `).get(shiftId);
   if (!progressNote) return;
 
+  // Don't mutate historical billed shifts.
+  const billed = db
+    .prepare(`SELECT billing_invoice_id FROM shifts WHERE id = ?`)
+    .get(shiftId);
+  if (billed?.billing_invoice_id) return;
+
   const existing = db.prepare('SELECT claim_type FROM shift_line_items WHERE shift_id = ?').all(shiftId);
   const hasProviderTravel = existing.some((r) => r.claim_type === 'provider_travel');
   const hasParticipantTravel = existing.some((r) => r.claim_type === 'participant_travel');
-  if (hasProviderTravel && hasParticipantTravel) return;
 
   const shift = db.prepare('SELECT start_time, end_time FROM shifts WHERE id = ?').get(shiftId);
   const lineItem = getDefaultLineItemForParticipant(
@@ -229,17 +234,36 @@ export function supplementShiftTravelLineItemsFromProgressNote(shiftId) {
   }
 
   const travelKmVal = parseTravelKm(progressNote.travel_km);
-  if (travelKmVal > 0 && !hasParticipantTravel) {
+  if (travelKmVal > 0) {
     const meta = getMainItemMeta(lineItem.id);
     const cat = getTravelCategoryFromMainItemMeta(meta);
     const third = getThirdCodeGroupFromSupportItemNumber(meta?.support_item_number);
     const travelKmItem = getNonProviderKmItemForCategory(cat, third);
     if (travelKmItem) {
       const qty = Math.round(travelKmVal * 100) / 100;
-      db.prepare(`
-        INSERT INTO shift_line_items (id, shift_id, ndis_line_item_id, quantity, unit_price, claim_type)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(uuidv4(), shiftId, travelKmItem.id, qty, travelKmItem.rate, 'participant_travel');
+      if (!hasParticipantTravel) {
+        db.prepare(`
+          INSERT INTO shift_line_items (id, shift_id, ndis_line_item_id, quantity, unit_price, claim_type)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(uuidv4(), shiftId, travelKmItem.id, qty, travelKmItem.rate, 'participant_travel');
+      } else {
+        // If a participant_travel row exists but uses the wrong km item code, correct it in-place.
+        const existingRows = db
+          .prepare(
+            `SELECT id, ndis_line_item_id
+             FROM shift_line_items
+             WHERE shift_id = ? AND claim_type = 'participant_travel'`
+          )
+          .all(shiftId);
+        const needsUpdate = existingRows.some((r) => r.ndis_line_item_id !== travelKmItem.id);
+        if (needsUpdate) {
+          db.prepare(
+            `UPDATE shift_line_items
+             SET ndis_line_item_id = ?, unit_price = ?, quantity = ?
+             WHERE shift_id = ? AND claim_type = 'participant_travel'`
+          ).run(travelKmItem.id, travelKmItem.rate, qty, shiftId);
+        }
+      }
     }
   }
 }
