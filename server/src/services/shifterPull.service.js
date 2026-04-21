@@ -1,11 +1,31 @@
 import {
   getShifterServiceRoleClient,
   resolveEffectiveShifterOrgIdForNexusOrg,
+  getShifterOrgTimezoneSpecForNexusOrg,
 } from './supabaseStaffShifter.service.js';
 import { agentDebugIngest460342 } from '../lib/debugAgent460342.js';
+import { DateTime, FixedOffsetZone } from 'luxon';
 
-const SHIFT_TABLE_CANDIDATES = ['shifts'];
+// Prefer nexus_shifts when available: it is normalized for Nexus (correct start/finish + travel fields).
+const SHIFT_TABLE_CANDIDATES = ['nexus_shifts', 'shifts'];
+// Some Shifter deployments store travel/time/km in a separate "captured shift data" table.
+// We probe a few common names and merge captured fields into the base shift rows.
+const CAPTURE_TABLE_CANDIDATES = [
+  'captured_shift_data',
+  'captured_shift_datas',
+  'captured_shifts',
+  'shift_captures',
+  'shift_capture',
+  'captured_shift',
+  'captured_shifts_data',
+  'captured_shift_records',
+  'captured_shift_record',
+];
 const ORG_COLUMN_CANDIDATES = [
+  // nexus_shifts commonly has nexus-org scoping
+  'nexus_org_id',
+  'nexuscore_org_id',
+  'nexus_org',
   'org',
   'org_id',
   'organization_id',
@@ -60,21 +80,51 @@ function toIsoDate(value) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function toHm(value) {
+function tzSpecToLuxonZone(tzSpec) {
+  if (!tzSpec) return null;
+  if (tzSpec.kind === 'iana' && tzSpec.zone) return tzSpec.zone;
+  if (tzSpec.kind === 'fixed' && Number.isFinite(tzSpec.offsetMinutes)) {
+    return FixedOffsetZone.instance(tzSpec.offsetMinutes);
+  }
+  return null;
+}
+
+function toIsoDateInZone(value, tzSpec) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const yyyyMmDd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (yyyyMmDd) return `${yyyyMmDd[1]}-${yyyyMmDd[2]}-${yyyyMmDd[3]}`;
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slash) return `${slash[3]}-${slash[2].padStart(2, '0')}-${slash[1].padStart(2, '0')}`;
+
+  const zone = tzSpecToLuxonZone(tzSpec);
+  if (zone) {
+    const dt = DateTime.fromISO(raw, { zone: 'utc' });
+    if (dt.isValid) return dt.setZone(zone).toFormat('yyyy-LL-dd');
+  }
+  return toIsoDate(raw);
+}
+
+function toHm(value, tzSpec) {
   const raw = String(value || '').trim();
   if (!raw) return '';
   const m = raw.match(/(\d{1,2}):(\d{2})/);
   if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+  const zone = tzSpecToLuxonZone(tzSpec);
+  if (zone) {
+    const dt = DateTime.fromISO(raw, { zone: 'utc' });
+    if (dt.isValid) return dt.setZone(zone).toFormat('HH:mm');
+  }
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return '';
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function dateFromDateOrTimestamp(row) {
+function dateFromDateOrTimestamp(row, tzSpec) {
   const fromDateField = pickString(row, ['date', 'shift_date', 'support_date']);
   if (fromDateField) return toIsoDate(fromDateField);
   const fromTs = pickString(row, ['scheduled_start', 'start_time', 'start_at']);
-  return toIsoDate(fromTs);
+  return toIsoDateInZone(fromTs, tzSpec);
 }
 
 function mapTravelKm(row) {
@@ -219,6 +269,96 @@ function collectShiftIdsForProgressNotes(rows) {
   return ids;
 }
 
+function collectShiftIdsForCaptureLookup(mappedShifts) {
+  const ids = [];
+  for (const s of mappedShifts || []) {
+    const sid = String(s?.shiftId || '').trim();
+    if (sid && isUuidString(sid)) ids.push(sid);
+  }
+  return [...new Set(ids)];
+}
+
+function captureShiftIdFromRow(row) {
+  return pickString(row, [
+    'shift_id',
+    'shifts_id',
+    'parent_shift_id',
+    'source_shift_id',
+    'external_shift_id',
+    'nexuscore_shift_id',
+    'nexus_shift_id',
+    'shiftId',
+  ]);
+}
+
+function mergeCapturedFieldsIntoShift(mappedShift, capturedRow) {
+  if (!mappedShift || !capturedRow) return mappedShift;
+  const next = { ...mappedShift };
+
+  const km = mapTravelKm(capturedRow);
+  if (next.travelKm == null && km != null) next.travelKm = km;
+
+  const mins = mapTravelTimeMinutes(capturedRow);
+  if (next.travelTimeMinutes == null && mins != null) next.travelTimeMinutes = mins;
+
+  // Some schemas store expenses on capture rows.
+  const exp = toNumberOrNull(capturedRow?.expenses);
+  if (next.expenses == null && exp != null) next.expenses = exp;
+
+  const notes = pickString(capturedRow, [
+    'session_details',
+    'session_notes',
+    'completion_notes',
+    'notes',
+  ]);
+  if (!next.sessionDetails && notes) next.sessionDetails = notes;
+
+  return next;
+}
+
+async function fetchCapturedShiftDataByShiftIds(shifterAdmin, shiftIds, logWarn) {
+  const unique = [...new Set((shiftIds || []).filter((id) => isUuidString(String(id))))];
+  if (unique.length === 0 || !shifterAdmin) return { table: null, byShiftId: new Map() };
+
+  let best = { table: null, byShiftId: new Map() };
+
+  for (const table of CAPTURE_TABLE_CANDIDATES) {
+    const byShiftId = new Map();
+    let anyOk = false;
+
+    for (let i = 0; i < unique.length; i += LOOKUP_CHUNK) {
+      const chunk = unique.slice(i, i + LOOKUP_CHUNK);
+      // Try common foreign key column names; first one that works wins for this table.
+      const fkCols = ['shift_id', 'shifts_id', 'parent_shift_id', 'source_shift_id', 'external_shift_id', 'nexuscore_shift_id'];
+      let chunkRows = null;
+      for (const fk of fkCols) {
+        const { data, error } = await shifterAdmin.from(table).select('*').in(fk, chunk).limit(10000);
+        if (error) continue;
+        chunkRows = data || [];
+        anyOk = true;
+        break;
+      }
+      if (!anyOk) {
+        if (logWarn) logWarn('Shifter captured shift lookup failed', { table, message: 'no_matching_fk_column' });
+        byShiftId.clear();
+        break;
+      }
+
+      for (const row of chunkRows || []) {
+        const sid = captureShiftIdFromRow(row);
+        if (!sid) continue;
+        if (!byShiftId.has(sid)) byShiftId.set(sid, row);
+      }
+    }
+
+    if (anyOk && byShiftId.size > best.byShiftId.size) {
+      best = { table, byShiftId };
+    }
+  }
+
+  return best;
+}
+
 /**
  * Shifter mobile stores completion narrative in public.progress_notes.notes, not on shifts.session_details.
  * Latest note per shift wins (ordered by created_at DESC).
@@ -262,15 +402,16 @@ async function buildShiftRowNameLookups(shifterAdmin, rows, logWarn) {
   return { profileById, clientById, progressNoteByShiftId };
 }
 
-function mapShifterRowToWebhookShift(row, lookups = null) {
+function mapShifterRowToWebhookShift(row, lookups = null, tzSpec = null) {
   const profileById = lookups?.profileById;
   const clientById = lookups?.clientById;
   const progressNoteByShiftId = lookups?.progressNoteByShiftId;
 
-  const shiftId = pickString(row, ['shift_id', 'id', 'external_shift_id']);
-  const date = dateFromDateOrTimestamp(row);
-  const startTime = toHm(pickString(row, ['start_time', 'scheduled_start', 'start_at'])) || '09:00';
-  const finishTime = toHm(pickString(row, ['end_time', 'scheduled_end', 'end_at'])) || '17:00';
+  // nexus_shifts often stores the Nexus shift id under nexuscore_shift_id.
+  const shiftId = pickString(row, ['nexuscore_shift_id', 'shift_id', 'id', 'external_shift_id']);
+  const date = dateFromDateOrTimestamp(row, tzSpec);
+  const startTime = toHm(pickString(row, ['start_time', 'scheduled_start', 'start_at']), tzSpec) || '09:00';
+  const finishTime = toHm(pickString(row, ['end_time', 'scheduled_end', 'end_at']), tzSpec) || '17:00';
   let staffName = pickString(row, ['staff_name', 'worker_name', 'carer_name']);
   if (!staffName && profileById?.size) {
     const wid = pickString(row, ['worker_id', 'user_id', 'staff_id']);
@@ -374,6 +515,14 @@ export async function pullShiftsFromShifterSupabase(options = {}) {
     throw new Error('Could not resolve Shifter org id for this Nexus organisation');
   }
 
+  let tzSpec = null;
+  try {
+    tzSpec = await getShifterOrgTimezoneSpecForNexusOrg(nexusOrgId);
+  } catch (e) {
+    logWarn('Failed to resolve org timezone for Shifter pull; using raw timestamps', { message: e?.message || String(e) });
+    tzSpec = null;
+  }
+
   let pulledRows = [];
   let matchedTable = null;
   let matchedOrgCol = null;
@@ -382,7 +531,11 @@ export async function pullShiftsFromShifterSupabase(options = {}) {
 
   for (const table of SHIFT_TABLE_CANDIDATES) {
     for (const orgCol of ORG_COLUMN_CANDIDATES) {
-      const result = await fetchRowsByOrgFromTable(shifterAdmin, table, orgCol, shifterOrgId, limit);
+      const scopedOrgId =
+        table === 'nexus_shifts' && /nexus/i.test(String(orgCol || ''))
+          ? String(nexusOrgId)
+          : String(shifterOrgId);
+      const result = await fetchRowsByOrgFromTable(shifterAdmin, table, orgCol, scopedOrgId, limit);
       if (!result.ok) {
         lastError = result.error;
         continue;
@@ -416,7 +569,22 @@ export async function pullShiftsFromShifterSupabase(options = {}) {
   }
 
   const lookups = await buildShiftRowNameLookups(shifterAdmin, pulledRows, logWarn);
-  const mapped = pulledRows.map((row) => mapShifterRowToWebhookShift(row, lookups));
+  let mapped = pulledRows.map((row) => mapShifterRowToWebhookShift(row, lookups, tzSpec));
+
+  // If travel/time/km were stored in a separate "captured shift data" table, merge them in.
+  // This is important for Nexus billing because travel charges are created from travelKm/travelTimeMinutes.
+  try {
+    const shiftIds = collectShiftIdsForCaptureLookup(mapped);
+    const captured = await fetchCapturedShiftDataByShiftIds(shifterAdmin, shiftIds, logWarn);
+    if (captured?.byShiftId?.size) {
+      mapped = mapped.map((s) => {
+        const row = captured.byShiftId.get(s.shiftId);
+        return row ? mergeCapturedFieldsIntoShift(s, row) : s;
+      });
+    }
+  } catch (e) {
+    if (logWarn) logWarn('Shifter captured shift merge failed', { message: e?.message || String(e) });
+  }
   const filteredByDate = mapped.filter((s) => dateInRange(s.date, fromDate, toDate));
   const valid = filteredByDate.filter((s) => s.shiftId && s.date);
   const skipped = filteredByDate.length - valid.length;
@@ -487,10 +655,14 @@ export async function debugShifterShiftsByOrg(options = {}) {
   const candidates = [];
   for (const table of SHIFT_TABLE_CANDIDATES) {
     for (const orgCol of ORG_COLUMN_CANDIDATES) {
+      const scopedOrgId =
+        table === 'nexus_shifts' && /nexus/i.test(String(orgCol || ''))
+          ? String(nexusOrgId)
+          : String(shifterOrgId);
       const { data, error, count } = await shifterAdmin
         .from(table)
         .select('*', { count: 'exact' })
-        .eq(orgCol, shifterOrgId)
+        .eq(orgCol, scopedOrgId)
         .limit(limit);
 
       if (error) {
@@ -505,7 +677,13 @@ export async function debugShifterShiftsByOrg(options = {}) {
 
       const rows = data || [];
       const lookups = await buildShiftRowNameLookups(shifterAdmin, rows, logWarn);
-      const mapped = rows.map((row) => mapShifterRowToWebhookShift(row, lookups));
+      let tzSpec = null;
+      try {
+        tzSpec = await getShifterOrgTimezoneSpecForNexusOrg(nexusOrgId);
+      } catch {
+        tzSpec = null;
+      }
+      const mapped = rows.map((row) => mapShifterRowToWebhookShift(row, lookups, tzSpec));
       candidates.push({
         table,
         org_column: orgCol,
