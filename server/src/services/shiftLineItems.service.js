@@ -40,13 +40,31 @@ export function parseTravelKm(val) {
 /**
  * Get support category (01-15) from main line item. Excludes 07 (Support Coordination).
  */
-function getTravelCategoryFromMainItem(mainLineItemId) {
-  if (!mainLineItemId) return '04';
-  const row = db.prepare('SELECT support_item_number, support_category FROM ndis_line_items WHERE id = ?').get(mainLineItemId);
-  if (!row) return '04';
-  const cat = row.support_category || (row.support_item_number || '').slice(0, 2);
+function getMainItemMeta(mainLineItemId) {
+  if (!mainLineItemId) return null;
+  const row = db
+    .prepare('SELECT support_item_number, support_category FROM ndis_line_items WHERE id = ?')
+    .get(mainLineItemId);
+  if (!row) return null;
+  return {
+    support_item_number: row.support_item_number || '',
+    support_category: row.support_category || null
+  };
+}
+
+function getTravelCategoryFromMainItemMeta(meta) {
+  const supportItemNumber = meta?.support_item_number || '';
+  const cat = meta?.support_category || supportItemNumber.slice(0, 2);
   if (cat && cat !== '07') return cat;
   return '04';
+}
+
+function getThirdCodeGroupFromSupportItemNumber(supportItemNumber) {
+  const s = String(supportItemNumber || '').trim();
+  // Expected format like 04_104_0125_6_1 (third group is 0125)
+  const parts = s.split('_');
+  const third = parts.length >= 3 ? parts[2] : '';
+  return /^\d{4}$/.test(third) ? third : null;
 }
 
 /**
@@ -54,8 +72,47 @@ function getTravelCategoryFromMainItem(mainLineItemId) {
  * First preference: explicit km/kilometre items (excluding 02_051 and XX_799).
  * Fallback: XX_799 non-labour travel item (unit each) because many catalogues only include this for travel.
  */
-function getNonProviderKmItemForCategory(cat) {
+function getNonProviderKmItemForCategory(cat, thirdCodeGroup) {
   if (!cat || cat === '07') return null;
+
+  // Prefer an item that matches the SAME 3rd code group as the main line item (e.g. 0125).
+  // This ensures travel-km charges align with the shift's support item variant.
+  if (thirdCodeGroup) {
+    const explicitKmMatchingThird = db
+      .prepare(
+        `
+        SELECT id, rate FROM ndis_line_items
+        WHERE support_item_number LIKE ?
+          AND support_item_number NOT LIKE '%_799_%'
+          AND support_item_number NOT LIKE '02_051%'
+          AND (
+            LOWER(unit) IN ('km', 'kilometre')
+            OR LOWER(description) LIKE '%kilomet%'
+            OR LOWER(description) LIKE '% km%'
+            OR LOWER(description) LIKE '%km %'
+            OR LOWER(description) LIKE '%/km%'
+            OR LOWER(description) LIKE '%per km%'
+          )
+        ORDER BY support_item_number LIMIT 1
+      `
+      )
+      .get(`${cat}\\_%\\_${thirdCodeGroup}\\_%`);
+    if (explicitKmMatchingThird) return explicitKmMatchingThird;
+
+    const fallback799MatchingThird = db
+      .prepare(
+        `
+        SELECT id, rate FROM ndis_line_items
+        WHERE support_item_number LIKE ?
+          AND support_item_number LIKE '%_799_%'
+          AND support_item_number NOT LIKE '02_051%'
+          AND (LOWER(unit) = 'each' OR LOWER(description) LIKE '%travel%')
+        ORDER BY support_item_number LIMIT 1
+      `
+      )
+      .get(`${cat}\\_%\\_${thirdCodeGroup}\\_%`);
+    if (fallback799MatchingThird) return fallback799MatchingThird;
+  }
 
   const explicitKm = db.prepare(`
     SELECT id, rate FROM ndis_line_items
@@ -116,8 +173,10 @@ export function populateShiftLineItems(
 
   const travelKmVal = parseTravelKm(travelKm);
   if (travelKmVal > 0 && lineItem) {
-    const cat = getTravelCategoryFromMainItem(lineItem.id);
-    const travelKmItem = getNonProviderKmItemForCategory(cat);
+    const meta = getMainItemMeta(lineItem.id);
+    const cat = getTravelCategoryFromMainItemMeta(meta);
+    const third = getThirdCodeGroupFromSupportItemNumber(meta?.support_item_number);
+    const travelKmItem = getNonProviderKmItemForCategory(cat, third);
     if (travelKmItem) {
       const qty = Math.round(travelKmVal * 100) / 100;
       lineItems.push({ ndisLineItemId: travelKmItem.id, quantity: qty, unitPrice: travelKmItem.rate, claimType: 'participant_travel' });
@@ -171,8 +230,10 @@ export function supplementShiftTravelLineItemsFromProgressNote(shiftId) {
 
   const travelKmVal = parseTravelKm(progressNote.travel_km);
   if (travelKmVal > 0 && !hasParticipantTravel) {
-    const cat = getTravelCategoryFromMainItem(lineItem.id);
-    const travelKmItem = getNonProviderKmItemForCategory(cat);
+    const meta = getMainItemMeta(lineItem.id);
+    const cat = getTravelCategoryFromMainItemMeta(meta);
+    const third = getThirdCodeGroupFromSupportItemNumber(meta?.support_item_number);
+    const travelKmItem = getNonProviderKmItemForCategory(cat, third);
     if (travelKmItem) {
       const qty = Math.round(travelKmVal * 100) / 100;
       db.prepare(`
