@@ -80,6 +80,14 @@ function pickStatus(record: Record<string, unknown>): unknown {
   return record.status ?? null;
 }
 
+function pickTravelKm(record: Record<string, unknown>): unknown {
+  return record.travel_km ?? record.kms ?? record.km ?? null;
+}
+
+function pickTravelTimeMin(record: Record<string, unknown>): unknown {
+  return record.travel_time_min ?? record.travel_time_minutes ?? record.provider_travel_minutes ?? null;
+}
+
 function pickActualStart(record: Record<string, unknown>): unknown {
   return record.actual_start ?? record.scheduled_start ?? record.start_time ?? null;
 }
@@ -313,6 +321,15 @@ Deno.serve(async (req) => {
       status:
         statusStr === null || statusStr === "" ? "scheduled" : statusStr,
     };
+
+    const travelKm = coerceShifterField(pickTravelKm(record));
+    if (travelKm != null && travelKm !== "") upsertRow.travel_km = travelKm;
+
+    const travelTimeMin = coerceShifterField(pickTravelTimeMin(record));
+    if (travelTimeMin != null && travelTimeMin !== "") {
+      upsertRow.travel_time_min = travelTimeMin;
+      upsertRow.provider_travel_minutes = travelTimeMin;
+    }
 
     if (isCompletedStatusStr(record.status)) {
       const actualStart = pickActualStart(record);

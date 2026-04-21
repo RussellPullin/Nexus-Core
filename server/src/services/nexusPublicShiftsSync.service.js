@@ -170,6 +170,8 @@ async function upsertShiftDirectlyToShifter({
   clientEmail,
   nexusOrgId,
   status,
+  travelKm,
+  travelTimeMin,
 }) {
   if (!workerProfileId) return { ok: false, skipped: true, reason: 'no_shifter_worker_profile_id' };
   const shifter = getShifterServiceRoleClient();
@@ -200,6 +202,15 @@ async function upsertShiftDirectlyToShifter({
     org: shifterOrgId.trim(),
     status: status || 'scheduled',
   };
+
+  if (travelKm != null && Number(travelKm) > 0) {
+    upsertRow.travel_km = Number(travelKm);
+  }
+  if (travelTimeMin != null && Number(travelTimeMin) > 0) {
+    const mins = Math.round(Number(travelTimeMin));
+    upsertRow.travel_time_min = mins;
+    upsertRow.provider_travel_minutes = mins;
+  }
 
   if (
     isCompletedShiftStatus(status) &&
@@ -233,6 +244,18 @@ async function upsertShiftDirectlyToShifter({
     }
     if (msg.includes("Could not find the 'actual_end' column")) {
       delete payload.actual_end;
+      return true;
+    }
+    if (msg.includes("Could not find the 'travel_km' column")) {
+      delete payload.travel_km;
+      return true;
+    }
+    if (msg.includes("Could not find the 'travel_time_min' column")) {
+      delete payload.travel_time_min;
+      return true;
+    }
+    if (msg.includes("Could not find the 'provider_travel_minutes' column")) {
+      delete payload.provider_travel_minutes;
       return true;
     }
     return false;
@@ -334,7 +357,31 @@ export async function mirrorShiftToNexusSupabase(shiftId) {
            st.email AS staff_email,
            st.shifter_worker_profile_id,
            st.role AS staff_role,
-           st.org_id AS staff_org_id
+           st.org_id AS staff_org_id,
+           (
+             SELECT pn.travel_km
+             FROM progress_notes pn
+             WHERE pn.shift_id = s.id
+             ORDER BY pn.created_at DESC
+             LIMIT 1
+           ) AS progress_travel_km,
+           (
+             SELECT pn.travel_time_min
+             FROM progress_notes pn
+             WHERE pn.shift_id = s.id
+             ORDER BY pn.created_at DESC
+             LIMIT 1
+           ) AS progress_travel_time_min,
+           (
+             SELECT SUM(CASE WHEN sli.claim_type = 'participant_travel' THEN (sli.quantity * 1.0) ELSE 0 END)
+             FROM shift_line_items sli
+             WHERE sli.shift_id = s.id
+           ) AS line_travel_km,
+           (
+             SELECT SUM(CASE WHEN sli.claim_type = 'provider_travel' THEN (sli.quantity * 1.0) ELSE 0 END)
+             FROM shift_line_items sli
+             WHERE sli.shift_id = s.id
+           ) AS line_travel_hours
     FROM shifts s
     JOIN participants p ON s.participant_id = p.id
     JOIN staff st ON s.staff_id = st.id
@@ -431,6 +478,18 @@ export async function mirrorShiftToNexusSupabase(shiftId) {
     org_id: isUuid(row.provider_org_id) ? row.provider_org_id.trim() : null,
     status: localStatus,
     notes: row.notes ?? null,
+    travel_km:
+      row.progress_travel_km != null
+        ? Number(row.progress_travel_km) || 0
+        : row.line_travel_km != null
+          ? Number(row.line_travel_km) || 0
+          : 0,
+    travel_time_minutes:
+      row.progress_travel_time_min != null
+        ? Math.round(Number(row.progress_travel_time_min) || 0)
+        : row.line_travel_hours != null
+          ? Math.round((Number(row.line_travel_hours) || 0) * 60)
+          : 0,
     updated_at: new Date().toISOString(),
   };
 
@@ -477,6 +536,8 @@ export async function mirrorShiftToNexusSupabase(shiftId) {
     clientEmail: row.participant_email || null,
     nexusOrgId: row.provider_org_id || row.staff_org_id || null,
     status: payload.status,
+    travelKm: payload.travel_km ?? null,
+    travelTimeMin: payload.travel_time_minutes ?? null,
   });
   if (!directPush.ok && !directPush.skipped) {
     console.warn('[nexus-public-shifts] direct push fallback failed', shiftId, directPush.error || directPush.reason);

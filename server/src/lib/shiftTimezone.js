@@ -84,6 +84,11 @@ export function sqliteNaiveToUtcIso(s, spec) {
   const trimmed = s.trim();
   if (!trimmed) return null;
 
+  // Naive SQLite strings represent *wall time* in an org schedule timezone.
+  // Never interpret them in the server's local timezone or as UTC by accident.
+  let effectiveSpec = spec || normalizeOrgTimezoneRaw(process.env.NEXUS_SHIFT_TIMEZONE_FALLBACK);
+  if (!effectiveSpec) effectiveSpec = { kind: 'iana', zone: 'Australia/Sydney' };
+
   let normalized = trimmed.replace(' ', 'T');
   if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
     normalized = `${normalized}T00:00:00`;
@@ -93,16 +98,14 @@ export function sqliteNaiveToUtcIso(s, spec) {
 
   const base = normalized.length >= 19 ? normalized.slice(0, 19) : normalized;
 
-  if (spec?.kind === 'iana') {
-    const dt = DateTime.fromISO(base, { zone: spec.zone });
+  if (effectiveSpec?.kind === 'iana') {
+    const dt = DateTime.fromISO(base, { zone: effectiveSpec.zone });
     if (dt.isValid) return dt.toUTC().toISO();
-  } else if (spec?.kind === 'fixed') {
-    const zone = FixedOffsetZone.instance(spec.offsetMinutes);
+  } else if (effectiveSpec?.kind === 'fixed') {
+    const zone = FixedOffsetZone.instance(effectiveSpec.offsetMinutes);
     const dt = DateTime.fromISO(base, { zone });
     if (dt.isValid) return dt.toUTC().toISO();
   }
 
-  const d = new Date(normalized);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  return null;
 }

@@ -488,40 +488,17 @@ router.put('/:id', async (req, res) => {
 });
 
 router.delete('/:id', (req, res) => {
+  // Shift deletion is intentionally disabled to avoid data loss.
+  // Use status updates (e.g. cancel) instead so the shift remains auditable.
   const id = req.params.id;
   if (!isShiftInRequesterTenant(id, req.session?.user?.id)) {
     return res.status(404).json({ error: 'Shift not found' });
   }
-  const existing = db.prepare('SELECT id, shifter_shift_id FROM shifts WHERE id = ?').get(id);
-  if (!existing) {
-    return res.status(404).json({ error: 'Shift not found' });
-  }
-  // Guardrail: do not allow deleting shifts that were imported/sourced from external systems.
-  // Those must be deleted at the source (Excel/Shifter/Progress) to avoid re-import on next sync.
-  if (existing.shifter_shift_id && String(existing.shifter_shift_id).trim()) {
-    return res.status(409).json({
-      error: 'This shift was imported and cannot be deleted here.',
-      errorDetail: 'Delete or correct it in the source system, then re-sync.',
-      code: 'SHIFT_DELETE_IMPORTED_BLOCKED',
-    });
-  }
-  // Remove dependent rows so FK constraint doesn't block shift delete
-  try {
-    db.prepare('DELETE FROM billing_invoice_line_items WHERE source_shift_id = ?').run(id);
-  } catch (e) { /* table may not exist or no FK */ }
-  try {
-    db.prepare('DELETE FROM invoices WHERE shift_id = ?').run(id);
-  } catch (e) { /* table may not exist */ }
-  try {
-    db.prepare('UPDATE progress_notes SET shift_id = NULL WHERE shift_id = ?').run(id);
-  } catch (e) { /* table may not exist */ }
-  try {
-    db.prepare('DELETE FROM case_notes WHERE shift_id = ?').run(id);
-  } catch (e) { /* column may not exist on old DB */ }
-  db.prepare('DELETE FROM shift_line_items WHERE shift_id = ?').run(id);
-  db.prepare('DELETE FROM shifts WHERE id = ?').run(id);
-  scheduleRemoveShiftFromNexusSupabase(id);
-  res.status(204).send();
+  return res.status(405).json({
+    error: 'Shift deletion is disabled.',
+    errorDetail: 'Cancel the shift instead (keeps history).',
+    code: 'SHIFT_DELETE_DISABLED',
+  });
 });
 
 // Shift line items (charges)
