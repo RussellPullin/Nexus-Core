@@ -394,7 +394,8 @@ function extractGoalsSectionText(fullText) {
 function extractPaceGoalsFromText(fullText) {
   const t = normalizeNdisPlanPdfText(String(fullText || ''));
   const out = [];
-  const re = /\byour\s+goal\s*:\s*([\s\S]*?)(?=\n\s*how\s+will\s+you\s+work\s+towards\s+this\s+goal\b|\n\s*your\s+goal\s*:|$)/gi;
+  // Allow OCR/newline variants before "How will you work…"; stop at next "Your goal:" or end.
+  const re = /\byour\s+goal\s*:\s*([\s\S]*?)(?=\s*how\s+will\s+you\s+work\s+towards\s+this\s+goal\b|\n\s*your\s+goal\s*:|$)/gi;
   let match;
   while ((match = re.exec(t)) !== null) {
     const body = fixHyphenatedLineBreaks(String(match[1] || '').trim());
@@ -404,12 +405,32 @@ function extractPaceGoalsFromText(fullText) {
   return out;
 }
 
+function dedupeGoalsList(goals) {
+  const seen = new Set();
+  return (Array.isArray(goals) ? goals : [])
+    .map(cleanGoalText)
+    .filter((g) => g.length >= 12)
+    .filter((g) => {
+      const key = normalizeGoalText(g);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 20);
+}
+
 function fixHyphenatedLineBreaks(s) {
   return String(s || '').replace(/-\s*\n\s*/g, '-');
 }
 
 function extractGoalsDeterministic(text) {
   const normalized = normalizeNdisPlanPdfText(text);
+  // PACE adult: one string per "Your goal:" block — do not also run line heuristics (they split paragraphs into many false goals).
+  const paceOnly = extractPaceGoalsFromText(normalized);
+  if (paceOnly.length > 0) {
+    return dedupeGoalsList(paceOnly);
+  }
+
   const goalsSectionOnly = extractGoalsSectionText(normalized);
   const lines = String(goalsSectionOnly || '').split(/\r?\n/).map((line) => line.trim());
   const collected = [];
@@ -473,13 +494,14 @@ function extractGoalsDeterministic(text) {
     }
 
     const yourGoalMatch = line.match(yourGoalRe);
-    if (yourGoalMatch?.[1]) {
+    if (yourGoalMatch) {
       if (currentGoalLines) {
         const joined = fixHyphenatedLineBreaks(currentGoalLines.join('\n'));
         const cleaned = cleanGoalText(joined);
         if (cleaned.length >= 12) collected.push(cleaned);
       }
-      currentGoalLines = [yourGoalMatch[1]];
+      const afterColon = (yourGoalMatch[1] || '').trim();
+      currentGoalLines = afterColon ? [afterColon] : [];
       continue;
     }
 
@@ -531,10 +553,6 @@ function extractGoalsDeterministic(text) {
       continue;
     }
 
-    const isIntroText = /\b(?:your\s+goals?\s+are\s+set\s+by\s+you|written\s+in\s+your\s+own\s+words|they\s+help\s+the\s+people\s+supporting\s+you|you\s+can\s+change\s+or\s+update\s+your\s+goals?)\b/i;
-    if (line.length > 25 && !/^\$[\d,]/.test(line) && !currentGoalLines && !isIntroText.test(line)) {
-      collected.push(cleanGoalText(line));
-    }
   }
 
   if (currentGoalLines) {
@@ -543,21 +561,7 @@ function extractGoalsDeterministic(text) {
     if (cleaned.length >= 12) collected.push(cleaned);
   }
 
-  for (const g of extractPaceGoalsFromText(normalized)) {
-    collected.push(g);
-  }
-
-  const seen = new Set();
-  return collected
-    .map(cleanGoalText)
-    .filter((g) => g.length >= 12)
-    .filter((g) => {
-      const key = normalizeGoalText(g);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 20);
+  return dedupeGoalsList(collected);
 }
 
 async function extractPlanGoals(text, useAi) {
@@ -880,7 +884,45 @@ function parsePlanFromPdfText(text) {
     return 'core';
   };
 
-  // Match $X,XXX.XX OR $X,XXX (amounts without decimals, e.g. $4,620 for category 09). Allow NBSP after amount.
+  // Pass 1: explicit "Category title: $amount" (and variants) — authoritative when present; avoids wrong $ matches from narrative.
+  for (const rule of PDF_CATEGORY_LINE_AMOUNT_RULES) {
+    const re = new RegExp(rule.re.source, rule.re.flags.includes('i') ? rule.re.flags : `${rule.re.flags}i`);
+    const labelMatch = re.exec(text);
+    if (!labelMatch || !labelMatch[1]) continue;
+    const amount = parseAmountExact(labelMatch[1]);
+    if (amount < 1) continue;
+    const matchIdx = labelMatch.index;
+    const section = getSectionAt(matchIdx);
+    const allowedCats = new Set();
+    if (section === 'core') CORE_CATS.forEach((c) => allowedCats.add(c));
+    else if (section === 'capital') CAPITAL_CATS.forEach((c) => allowedCats.add(c));
+    else if (section === 'capacity') CAPACITY_CATS.forEach((c) => allowedCats.add(c));
+    else {
+      CORE_CATS.forEach((c) => allowedCats.add(c));
+      CAPITAL_CATS.forEach((c) => allowedCats.add(c));
+      CAPACITY_CATS.forEach((c) => allowedCats.add(c));
+    }
+    if (rule.cat === '07') allowedCats.add('07');
+    if (!allowedCats.has(rule.cat)) continue;
+    const win = text.slice(matchIdx, Math.min(text.length, matchIdx + 520)).toLowerCase();
+    const statedSupportNearby = containsStatedSupport(win) || containsStatedSupport(text.slice(Math.max(0, matchIdx - 260), matchIdx));
+    if (rule.cat === '03' && section === 'core' && /(?:includes?|including)\b/i.test(text.slice(Math.max(0, matchIdx - 220), matchIdx).toLowerCase()) && !statedSupportNearby) {
+      continue;
+    }
+    seen.add(rule.cat);
+    const lineItems = (text.slice(matchIdx, matchIdx + 120).match(/\d{2}_\d{3}_\d{4}_\d_\d/g) || []);
+    budgets.push({
+      category: rule.cat,
+      name: rule.name,
+      amount,
+      line_item_numbers: lineItems,
+      management_type: 'self',
+      is_stated_support: statedSupportNearby,
+      auto_budgeted: statedSupportNearby
+    });
+  }
+
+  // Pass 2: $-scan for categories not already taken from labelled lines.
   const amountRe = /\$([\d,]+(?:\.\d{2})?)(?=[\s\u00A0\u202F]|[\n\r]|$|\)|\.\s|,|;)/g;
   let m;
   while ((m = amountRe.exec(text)) !== null) {
@@ -961,6 +1003,9 @@ function parsePlanFromPdfText(text) {
     if (!cat) {
       continue;
     }
+    if (seen.has(cat)) {
+      continue;
+    }
 
     // Core funding can describe included sub-allocations; never treat those include amounts
     // as standalone category 03 budgets.
@@ -978,46 +1023,6 @@ function parsePlanFromPdfText(text) {
     budgets.push({
       category: cat,
       name,
-      amount,
-      line_item_numbers: lineItems,
-      management_type: 'self',
-      is_stated_support: statedSupportNearby,
-      auto_budgeted: statedSupportNearby
-    });
-  }
-
-  // Second pass: explicit "Category title: $amount" (amount may start on the next line after NDIS PDF line breaks).
-  for (const rule of PDF_CATEGORY_LINE_AMOUNT_RULES) {
-    if (seen.has(rule.cat)) continue;
-    const re = new RegExp(rule.re.source, rule.re.flags.includes('i') ? rule.re.flags : `${rule.re.flags}i`);
-    const labelMatch = re.exec(text);
-    if (!labelMatch || !labelMatch[1]) continue;
-    const amount = parseAmountExact(labelMatch[1]);
-    if (amount < 1) continue;
-    const matchIdx = labelMatch.index;
-    const section = getSectionAt(matchIdx);
-    const allowedCats = new Set();
-    if (section === 'core') CORE_CATS.forEach((c) => allowedCats.add(c));
-    else if (section === 'capital') CAPITAL_CATS.forEach((c) => allowedCats.add(c));
-    else if (section === 'capacity') CAPACITY_CATS.forEach((c) => allowedCats.add(c));
-    else {
-      CORE_CATS.forEach((c) => allowedCats.add(c));
-      CAPITAL_CATS.forEach((c) => allowedCats.add(c));
-      CAPACITY_CATS.forEach((c) => allowedCats.add(c));
-    }
-    // Second-pass regex only fires on 07-specific titles; section can still be misclassified as capital.
-    if (rule.cat === '07') allowedCats.add('07');
-    if (!allowedCats.has(rule.cat)) continue;
-    const win = text.slice(matchIdx, Math.min(text.length, matchIdx + 520)).toLowerCase();
-    const statedSupportNearby = containsStatedSupport(win) || containsStatedSupport(text.slice(Math.max(0, matchIdx - 260), matchIdx));
-    if (rule.cat === '03' && section === 'core' && /(?:includes?|including)\b/i.test(text.slice(Math.max(0, matchIdx - 220), matchIdx).toLowerCase()) && !statedSupportNearby) {
-      continue;
-    }
-    seen.add(rule.cat);
-    const lineItems = (text.slice(matchIdx, matchIdx + 120).match(/\d{2}_\d{3}_\d{4}_\d_\d/g) || []);
-    budgets.push({
-      category: rule.cat,
-      name: rule.name,
       amount,
       line_item_numbers: lineItems,
       management_type: 'self',

@@ -100,6 +100,7 @@ router.post('/from-excel', async (req, res) => {
     let shifts;
     let llmUsed = false;
     let source = 'onedrive_excel';
+    let onedrive_error = null;
 
     try {
       const pulled = await pullShiftsFromExcel({
@@ -110,6 +111,7 @@ router.post('/from-excel', async (req, res) => {
       shifts = pulled.shifts;
       llmUsed = !!pulled.llmUsed;
     } catch (excelErr) {
+      onedrive_error = excelErr?.message ? String(excelErr.message) : String(excelErr || '');
       if (orgId && shouldTryShifterAfterOnedriveNotFound(excelErr)) {
         log('OneDrive Excel not found; falling back to Shifter Supabase shifts for this org', { orgId });
         const pulled = await pullShiftsFromShifterSupabase({
@@ -130,6 +132,7 @@ router.post('/from-excel', async (req, res) => {
       return res.json({
         ok: true,
         source,
+        ...(source === 'shifter_supabase_fallback' && onedrive_error ? { onedrive_error } : {}),
         llm_used: !!llmUsed,
         processed: 0,
         matched: 0,
@@ -152,6 +155,7 @@ router.post('/from-excel', async (req, res) => {
     res.json({
       ok: true,
       source,
+      ...(source === 'shifter_supabase_fallback' && onedrive_error ? { onedrive_error } : {}),
       llm_used: !!llmUsed,
       ...result,
     });

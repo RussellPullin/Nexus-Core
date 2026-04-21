@@ -239,12 +239,37 @@ async function upsertShiftDirectlyToShifter({
   };
 
   let payload = { ...upsertRow };
+  let lastErrMsg = null;
+  let lastErrAttempt = null;
+  let lastPayloadKeys = Object.keys(payload);
   for (let attempt = 0; attempt < 4; attempt++) {
     const { error } = await shifter.from('shifts').upsert(payload, { onConflict: 'nexuscore_shift_id' });
     if (!error) return { ok: true };
 
     const msg = String(error.message || '');
-    if (cleanupForSchemaMismatch(payload, msg)) continue;
+    lastErrMsg = msg;
+    lastErrAttempt = attempt;
+    lastPayloadKeys = Object.keys(payload);
+
+    // Log the raw Supabase error + current payload shape (no PII).
+    console.warn('[nexus-public-shifts] direct shifter upsert error', {
+      shiftId,
+      attempt,
+      msg,
+      payload_keys: lastPayloadKeys,
+    });
+
+    const beforeKeys = Object.keys(payload);
+    if (cleanupForSchemaMismatch(payload, msg)) {
+      const afterKeys = Object.keys(payload);
+      console.warn('[nexus-public-shifts] shifter schema mismatch cleanup', {
+        shiftId,
+        attempt,
+        removed_keys: beforeKeys.filter((k) => !afterKeys.includes(k)),
+        remaining_keys: afterKeys,
+      });
+      continue;
+    }
 
     if (msg.includes('no unique or exclusion constraint matching the ON CONFLICT specification')) {
       // Some Shifter projects don't enforce unique(nexuscore_shift_id).
@@ -282,8 +307,14 @@ async function upsertShiftDirectlyToShifter({
     console.warn('[nexus-public-shifts] direct shifter upsert failed', shiftId, msg);
     return { ok: false, error: msg };
   }
-  console.warn('[nexus-public-shifts] direct shifter upsert failed', shiftId, 'schema_mismatch_after_retries');
-  return { ok: false, error: 'schema_mismatch_after_retries' };
+  console.warn('[nexus-public-shifts] direct shifter upsert failed', {
+    shiftId,
+    error: 'schema_mismatch_after_retries',
+    lastErrAttempt,
+    lastErrMsg,
+    lastPayloadKeys,
+  });
+  return { ok: false, error: 'schema_mismatch_after_retries', lastErrAttempt, lastErrMsg, lastPayloadKeys };
 }
 
 /**

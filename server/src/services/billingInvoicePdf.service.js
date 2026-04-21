@@ -49,12 +49,26 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
     subtotal = roundMoney(subtotal);
     const { gst_amount: totalGst, total_incl_gst: grandTotal } = gstBreakdownFromSubtotal(subtotal, includesGst);
 
-    const doc = new PDFDocument({ margin: 50 });
+    const doc = new PDFDocument({ margin: 50, bufferPages: true });
     doc.font('Helvetica');
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
+
+    const footerReserve = 44;
+    const pageMaxY = () => doc.page.height - footerReserve;
+
+    function drawLineItemsTableHeader(y) {
+      doc.fontSize(9);
+      doc.text('Item', 50, y);
+      doc.text('Details', 120, y);
+      doc.text('Quantity', 380, y);
+      doc.text('Price', 430, y);
+      doc.text('GST', 480, y);
+      doc.text('Total', 520, y);
+      return y + 16;
+    }
 
     const billingOrgId = resolveOrgIdForBillingParticipant(inv.participant_id);
     const bizRow = getBusinessSettings(billingOrgId);
@@ -132,16 +146,8 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
     doc.moveDown();
 
     const tableTop = doc.y;
-    doc.fontSize(9);
-    doc.text('Item', 50, tableTop);
-    doc.text('Details', 120, tableTop);
-    doc.text('Quantity', 380, tableTop);
-    doc.text('Price', 430, tableTop);
-    doc.text('GST', 480, tableTop);
-    doc.text('Total', 520, tableTop);
-    doc.moveDown(0.5);
+    let rowY = drawLineItemsTableHeader(tableTop) + 6;
 
-    let rowY = doc.y;
     items.forEach((li) => {
       const lineTotal = roundMoney((li.quantity || 0) * (li.unit_price || 0));
       const lineGst = includesGst ? roundMoney(lineTotal * 0.1) : 0;
@@ -157,6 +163,11 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
       const hDetail = doc.heightOfString(descBlock, { width: 250 });
       const rowH = Math.max(hLeft, hDetail, 14);
 
+      if (rowY + rowH > pageMaxY()) {
+        doc.addPage();
+        rowY = drawLineItemsTableHeader(50) + 6;
+      }
+
       doc.text(itemCell, 50, rowY, { width: 65 });
       doc.text(descBlock, 120, rowY, { width: 250 });
       doc.text(String(li.quantity ?? ''), 380, rowY, { width: 45, align: 'right' });
@@ -166,9 +177,16 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
 
       rowY += rowH + 6;
     });
-    doc.y = rowY + 8;
 
-    const summaryY = doc.y;
+    const tailBlockMin = 210;
+    if (rowY + tailBlockMin > pageMaxY()) {
+      doc.addPage();
+      rowY = 50;
+    } else {
+      rowY += 8;
+    }
+
+    const summaryY = rowY;
     if (includesGst) {
       doc.text(`Subtotal (ex GST) ${subtotal.toFixed(2)}`, 380, summaryY, { width: 170, align: 'right' });
       doc.text(`GST (10%) ${totalGst.toFixed(2)}`, 380, summaryY + 14, { width: 170, align: 'right' });
@@ -203,7 +221,14 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
     doc.text(`Reference ${sanitizePdfText(inv.invoice_number)}`, 50, payY + 74);
     doc.y = payY + 90;
 
-    doc.fontSize(8).text('Page 1 of 1', { align: 'center' });
+    const range = doc.bufferedPageRange();
+    for (let i = 0; i < range.count; i += 1) {
+      doc.switchToPage(range.start + i);
+      doc.fontSize(8).text(`Page ${i + 1} of ${range.count}`, 50, doc.page.height - 32, {
+        width: doc.page.width - 100,
+        align: 'center'
+      });
+    }
     doc.end();
   });
 }

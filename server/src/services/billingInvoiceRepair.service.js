@@ -5,7 +5,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { syncShiftLineItemsWithProgressNote } from './shiftLineItems.service.js';
-import { buildBillingLinePayloadForScDayBucket, ALL_BUCKETS } from './coordinatorTasks.service.js';
+import { buildBillingLinePayloadForScDayBucket, ALL_BUCKETS, resolveSupportCoordProviderTravelKmItem } from './coordinatorTasks.service.js';
 import { getDefaultLineItemForParticipant } from './progressNoteMatcher.js';
 
 export function rebuildBillingInvoiceLineItems(invoiceId) {
@@ -32,10 +32,6 @@ export function rebuildBillingInvoiceLineItems(invoiceId) {
     )
     .all(invoiceId);
 
-  const travelKmItem = db
-    .prepare('SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?')
-    .get('07_799%');
-
   const byDate = new Map();
   for (const t of tasks) {
     const k = t.activity_date || '';
@@ -45,6 +41,7 @@ export function rebuildBillingInvoiceLineItems(invoiceId) {
 
   for (const [, dayTasks] of byDate) {
     if (dayTasks.length === 0) continue;
+    const travelKmItem = resolveSupportCoordProviderTravelKmItem(db, dayTasks);
     for (const b of ALL_BUCKETS) {
       const payload = buildBillingLinePayloadForScDayBucket(dayTasks, b, travelKmItem, 15);
       if (!payload) continue;

@@ -480,6 +480,19 @@ router.delete('/:id', (req, res) => {
   if (!isShiftInRequesterTenant(id, req.session?.user?.id)) {
     return res.status(404).json({ error: 'Shift not found' });
   }
+  const existing = db.prepare('SELECT id, shifter_shift_id FROM shifts WHERE id = ?').get(id);
+  if (!existing) {
+    return res.status(404).json({ error: 'Shift not found' });
+  }
+  // Guardrail: do not allow deleting shifts that were imported/sourced from external systems.
+  // Those must be deleted at the source (Excel/Shifter/Progress) to avoid re-import on next sync.
+  if (existing.shifter_shift_id && String(existing.shifter_shift_id).trim()) {
+    return res.status(409).json({
+      error: 'This shift was imported and cannot be deleted here.',
+      errorDetail: 'Delete or correct it in the source system, then re-sync.',
+      code: 'SHIFT_DELETE_IMPORTED_BLOCKED',
+    });
+  }
   // Remove dependent rows so FK constraint doesn't block shift delete
   try {
     db.prepare('DELETE FROM billing_invoice_line_items WHERE source_shift_id = ?').run(id);

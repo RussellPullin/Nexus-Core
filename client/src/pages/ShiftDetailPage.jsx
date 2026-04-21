@@ -62,6 +62,20 @@ export default function ShiftDetailPage() {
   const [periodNavLoading, setPeriodNavLoading] = useState(false);
   const [effectivePeriod, setEffectivePeriod] = useState(null);
 
+  const handleDeleteShift = async () => {
+    if (!shift?.id) return;
+    const typed = prompt('Type DELETE to permanently delete this shift.');
+    if (typed !== 'DELETE') return;
+    if (!confirm('This will permanently delete the shift and its charges. Continue?')) return;
+    try {
+      await shifts.delete(shift.id);
+      alert('Shift deleted.');
+      navigate('/shifts');
+    } catch (err) {
+      alert(err?.message || 'Failed to delete shift');
+    }
+  };
+
   const loadShiftData = async () => {
     if (!id) return;
     setLoading(true);
@@ -664,6 +678,20 @@ export default function ShiftDetailPage() {
             </ul>
           </div>
         )}
+
+        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
+          <strong>Danger zone</strong>
+          <p style={{ margin: '0.5rem 0 0.75rem', fontSize: '0.85rem', color: '#64748b' }}>
+            Delete is only allowed for manual shifts created in Nexus Core (not imported from Excel/Shifter).
+          </p>
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={handleDeleteShift}
+          >
+            Delete shift
+          </button>
+        </div>
       </div>
 
       {showAddCharge && (

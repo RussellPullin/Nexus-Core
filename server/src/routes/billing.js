@@ -38,7 +38,8 @@ import {
   parseTaskScDaySelectionId,
   buildScDayDraftLineItems,
   buildBillingLinePayloadForScDayBucket,
-  ALL_BUCKETS
+  ALL_BUCKETS,
+  resolveSupportCoordProviderTravelKmItem
 } from '../services/coordinatorTasks.service.js';
 
 const router = Router();
@@ -182,10 +183,6 @@ router.get('/draft-batch', (req, res) => {
 
     const lineItems = [];
 
-    const travelKmItemDraft = db.prepare(
-      'SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?'
-    ).get('07_799%');
-
     /** Support coordination: up to four draft rows per participant per day (F2F, non-F2F, travel time, km). */
     const scByDay = {};
     tasks.forEach((t) => {
@@ -194,6 +191,7 @@ router.get('/draft-batch', (req, res) => {
       scByDay[key].push(t);
     });
     Object.entries(scByDay).forEach(([, group]) => {
+      const travelKmItemDraft = resolveSupportCoordProviderTravelKmItem(db, group);
       const rows = buildScDayDraftLineItems(group, travelKmItemDraft, 15);
       rows.forEach((row) => lineItems.push(row));
     });
@@ -415,10 +413,6 @@ router.post('/create-batch', (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
-      const travelKmItem = db.prepare(
-        'SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?'
-      ).get('07_799%');
-
       const updateTaskBilling = db.prepare('UPDATE coordinator_tasks SET billing_invoice_id = ? WHERE id = ?');
       for (const [dayKey, bucketSet] of scDayBucketMap) {
         const [pid, lineDate] = dayKey.split('|');
@@ -432,6 +426,7 @@ router.post('/create-batch', (req, res) => {
           WHERE ct.participant_id = ? AND ct.activity_date = ? AND ct.task_invoice_id IS NULL AND ct.billing_invoice_id IS NULL
         `).all(pid, lineDate);
         if (dayGroup.length === 0) continue;
+        const travelKmItem = resolveSupportCoordProviderTravelKmItem(db, dayGroup);
         const touched = new Set();
         const orderedBuckets = ALL_BUCKETS.filter((b) => bucketSet.has(b));
         for (const b of orderedBuckets) {

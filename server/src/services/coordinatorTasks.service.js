@@ -6,6 +6,35 @@ import { db } from '../db/index.js';
 import { getDefaultLineItemForParticipant } from './progressNoteMatcher.js';
 import { getShiftDayType } from '../lib/ndisDay.js';
 import { roundMoney } from '../lib/invoiceGst.js';
+import { parseRegistrationGroup } from '../lib/travel.js';
+
+/**
+ * Provider travel km (07_799_*) must match the participant's Support Coordination registration group
+ * (e.g. 0132 standard SC, 0106 psychosocial). A bare LIKE '07_799%' is ambiguous in SQLite.
+ */
+export function resolveSupportCoordProviderTravelKmItem(db, tasks) {
+  let regGroup = null;
+  for (const t of tasks || []) {
+    const sn = t?.support_item_number;
+    if (!sn) continue;
+    const s = String(sn).trim();
+    if (s.includes('_799_')) continue;
+    regGroup = parseRegistrationGroup(s);
+    if (regGroup) break;
+  }
+  const pick = (pattern) =>
+    db
+      .prepare(
+        `SELECT id, support_item_number, description, rate, unit FROM ndis_line_items
+         WHERE support_item_number LIKE ? ORDER BY support_item_number LIMIT 1`
+      )
+      .get(pattern);
+  if (regGroup) {
+    const row = pick(`07_799_${regGroup}%`);
+    if (row) return row;
+  }
+  return pick('07_799_0132%') || pick('07_799%');
+}
 
 /**
  * Get default support coordination line item for participant (category 07).

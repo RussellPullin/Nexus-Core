@@ -2,6 +2,7 @@ import {
   getShifterServiceRoleClient,
   resolveEffectiveShifterOrgIdForNexusOrg,
 } from './supabaseStaffShifter.service.js';
+import { agentDebugIngest460342 } from '../lib/debugAgent460342.js';
 
 const SHIFT_TABLE_CANDIDATES = ['shifts'];
 const ORG_COLUMN_CANDIDATES = [
@@ -398,6 +399,19 @@ export async function pullShiftsFromShifterSupabase(options = {}) {
 
   if (!matchedTable || successfulProbeCount === 0) {
     const reason = lastError?.message ? ` (${lastError.message})` : '';
+    // #region agent log
+    agentDebugIngest460342({
+      hypothesisId: 'H3',
+      location: 'shifterPull.service.js:pullShiftsFromShifterSupabase',
+      message: 'shifter_probe_zero_rows',
+      data: {
+        nexusOrgId: String(nexusOrgId),
+        shifterOrgId: String(shifterOrgId),
+        successfulProbeCount,
+        lastErrorMsg: lastError?.message ? String(lastError.message).slice(0, 200) : null,
+      },
+    });
+    // #endregion
     throw new Error(`Unable to query Shifter shifts by organisation${reason}`);
   }
 
@@ -406,6 +420,26 @@ export async function pullShiftsFromShifterSupabase(options = {}) {
   const filteredByDate = mapped.filter((s) => dateInRange(s.date, fromDate, toDate));
   const valid = filteredByDate.filter((s) => s.shiftId && s.date);
   const skipped = filteredByDate.length - valid.length;
+
+  // #region agent log
+  agentDebugIngest460342({
+    hypothesisId: 'H5',
+    location: 'shifterPull.service.js:pullShiftsFromShifterSupabase',
+    message: 'pull_counts',
+    data: {
+      nexusOrgId: String(nexusOrgId),
+      shifterOrgId: String(shifterOrgId),
+      matchedTable,
+      matchedOrgCol,
+      pulledRows: pulledRows.length,
+      mappedRows: filteredByDate.length,
+      validShifts: valid.length,
+      skippedRows: skipped,
+      fromDate: fromDate || null,
+      toDate: toDate || null,
+    },
+  });
+  // #endregion
 
   log('Shifter Supabase pull complete', {
     nexusOrgId,

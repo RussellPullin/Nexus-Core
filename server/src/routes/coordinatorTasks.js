@@ -7,7 +7,8 @@ import { tenantParticipantAndStaffClause } from '../lib/orgScopeSql.js';
 import {
   getSupportCoordLineItem,
   roundToBillableUnits,
-  buildTaskInvoiceLineItems
+  buildTaskInvoiceLineItems,
+  resolveSupportCoordProviderTravelKmItem
 } from '../services/coordinatorTasks.service.js';
 import PDFDocument from 'pdfkit';
 
@@ -380,7 +381,7 @@ router.get('/task-invoices/:id', (req, res) => {
       ORDER BY ct.activity_date, ct.created_at
     `).all(req.params.id);
 
-    const travelItem = db.prepare('SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?').get('07_799%');
+    const travelItem = resolveSupportCoordProviderTravelKmItem(db, tasks);
 
     const billingUser = db.prepare('SELECT billing_interval_minutes FROM users WHERE staff_id = ? LIMIT 1').get(
       invoice.staff_id
@@ -430,7 +431,7 @@ router.get('/task-invoices/:id/pdf', async (req, res) => {
       ORDER BY ct.activity_date, ct.created_at
     `).all(req.params.id);
 
-    const travelItem = db.prepare('SELECT id, support_item_number, description, rate, unit FROM ndis_line_items WHERE support_item_number LIKE ?').get('07_799%');
+    const travelItem = resolveSupportCoordProviderTravelKmItem(db, tasks);
 
     const billingUserPdf = db.prepare('SELECT billing_interval_minutes FROM users WHERE staff_id = ? LIMIT 1').get(
       invoice.staff_id

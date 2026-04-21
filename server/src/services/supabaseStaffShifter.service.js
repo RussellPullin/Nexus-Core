@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
+import { agentDebugIngest460342 } from '../lib/debugAgent460342.js';
 
 let _admin = null;
 let _shifterAdmin = null;
@@ -210,15 +211,67 @@ async function resolveEffectiveShifterOrgId(nexusAdmin, nexusOrgId) {
     .maybeSingle();
   if (error) {
     console.warn('[shifter-link] organizations lookup', error.message);
+    // #region agent log
+    agentDebugIngest460342({
+      hypothesisId: 'H4',
+      location: 'supabaseStaffShifter.service.js:resolveEffectiveShifterOrgId',
+      message: 'organizations_lookup_error',
+      data: {
+        nexusOrgId: String(nexusOrgId),
+        errorMsg: String(error.message || ''),
+        effectiveShifterOrgId: String(nexusOrgId),
+      },
+    });
+    // #endregion
     return nexusOrgId;
   }
-  if (!data) return nexusOrgId;
-  return data.shifter_organization_id || data.id;
+  if (!data) {
+    // #region agent log
+    agentDebugIngest460342({
+      hypothesisId: 'H1',
+      location: 'supabaseStaffShifter.service.js:resolveEffectiveShifterOrgId',
+      message: 'organizations_row_missing',
+      data: {
+        nexusOrgId: String(nexusOrgId),
+        effectiveShifterOrgId: String(nexusOrgId),
+        shifter_organization_id: null,
+      },
+    });
+    // #endregion
+    return nexusOrgId;
+  }
+  const effective = data.shifter_organization_id || data.id;
+  // #region agent log
+  agentDebugIngest460342({
+    hypothesisId: 'H1',
+    location: 'supabaseStaffShifter.service.js:resolveEffectiveShifterOrgId',
+    message: 'organizations_row_resolved',
+    data: {
+      nexusOrgId: String(nexusOrgId),
+      orgRowPk: data.id != null ? String(data.id) : null,
+      shifter_organization_id: data.shifter_organization_id != null ? String(data.shifter_organization_id) : null,
+      effectiveShifterOrgId: String(effective),
+      usedExplicitShifterLink: Boolean(data.shifter_organization_id),
+    },
+  });
+  // #endregion
+  return effective;
 }
 
 /** Resolve org id used in Shifter for a given Nexus org id. */
 export async function resolveEffectiveShifterOrgIdForNexusOrg(nexusOrgId) {
   const nexusAdmin = getAdminClient();
+  // #region agent log
+  agentDebugIngest460342({
+    hypothesisId: 'H2',
+    location: 'supabaseStaffShifter.service.js:resolveEffectiveShifterOrgIdForNexusOrg',
+    message: 'entry',
+    data: {
+      hasNexusSupabaseAdmin: Boolean(nexusAdmin),
+      nexusOrgId: nexusOrgId ? String(nexusOrgId) : null,
+    },
+  });
+  // #endregion
   if (!nexusAdmin || !nexusOrgId) return nexusOrgId || null;
   return resolveEffectiveShifterOrgId(nexusAdmin, nexusOrgId);
 }
