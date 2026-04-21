@@ -73,6 +73,20 @@ export default function ShiftDetailPage() {
     }
   };
 
+  const handleHardDeleteShift = async () => {
+    if (!shift?.id) return;
+    const typed = prompt('Type DELETE to permanently hard-delete this shift.');
+    if (typed !== 'DELETE') return;
+    if (!confirm('This will permanently delete the shift (cannot be undone). Continue?')) return;
+    try {
+      await shifts.hardDelete(shift.id);
+      alert('Shift deleted.');
+      navigate('/shifts');
+    } catch (err) {
+      alert(err?.message || 'Failed to delete shift');
+    }
+  };
+
   const loadShiftData = async () => {
     if (!id) return;
     setLoading(true);
@@ -681,9 +695,19 @@ export default function ShiftDetailPage() {
           <p style={{ margin: '0.5rem 0 0.75rem', fontSize: '0.85rem', color: '#64748b' }}>
             Shift deletion is disabled. Use cancel to keep an audit trail.
           </p>
-          <button type="button" className="btn btn-danger" onClick={handleCancelShift}>
-            Cancel shift
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-danger" onClick={handleCancelShift}>
+              Cancel shift
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={handleHardDeleteShift}
+              title="Admin only. Requires server env ALLOW_SHIFT_HARD_DELETE=true"
+            >
+              Hard delete…
+            </button>
+          </div>
         </div>
       </div>
 

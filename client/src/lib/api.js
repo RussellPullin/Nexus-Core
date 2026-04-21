@@ -407,6 +407,11 @@ export const shifts = {
   create: (data) => fetchApi('/shifts', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => fetchApi(`/shifts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id) => fetchApi(`/shifts/${id}`, { method: 'DELETE' }),
+  hardDelete: (id) =>
+    fetchApi(`/shifts/${encodeURIComponent(id)}/hard-delete`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm: 'DELETE' })
+    }),
   lineItems: {
     list: (shiftId) => fetchApi(`/shifts/${shiftId}/line-items`),
     add: (shiftId, data) => fetchApi(`/shifts/${shiftId}/line-items`, { method: 'POST', body: JSON.stringify(data) }),

@@ -13,7 +13,7 @@ import {
   scheduleRemoveShiftFromNexusSupabase,
 } from '../services/nexusPublicShiftsSync.service.js';
 import { syncCaseNoteFromShift } from '../services/shiftCaseNoteSync.service.js';
-import { getProviderOrgIdForUser } from '../middleware/roles.js';
+import { getProviderOrgIdForUser, requireAdminOrDelegate } from '../middleware/roles.js';
 import {
   isParticipantInRequesterTenant,
   isShiftInRequesterTenant,
@@ -499,6 +499,60 @@ router.delete('/:id', (req, res) => {
     errorDetail: 'Cancel the shift instead (keeps history).',
     code: 'SHIFT_DELETE_DISABLED',
   });
+});
+
+/**
+ * Hard-delete a shift and its dependent rows.
+ * Admin/delegate only, explicit confirmation, and opt-in via env flag.
+ *
+ * POST /api/shifts/:id/hard-delete
+ * Body: { confirm: 'DELETE' }
+ */
+router.post('/:id/hard-delete', requireAdminOrDelegate, (req, res) => {
+  const id = req.params.id;
+  if (!isShiftInRequesterTenant(id, req.session?.user?.id)) {
+    return res.status(404).json({ error: 'Shift not found' });
+  }
+  if (process.env.ALLOW_SHIFT_HARD_DELETE !== 'true') {
+    return res.status(403).json({
+      error: 'Hard delete is disabled on this server.',
+      errorDetail: 'Set ALLOW_SHIFT_HARD_DELETE=true to enable.',
+      code: 'SHIFT_HARD_DELETE_DISABLED',
+    });
+  }
+  const confirm = String(req.body?.confirm || '').trim().toUpperCase();
+  if (confirm !== 'DELETE') {
+    return res.status(400).json({
+      error: 'Confirmation required.',
+      errorDetail: 'Pass JSON body {"confirm":"DELETE"} to hard-delete this shift.',
+      code: 'SHIFT_HARD_DELETE_CONFIRM_REQUIRED',
+    });
+  }
+
+  const existing = db.prepare('SELECT id FROM shifts WHERE id = ?').get(id);
+  if (!existing) {
+    return res.status(404).json({ error: 'Shift not found' });
+  }
+
+  // Remove dependent rows so FK constraints don't block shift delete
+  try {
+    db.prepare('DELETE FROM billing_invoice_line_items WHERE source_shift_id = ?').run(id);
+  } catch (e) { /* table may not exist or no FK */ }
+  try {
+    db.prepare('DELETE FROM invoices WHERE shift_id = ?').run(id);
+  } catch (e) { /* table may not exist */ }
+  try {
+    db.prepare('UPDATE progress_notes SET shift_id = NULL WHERE shift_id = ?').run(id);
+  } catch (e) { /* table may not exist */ }
+  try {
+    db.prepare('DELETE FROM case_notes WHERE shift_id = ?').run(id);
+  } catch (e) { /* column may not exist on old DB */ }
+  db.prepare('DELETE FROM shift_line_items WHERE shift_id = ?').run(id);
+  db.prepare('DELETE FROM shifts WHERE id = ?').run(id);
+
+  // Also remove mirrored copy from Nexus Supabase (if configured).
+  scheduleRemoveShiftFromNexusSupabase(id);
+  return res.json({ ok: true, deleted: true, id });
 });
 
 // Shift line items (charges)
