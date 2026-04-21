@@ -5,6 +5,7 @@ const API = '/api';
 export const settings = {
   getBusiness: () => fetchApi('/settings/business'),
   updateBusiness: (data) => fetchApi('/settings/business', { method: 'PUT', body: JSON.stringify(data) }),
+  getOrgTimezone: () => fetchApi('/settings/org-timezone'),
   /** Requires server env XERO_CLIENT_ID, XERO_CLIENT_SECRET, XERO_REDIRECT_URI */
   xeroConnect: () => fetchApi('/settings/xero/connect', { method: 'POST' }),
   xeroDisconnect: () => fetchApi('/settings/xero/disconnect', { method: 'POST' }),

@@ -85,3 +85,34 @@ export function fromInputDate(iso) {
   if (y && m && d) return `${d}/${m}/${y}`;
   return iso;
 }
+
+/**
+ * Format an ISO-ish datetime string in a specific IANA timezone.
+ * @param {string} isoDateTime - e.g. "2026-04-21T09:00:00" (naive) or with zone.
+ * @param {string} timeZone - IANA, e.g. "Australia/Sydney"
+ */
+export function formatDateInTimeZone(isoDateTime, timeZone) {
+  const s = String(isoDateTime || '').trim();
+  const tz = String(timeZone || '').trim();
+  if (!s || !tz) return formatDate(s);
+  const d = new Date(s.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return formatDate(s);
+  try {
+    return new Intl.DateTimeFormat('en-AU', { timeZone: tz, day: '2-digit', month: '2-digit', year: 'numeric' }).format(d);
+  } catch {
+    return formatDate(s);
+  }
+}
+
+export function formatTimeInTimeZone(isoDateTime, timeZone) {
+  const s = String(isoDateTime || '').trim();
+  const tz = String(timeZone || '').trim();
+  if (!s || !tz) return '';
+  const d = new Date(s.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-AU', { timeZone: tz, hour: '2-digit', minute: '2-digit' }).format(d);
+  } catch {
+    return '';
+  }
+}

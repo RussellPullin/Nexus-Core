@@ -60,7 +60,8 @@ export function getInvoiceData(invoiceId) {
     WHERE sli.shift_id = ?
   `).all(invoice.shift_id);
 
-  const supportDate = shift.start_time ? new Date(shift.start_time).toISOString().slice(0, 10) : null;
+  // Shift times are stored as local wall times in SQLite; do not convert with Date()/toISOString() (server TZ may be UTC).
+  const supportDate = shift.start_time ? String(shift.start_time).replace(' ', 'T').slice(0, 10) : null;
   const includesGst = participantInvoiceIncludesGst(shift.invoice_includes_gst);
   let subtotal = 0;
   const items = lineItems.map(li => {

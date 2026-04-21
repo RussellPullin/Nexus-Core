@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { formatDate, formatDateLocal } from '../lib/dateUtils';
+import { formatDate, formatDateInTimeZone, formatDateLocal, formatTimeInTimeZone } from '../lib/dateUtils';
 import { useSearchParams } from 'react-router-dom';
-import { shifts, participants, staff, appShifts, syncFromExcel, syncFromShifter } from '../lib/api';
+import { shifts, participants, staff, appShifts, settings, syncFromExcel, syncFromShifter } from '../lib/api';
 import WeekPlanner from '../components/WeekPlanner';
 import SearchableSelect from '../components/SearchableSelect';
 import SuggestionPanel from '../components/SuggestionPanel';
@@ -27,6 +27,7 @@ export default function ShiftsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [shiftList, setShiftList] = useState([]);
+  const [orgTimezone, setOrgTimezone] = useState('');
   const [participantsList, setParticipantsList] = useState([]);
   const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -110,6 +111,12 @@ export default function ShiftsPage() {
   useEffect(() => {
     load();
   }, [weekStart]);
+
+  useEffect(() => {
+    settings.getOrgTimezone()
+      .then((r) => setOrgTimezone(String(r?.timezone || '').trim()))
+      .catch(() => setOrgTimezone(''));
+  }, []);
 
   const loadAppShifts = () => {
     const from = formatDateLocal(weekStart);
@@ -754,8 +761,13 @@ export default function ShiftsPage() {
                 <tbody>
                   {shiftList.map((s) => (
                     <tr key={s.id}>
-                      <td>{formatDate(s.start_time)}</td>
-                      <td>{new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(s.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                      <td>{orgTimezone ? formatDateInTimeZone(s.start_time, orgTimezone) : formatDate(s.start_time)}</td>
+                      <td>
+                        {orgTimezone
+                          ? `${formatTimeInTimeZone(s.start_time, orgTimezone)} - ${formatTimeInTimeZone(s.end_time, orgTimezone)}`
+                          : `${new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(s.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                        }
+                      </td>
                       <td>{s.participant_name}</td>
                       <td>{s.staff_name}</td>
                       <td><span className={`badge badge-${s.status}`}>{s.status}</span></td>

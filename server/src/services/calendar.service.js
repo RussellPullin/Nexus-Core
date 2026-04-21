@@ -2,11 +2,29 @@
  * Calendar service - ICS export and future Google/Outlook/Apple sync
  */
 
+import { sqliteNaiveToUtcIso } from '../lib/shiftTimezone.js';
+
 const formatDate = (d) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 
-export function generateICS(shift, participantName, staffName) {
-  const start = new Date(shift.start_time);
-  const end = new Date(shift.end_time);
+function toUtcDate(isoOrNaive, tzSpec) {
+  const raw = String(isoOrNaive || '').trim();
+  if (!raw) return null;
+  // If the string already carries a timezone/offset, trust it.
+  if (/[zZ]$/.test(raw) || /[+-]\d{2}:?\d{2}$/.test(raw)) {
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const utcIso = sqliteNaiveToUtcIso(raw, tzSpec || null);
+  if (!utcIso) return null;
+  const d = new Date(utcIso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function generateICS(shift, participantName, staffName, options = {}) {
+  const tzSpec = options.tzSpec || null;
+  const start = toUtcDate(shift.start_time, tzSpec);
+  const end = toUtcDate(shift.end_time, tzSpec);
+  if (!start || !end) throw new Error('Invalid shift start/end time');
   const uid = `shift-${shift.id}@schedule-app`;
   const summary = `Shift: ${participantName} - ${staffName}`;
   const description = shift.notes
@@ -30,10 +48,12 @@ export function generateICS(shift, participantName, staffName) {
 }
 
 /** Generate ICS with multiple shifts (for week roster) */
-export function generateICSForMultipleShifts(shifts) {
+export function generateICSForMultipleShifts(shifts, options = {}) {
+  const tzSpec = options.tzSpec || null;
   const events = shifts.map((shift) => {
-    const start = new Date(shift.start_time);
-    const end = new Date(shift.end_time);
+    const start = toUtcDate(shift.start_time, tzSpec);
+    const end = toUtcDate(shift.end_time, tzSpec);
+    if (!start || !end) throw new Error('Invalid shift start/end time');
     const uid = `shift-${shift.id}@schedule-app`;
     const summary = `Shift: ${shift.participant_name} - ${shift.staff_name}`;
     const description = shift.notes

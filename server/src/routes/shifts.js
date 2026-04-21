@@ -6,6 +6,8 @@ import { generateICS, generateICSForMultipleShifts } from '../services/calendar.
 import { recordEvent } from '../services/learningEvent.service.js';
 import { updateAggregatesForShift } from '../services/featureStore.service.js';
 import { pullShiftsFromExcel } from '../services/excelPull.service.js';
+import { getShifterOrgTimezoneSpecForNexusOrg } from '../services/supabaseStaffShifter.service.js';
+import { normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
 import {
   scheduleMirrorShiftToNexusSupabase,
   scheduleRemoveShiftFromNexusSupabase,
@@ -20,6 +22,15 @@ import {
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 
 const router = Router();
+
+async function getEffectiveOrgTzSpecForUser(userId) {
+  const u = userId ? db.prepare('SELECT org_id FROM users WHERE id = ?').get(userId) : null;
+  const orgId = u?.org_id || null;
+  let spec = orgId ? await getShifterOrgTimezoneSpecForNexusOrg(orgId) : null;
+  if (!spec) spec = normalizeOrgTimezoneRaw(process.env.NEXUS_SHIFT_TIMEZONE_FALLBACK);
+  if (!spec) spec = { kind: 'iana', zone: 'Australia/Sydney' };
+  return spec;
+}
 
 /**
  * SQLite often returns "YYYY-MM-DD HH:MM:SS" while clients send ISO "YYYY-MM-DDTHH:MM:SS".
@@ -125,6 +136,7 @@ router.post('/send-roster', async (req, res) => {
     const results = { sent: 0, skipped: 0, errors: [] };
     const weekLabel = `${new Date(start).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} – ${new Date(end).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
     const safeFilename = `roster-${start}-to-${end}.ics`;
+    const tzSpec = await getEffectiveOrgTzSpecForUser(userId);
     for (const staffId of Object.keys(byStaff)) {
       const { staff: st, shifts: staffShifts } = byStaff[staffId];
       if (!st.email) {
@@ -133,7 +145,7 @@ router.post('/send-roster', async (req, res) => {
         continue;
       }
       try {
-        const ics = generateICSForMultipleShifts(staffShifts);
+        const ics = generateICSForMultipleShifts(staffShifts, { tzSpec });
         await sendICSByEmail(st.email, `Your roster – ${weekLabel}`, ics, safeFilename, staffShifts, userId);
         for (const sh of staffShifts) {
           db.prepare('UPDATE shifts SET roster_sent_at = datetime(\'now\') WHERE id = ?').run(sh.id);
@@ -646,10 +658,13 @@ router.get('/:id/ics', (req, res) => {
     WHERE s.id = ? AND (${c.sql})
   `).get(req.params.id, ...c.params);
   if (!shift) return res.status(404).json({ error: 'Shift not found' });
-  const ics = generateICS(shift, shift.participant_name, shift.staff_name);
-  res.setHeader('Content-Type', 'text/calendar');
-  res.setHeader('Content-Disposition', `attachment; filename="shift-${req.params.id}.ics"`);
-  res.send(ics);
+  (async () => {
+    const tzSpec = await getEffectiveOrgTzSpecForUser(userId);
+    const ics = generateICS(shift, shift.participant_name, shift.staff_name, { tzSpec });
+    res.setHeader('Content-Type', 'text/calendar');
+    res.setHeader('Content-Disposition', `attachment; filename="shift-${req.params.id}.ics"`);
+    res.send(ics);
+  })().catch((err) => res.status(500).json({ error: err.message }));
 });
 
 router.post('/:id/send-ics', async (req, res) => {
@@ -679,7 +694,8 @@ router.post('/:id/send-ics', async (req, res) => {
         errorDetail: 'Open Settings and use Connect email.'
       });
     }
-    const ics = generateICS(shift, shift.participant_name, shift.staff_name);
+    const tzSpec = await getEffectiveOrgTzSpecForUser(userId);
+    const ics = generateICS(shift, shift.participant_name, shift.staff_name, { tzSpec });
     const dateStr = new Date(shift.start_time).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
     await sendICSByEmail(shift.staff_email, `Your shift – ${dateStr}`, ics, `shift-${req.params.id}.ics`, [shift], userId);
     db.prepare('UPDATE shifts SET roster_sent_at = datetime(\'now\') WHERE id = ?').run(req.params.id);

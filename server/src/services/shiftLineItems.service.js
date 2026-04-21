@@ -61,7 +61,14 @@ function getNonProviderKmItemForCategory(cat) {
     SELECT id, rate FROM ndis_line_items
     WHERE support_item_number LIKE ? AND support_item_number NOT LIKE '%_799_%'
       AND support_item_number NOT LIKE '02_051%'
-      AND (unit = 'km' OR unit = 'kilometre' OR description LIKE '%travel%')
+      AND (
+        LOWER(unit) IN ('km', 'kilometre')
+        OR LOWER(description) LIKE '%kilomet%'
+        OR LOWER(description) LIKE '% km%'
+        OR LOWER(description) LIKE '%km %'
+        OR LOWER(description) LIKE '%/km%'
+        OR LOWER(description) LIKE '%per km%'
+      )
     ORDER BY support_item_number LIMIT 1
   `).get(cat + '_%');
   if (explicitKm) return explicitKm;
@@ -72,7 +79,7 @@ function getNonProviderKmItemForCategory(cat) {
     WHERE support_item_number LIKE ?
       AND support_item_number LIKE '%_799_%'
       AND support_item_number NOT LIKE '02_051%'
-      AND (unit = 'each' OR description LIKE '%travel%')
+      AND (LOWER(unit) = 'each' OR LOWER(description) LIKE '%travel%')
     ORDER BY support_item_number LIMIT 1
   `).get(cat + '_%');
 }

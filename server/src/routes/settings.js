@@ -12,6 +12,8 @@ import { db } from '../db/index.js';
 import { frontendBaseUrl } from '../lib/frontendBaseUrl.js';
 import { oauthPublicApiOriginFromEnv } from '../lib/oauthPublicOrigin.js';
 import { exchangeAdobeAuthorizationCode } from '../services/adobeSign.service.js';
+import { getShifterOrgTimezoneSpecForNexusOrg } from '../services/supabaseStaffShifter.service.js';
+import { normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -216,6 +218,35 @@ router.get('/business', (req, res) => {
     const merged = mergeWithEnv(row, { noOrgRowYet: Boolean(orgId) && !row });
     res.setHeader('Cache-Control', 'no-store, private');
     res.json(merged);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/settings/org-timezone - org timezone used for shift display + exports
+router.get('/org-timezone', async (req, res) => {
+  try {
+    const orgId = resolveTargetOrgId(req);
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account.' });
+
+    let spec = await getShifterOrgTimezoneSpecForNexusOrg(orgId);
+    let source = spec ? 'shifter_org' : null;
+    if (!spec) {
+      spec = normalizeOrgTimezoneRaw(process.env.NEXUS_SHIFT_TIMEZONE_FALLBACK);
+      source = spec ? 'env_fallback' : null;
+    }
+    if (!spec) {
+      spec = { kind: 'iana', zone: 'Australia/Sydney' };
+      source = 'default';
+    }
+
+    const timezone =
+      spec.kind === 'iana'
+        ? spec.zone
+        : `UTC${spec.offsetMinutes >= 0 ? '+' : ''}${(spec.offsetMinutes / 60).toFixed(spec.offsetMinutes % 60 ? 1 : 0)}`;
+
+    res.setHeader('Cache-Control', 'no-store, private');
+    res.json({ timezone, spec, source });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
