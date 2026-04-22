@@ -206,7 +206,7 @@ export default function ShiftDetailPage() {
     return /^\d{2}$/.test(prefix) ? prefix : null;
   };
 
-  // Travel rule: when hourly line item is e.g. 04_104, travel time uses same item (04_104), travel km uses 04_799
+  // Travel rule: time uses same line as hourly (e.g. 04_104). Km quick-add uses Activity Based Transport (e.g. 04_590) or other non-provider km from the catalogue, not 799 (799 = provider travel km only).
   const mainHourlyItem = lineItems.find((li) => {
     const num = li?.support_item_number || '';
     return num && !num.includes('_799');

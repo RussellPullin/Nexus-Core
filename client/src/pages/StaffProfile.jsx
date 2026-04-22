@@ -11,6 +11,11 @@ import {
   validateAvailabilitySlots,
   formatHmLocal,
 } from '../lib/staffAvailability.js';
+import {
+  effectivePayRates,
+  payRateFormFieldsFromRow,
+  payRateOverridesFromFormFields,
+} from '../lib/payrollRates.js';
 
 const PAYROLL_SHIFT_STATUSES = ['completed', 'completed_by_admin'];
 
@@ -24,6 +29,7 @@ function staffEditFormFromRow(staffRow) {
     role: staffRow?.role || '',
     employment_type: staffRow?.employment_type || 'employee',
     hourly_rate: staffRow?.hourly_rate != null ? String(staffRow.hourly_rate) : '',
+    ...payRateFormFieldsFromRow(staffRow),
     availability: parseStaffAvailabilityFromRow(staffRow),
   };
 }
@@ -166,6 +172,7 @@ export default function StaffProfile() {
         role: editForm.role,
         employment_type: editForm.employment_type,
         hourly_rate: editForm.hourly_rate,
+        pay_rates: payRateOverridesFromFormFields(editForm),
         availability: editForm.availability,
       });
       setShowEdit(false);
@@ -359,6 +366,7 @@ export default function StaffProfile() {
   }
 
   const viewAvail = parseStaffAvailabilityFromRow(data);
+  const viewPayRates = useMemo(() => (data ? effectivePayRates(data) : null), [data]);
 
   return (
     <div className="content">
@@ -391,7 +399,28 @@ export default function StaffProfile() {
             <p><strong>Phone:</strong> {data.phone || '—'}</p>
             <p><strong>Role:</strong> {data.role || '—'}</p>
             <p><strong>Employment type:</strong> {data.employment_type === 'subcontractor' ? 'Subcontractor' : (data.employment_type === 'employee' ? 'Employee' : (data.employment_type || '—'))}</p>
-            <p><strong>Hourly rate:</strong> {data.hourly_rate != null ? `$${Number(data.hourly_rate).toFixed(2)}` : '—'}</p>
+            <div style={{ marginTop: '0.5rem' }}>
+              <p style={{ marginBottom: '0.35rem' }}><strong>Pay rates (per hour)</strong></p>
+              <p style={{ margin: '0.15rem 0', color: '#334155', fontSize: '0.95rem' }}>
+                <strong>Weekday (default):</strong>{' '}
+                {viewPayRates?.weekday != null && Number.isFinite(viewPayRates.weekday) ? `$${viewPayRates.weekday.toFixed(2)}` : '—'}
+              </p>
+              {['saturday', 'sunday', 'public_holiday', 'evening'].map((key) => {
+                const labels = {
+                  saturday: 'Saturday',
+                  sunday: 'Sunday',
+                  public_holiday: 'Public holiday',
+                  evening: 'Weekday evening (after 8:30pm finish)',
+                };
+                const v = viewPayRates?.[key];
+                return (
+                  <p key={key} style={{ margin: '0.15rem 0', color: '#334155', fontSize: '0.95rem' }}>
+                    <strong>{labels[key]}:</strong>{' '}
+                    {v != null && Number.isFinite(v) ? `$${v.toFixed(2)}` : '—'}
+                  </p>
+                );
+              })}
+            </div>
             <p><strong>Notifications:</strong> {data.notify_email ? 'Email ' : ''}{data.notify_sms ? 'SMS' : ''}{!data.notify_email && !data.notify_sms ? '—' : ''}</p>
             <h3 style={{ marginTop: '1.25rem', marginBottom: '0.5rem', fontSize: '1.05rem' }}>Weekly availability</h3>
             {!hasAnyAvailabilitySlots(viewAvail) ? (
@@ -438,8 +467,27 @@ export default function StaffProfile() {
               </select>
             </div>
             <div className="form-group">
-              <label>Hourly rate</label>
+              <label>Hourly rate (weekday default, daytime)</label>
               <input type="number" step="0.01" min="0" value={editForm.hourly_rate} onChange={(e) => setEditForm({ ...editForm, hourly_rate: e.target.value })} />
+            </div>
+            <p style={{ color: '#64748b', fontSize: '0.9rem', marginTop: 0, marginBottom: '0.5rem' }}>
+              Optional: set different pay for weekend, public holidays, or weekday evening shifts. Leave blank to use the default hourly rate.
+            </p>
+            <div className="form-group">
+              <label>Saturday ($/h)</label>
+              <input type="number" step="0.01" min="0" value={editForm.pay_saturday} onChange={(e) => setEditForm({ ...editForm, pay_saturday: e.target.value })} placeholder="Default" />
+            </div>
+            <div className="form-group">
+              <label>Sunday ($/h)</label>
+              <input type="number" step="0.01" min="0" value={editForm.pay_sunday} onChange={(e) => setEditForm({ ...editForm, pay_sunday: e.target.value })} placeholder="Default" />
+            </div>
+            <div className="form-group">
+              <label>Public holiday ($/h)</label>
+              <input type="number" step="0.01" min="0" value={editForm.pay_public_holiday} onChange={(e) => setEditForm({ ...editForm, pay_public_holiday: e.target.value })} placeholder="Default" />
+            </div>
+            <div className="form-group">
+              <label>Weekday evening — shift ends after 8:30pm ($/h)</label>
+              <input type="number" step="0.01" min="0" value={editForm.pay_evening} onChange={(e) => setEditForm({ ...editForm, pay_evening: e.target.value })} placeholder="Default" />
             </div>
             <div className="form-group">
               <label>

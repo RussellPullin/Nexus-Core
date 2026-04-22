@@ -33,6 +33,22 @@ const staffUploadsDir = join(dataDir, 'uploads', 'staff');
 
 const DOCUMENT_TYPES = ['drivers_licence_front', 'drivers_licence_back', 'blue_card', 'yellow_card', 'first_aid', 'car_insurance'];
 
+const PAY_RATE_OVERRIDE_KEYS = ['weekday', 'saturday', 'sunday', 'public_holiday', 'evening'];
+
+/** @returns {string|null} JSON string, or null if all keys empty. */
+function payRatesJsonFromBody(payRates) {
+  if (payRates == null || payRates === undefined) return null;
+  if (typeof payRates !== 'object' || Array.isArray(payRates)) return null;
+  const out = {};
+  for (const k of PAY_RATE_OVERRIDE_KEYS) {
+    if (payRates[k] != null && payRates[k] !== '') {
+      const n = Number(payRates[k]);
+      if (Number.isFinite(n) && n >= 0) out[k] = n;
+    }
+  }
+  return Object.keys(out).length > 0 ? JSON.stringify(out) : null;
+}
+
 function computeDocStatus(expiryDate) {
   if (!expiryDate) return 'valid';
   const exp = new Date(expiryDate);
@@ -673,11 +689,14 @@ router.post('/', requireAdminOrDelegate, async (req, res) => {
     const orgId = requesterOrgId(req.session?.user?.id);
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
     const id = uuidv4();
-    const { name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate } = req.body;
+    const { name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate, pay_rates } = req.body;
     const { present: availPresent, value: availabilityJson } = availabilityFromRequestBody(req.body);
+    const payRatesJson = Object.prototype.hasOwnProperty.call(req.body, 'pay_rates')
+      ? payRatesJsonFromBody(pay_rates)
+      : null;
     db.prepare(`
-      INSERT INTO staff (id, org_id, name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate, onboarding_status, availability_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_started', ?)
+      INSERT INTO staff (id, org_id, name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate, pay_rates_json, onboarding_status, availability_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_started', ?)
     `).run(
       id,
       orgId,
@@ -689,6 +708,7 @@ router.post('/', requireAdminOrDelegate, async (req, res) => {
       role || null,
       employment_type || null,
       hourly_rate != null ? Number(hourly_rate) : null,
+      payRatesJson,
       availPresent ? availabilityJson : null
     );
     const row = db.prepare('SELECT * FROM staff WHERE id = ?').get(id);
@@ -714,15 +734,18 @@ router.put('/:id', requireAdminOrDelegate, async (req, res) => {
     const orgId = requesterOrgId(req.session?.user?.id);
     const existing = visibleStaffById(req.params.id, orgId);
     if (!existing) return res.status(404).json({ error: 'Staff not found' });
-    const { name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate } = req.body;
-    const before = db.prepare('SELECT email, availability_json FROM staff WHERE id = ?').get(req.params.id);
+    const { name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate, pay_rates } = req.body;
+    const before = db.prepare('SELECT email, availability_json, pay_rates_json FROM staff WHERE id = ?').get(req.params.id);
     const emailBefore = normStaffEmail(before?.email);
     const emailAfter = normStaffEmail(email);
     const { present: availPresent, value: availabilityJson } = availabilityFromRequestBody(req.body);
     const availabilityToStore = availPresent ? availabilityJson : before?.availability_json ?? null;
+    const payRatesToStore = Object.prototype.hasOwnProperty.call(req.body, 'pay_rates')
+      ? payRatesJsonFromBody(pay_rates)
+      : (before?.pay_rates_json ?? null);
     db.prepare(`
       UPDATE staff SET name = ?, email = ?, phone = ?, notify_email = ?, notify_sms = ?,
-        role = ?, employment_type = ?, hourly_rate = ?, availability_json = ?, updated_at = datetime('now')
+        role = ?, employment_type = ?, hourly_rate = ?, pay_rates_json = ?, availability_json = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       name,
@@ -733,6 +756,7 @@ router.put('/:id', requireAdminOrDelegate, async (req, res) => {
       role || null,
       employment_type || null,
       hourly_rate != null ? Number(hourly_rate) : null,
+      payRatesToStore,
       availabilityToStore,
       req.params.id
     );

@@ -4,8 +4,19 @@
  */
 
 const PROVIDER_TRAVEL_PATTERN = /^\d+_799_\d+_/;
-const ACTIVITY_TRANSPORT_590 = /^04_590_\d+_/;
-const ACTIVITY_TRANSPORT_591 = /^04_591_\d+_/;
+const ACTIVITY_TRANSPORT_PATTERNS = [
+  /^04_590_\d+_/,
+  /^04_591_\d+_/,
+  /^04_592_\d+_/,
+  /^04_821_\d+_/,
+  /^07_501_\d+_/,
+  /^08_590_\d+_/,
+  /^09_590_\d+_/,
+  /^09_591_\d+_/,
+  /^10_590_\d+_/,
+  /^11_590_\d+_/,
+  /^13_590_\d+_/
+];
 const PARTICIPANT_TRANSPORT = '02_051_0108_1_1';
 
 export function parseRegistrationGroup(supportItemNumber) {
@@ -20,7 +31,7 @@ export function isProviderTravelNonLabour(supportItemNumber) {
 
 export function isActivityBasedTransport(supportItemNumber) {
   const s = String(supportItemNumber || '').trim();
-  return ACTIVITY_TRANSPORT_590.test(s) || ACTIVITY_TRANSPORT_591.test(s);
+  return ACTIVITY_TRANSPORT_PATTERNS.some((re) => re.test(s));
 }
 
 export function isParticipantTransport(supportItemNumber) {

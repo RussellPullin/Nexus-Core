@@ -568,7 +568,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_a
 CREATE INDEX IF NOT EXISTS idx_onboarding_renewal_tasks_due ON onboarding_renewal_tasks(due_at);
 
 -- Staff onboarding (care support worker platform)
--- staff table extended via migrations: role, employment_type, hourly_rate, onboarding_status, onboarding_token, onboarding_token_expires_at, manager_id, abn, address, date_of_birth, emergency_contact_name, emergency_contact_phone, availability_json
+-- staff table extended via migrations: role, employment_type, hourly_rate, pay_rates_json (JSON overrides: saturday, sunday, public_holiday, evening, optional weekday), onboarding_status, onboarding_token, onboarding_token_expires_at, manager_id, abn, address, date_of_birth, emergency_contact_name, emergency_contact_phone, availability_json
 
 CREATE TABLE IF NOT EXISTS staff_sensitive_data (
   id TEXT PRIMARY KEY,

@@ -1,15 +1,26 @@
 /**
  * NDIS travel line item classification and matching utilities.
- * Supports: Provider travel non-labour (01_799, 04_799), Activity-based transport (04_590, 04_591),
+ * Supports: Provider travel non-labour (01_799, 04_799), Activity-based transport (590/591/…),
  * Participant Transport budget (02_051).
  */
 
 /** Provider travel non-labour pattern: XX_799_ZZZZ_* */
 const PROVIDER_TRAVEL_PATTERN = /^\d+_799_\d+_/;
 
-/** Activity-based transport patterns */
-const ACTIVITY_TRANSPORT_590 = /^04_590_\d+_/;
-const ACTIVITY_TRANSPORT_591 = /^04_591_\d+_/;
+/** Activity Based Transport (NDIS catalogue) — not provider travel 799. */
+const ACTIVITY_TRANSPORT_PATTERNS = [
+  /^04_590_\d+_/,
+  /^04_591_\d+_/,
+  /^04_592_\d+_/,
+  /^04_821_\d+_/,
+  /^07_501_\d+_/,
+  /^08_590_\d+_/,
+  /^09_590_\d+_/,
+  /^09_591_\d+_/,
+  /^10_590_\d+_/,
+  /^11_590_\d+_/,
+  /^13_590_\d+_/
+];
 
 /** Participant Transport budget */
 const PARTICIPANT_TRANSPORT = '02_051_0108_1_1';
@@ -35,13 +46,13 @@ export function isProviderTravelNonLabour(supportItemNumber) {
 }
 
 /**
- * Check if a support item is activity-based transport (04_590, 04_591)
+ * Check if a support item is Activity Based Transport (vs provider travel 799)
  * @param {string} supportItemNumber
  * @returns {boolean}
  */
 export function isActivityBasedTransport(supportItemNumber) {
   const s = String(supportItemNumber || '').trim();
-  return ACTIVITY_TRANSPORT_590.test(s) || ACTIVITY_TRANSPORT_591.test(s);
+  return ACTIVITY_TRANSPORT_PATTERNS.some((re) => re.test(s));
 }
 
 /**

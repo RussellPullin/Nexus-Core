@@ -83,6 +83,45 @@ async function copyTextToClipboard(text) {
   }
 }
 
+/** Normalise DB/API value to a list of valid emails (same idea as server batch send). */
+function parseInvoiceEmailsField(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) {
+    return raw.map((e) => String(e).trim()).filter((e) => e.includes('@'));
+  }
+  if (typeof raw === 'string') {
+    try {
+      const p = JSON.parse(raw);
+      if (Array.isArray(p)) {
+        return p.map((e) => String(e).trim()).filter((e) => e.includes('@'));
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return [];
+}
+
+/**
+ * Mirrors server `resolveInvoiceEmailsForXero`: explicit list, else plan manager org email, else participant email.
+ */
+function resolveInvoiceRecipientsForDisplay(p) {
+  const explicit = parseInvoiceEmailsField(p?.invoice_emails);
+  if (explicit.length > 0) {
+    return { kind: 'explicit', emails: explicit, note: null };
+  }
+  const mt = String(p?.management_type || 'self').toLowerCase();
+  const pm = String(p?.plan_manager_email || '').trim();
+  if (mt === 'plan' && pm.includes('@')) {
+    return { kind: 'fallback', emails: [pm], note: 'from plan manager organisation' };
+  }
+  const pe = String(p?.email || '').trim();
+  if (mt === 'self' && pe.includes('@')) {
+    return { kind: 'fallback', emails: [pe], note: 'from participant contact email' };
+  }
+  return { kind: 'none', emails: [], note: null };
+}
+
 export default function ParticipantProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -123,6 +162,7 @@ export default function ParticipantProfile() {
   const [expandedBudgetCards, setExpandedBudgetCards] = useState({});
   const [allNdisItems, setAllNdisItems] = useState([]);
   const [copiedGoalKey, setCopiedGoalKey] = useState(null);
+  const [invoiceEmailInput, setInvoiceEmailInput] = useState('');
 
   const copyGoalLine = async (key, text) => {
     if (!String(text || '').trim()) return;
@@ -783,9 +823,11 @@ export default function ParticipantProfile() {
   const handleSaveProfile = async (e) => {
     e.preventDefault();
     try {
-      await participants.update(id, editForm);
+      const inv = Array.isArray(editForm.invoice_emails) ? editForm.invoice_emails : parseInvoiceEmailsField(editForm.invoice_emails);
+      await participants.update(id, { ...editForm, invoice_emails: inv });
       load();
       setEditForm(null);
+      setInvoiceEmailInput('');
     } catch (err) {
       alert(err.message);
     }
@@ -850,6 +892,7 @@ export default function ParticipantProfile() {
   if (loading || !data) return <div className="card"><p>Loading...</p></div>;
 
   const starredContacts = data.contacts?.filter(c => c.is_starred) || [];
+  const invoiceRec = resolveInvoiceRecipientsForDisplay(data);
 
   return (
     <div>
@@ -902,7 +945,7 @@ export default function ParticipantProfile() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div className="form-group">
-                <label>Email (optional – can leave blank)</label>
+                <label>Email (optional – for self‑managed, used for invoices if no “Invoice email(s)” below)</label>
                 <input type="email" value={editForm.email || ''} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} placeholder="Leave blank if not needed" />
               </div>
               <div className="form-group">
@@ -912,7 +955,7 @@ export default function ParticipantProfile() {
             </div>
             {(editForm.management_type || 'self') === 'plan' && (
               <div className="form-group">
-                <label>Plan Manager (optional – can leave blank)</label>
+                <label>Plan Manager (optional – can leave blank; org email is used for invoices if no list below)</label>
                 <select value={editForm.plan_manager_id || ''} onChange={(e) => setEditForm({ ...editForm, plan_manager_id: e.target.value || '' })}>
                   <option value="">Select plan manager...</option>
                   {orgs.map((o) => (
@@ -921,6 +964,70 @@ export default function ParticipantProfile() {
                 </select>
               </div>
             )}
+            <div className="form-group">
+              <label>
+                Invoice email(s) — where financial batch PDFs and Xero contact email go
+              </label>
+              <small style={{ display: 'block', color: '#64748b', marginBottom: '0.4rem' }}>
+                First in the list is the primary; additional addresses are CCed when you send a batch. If you leave this empty, Nexus
+                uses the plan manager organisation’s email (plan‑managed) or the participant email above (self‑managed). For
+                NDIA‑managed, add at least one address to send by email, or use your NDIA export/claim process instead.
+              </small>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
+                {(Array.isArray(editForm.invoice_emails) ? editForm.invoice_emails : parseInvoiceEmailsField(editForm.invoice_emails)).map((em, idx) => (
+                  <span
+                    key={`${em}-${idx}`}
+                    style={{ display: 'inline-flex', alignItems: 'center', background: '#e2e8f0', borderRadius: '4px', padding: '2px 8px', fontSize: '0.85rem' }}
+                  >
+                    {em}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = Array.isArray(editForm.invoice_emails) ? editForm.invoice_emails : parseInvoiceEmailsField(editForm.invoice_emails);
+                        setEditForm({ ...editForm, invoice_emails: cur.filter((_, i) => i !== idx) });
+                      }}
+                      style={{ marginLeft: '4px', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: '1rem', lineHeight: 1, color: '#64748b' }}
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                  type="email"
+                  value={invoiceEmailInput}
+                  onChange={(e) => setInvoiceEmailInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ',') {
+                      e.preventDefault();
+                      const val = invoiceEmailInput.trim();
+                      const cur = Array.isArray(editForm.invoice_emails) ? editForm.invoice_emails : parseInvoiceEmailsField(editForm.invoice_emails);
+                      if (val && val.includes('@') && !cur.includes(val)) {
+                        setEditForm({ ...editForm, invoice_emails: [...cur, val] });
+                        setInvoiceEmailInput('');
+                      }
+                    }
+                  }}
+                  placeholder="Type email, Enter to add"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    const val = invoiceEmailInput.trim();
+                    const cur = Array.isArray(editForm.invoice_emails) ? editForm.invoice_emails : parseInvoiceEmailsField(editForm.invoice_emails);
+                    if (val && val.includes('@') && !cur.includes(val)) {
+                      setEditForm({ ...editForm, invoice_emails: [...cur, val] });
+                      setInvoiceEmailInput('');
+                    }
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div className="form-group">
                 <label>Parent/Guardian Phone (optional – leave blank if not needed)</label>
@@ -1043,7 +1150,7 @@ export default function ParticipantProfile() {
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button type="submit" className="btn btn-primary">Save</button>
-              <button type="button" className="btn btn-secondary" onClick={() => setEditForm(null)}>Cancel</button>
+              <button type="button" className="btn btn-secondary" onClick={() => { setEditForm(null); setInvoiceEmailInput(''); }}>Cancel</button>
             </div>
           </form>
         </div>
@@ -1067,6 +1174,52 @@ export default function ParticipantProfile() {
               {(data.management_type === 'plan' || data.plan_manager_name) && (
                 <CopyableField label="Plan Manager" value={data.plan_manager_name} />
               )}
+              {data.management_type === 'plan' && data.plan_manager_email && (invoiceRec.kind === 'explicit' || invoiceRec.kind === 'none') && (
+                <CopyableField
+                  label="Plan manager organisation email"
+                  value={data.plan_manager_email}
+                />
+              )}
+              {invoiceRec.kind === 'explicit' && invoiceRec.emails.length > 0 && (
+                <div className="copyable-field" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.35rem' }}>
+                  <span className="copyable-field-label">Invoice email(s) — financial batch + email send</span>
+                  {invoiceRec.emails.map((em, i) => (
+                    <CopyableField key={`${em}-${i}`} label={i === 0 ? 'Primary' : 'Also (CC)'} value={em} />
+                  ))}
+                  <small style={{ color: '#64748b', lineHeight: 1.4 }}>
+                    First address is the main recipient when you send a batch; Xero uses it for the contact when a new contact is created.
+                    Connect email under Settings to send from Nexus.
+                  </small>
+                </div>
+              )}
+              {invoiceRec.kind === 'fallback' && invoiceRec.emails.length > 0 && (
+                <div className="copyable-field" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.35rem' }}>
+                  <span className="copyable-field-label">Invoice email(s) — using fallback</span>
+                  <CopyableField label="Primary (only)" value={invoiceRec.emails[0]} />
+                  <small style={{ color: '#64748b', lineHeight: 1.4 }}>
+                    None listed under “Invoice email(s)”. Nexus is using the {invoiceRec.note}. Add explicit invoice addresses in
+                    Edit to change this and add CCs.
+                  </small>
+                </div>
+              )}
+              {invoiceRec.kind === 'none' && (data.management_type || 'self') === 'ndia' && (
+                <div className="copyable-field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+                  <span className="copyable-field-label">Invoices (NDIA-managed)</span>
+                  <small style={{ color: '#64748b', lineHeight: 1.4, display: 'block' }}>
+                    Set invoice email(s) in Edit to send financial batch PDFs by email. NDIA plan billing often uses the
+                    Invoices / export workflow; connect email in Settings to send.
+                  </small>
+                </div>
+              )}
+              {invoiceRec.kind === 'none' && (data.management_type || 'self') !== 'ndia' && (
+                <div className="copyable-field" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+                  <span className="copyable-field-label">Invoice email(s)</span>
+                  <span className="copyable-field-value" style={{ color: '#b45309' }}>
+                    No address resolved — add invoice email(s) in Edit, or
+                    {data.management_type === 'plan' ? ' set the plan manager organisation’s email' : ' add the participant email (self-managed)'}.
+                  </span>
+                </div>
+              )}
               {data.plans?.length > 0 && (() => {
                 const current = data.plans.find(p => new Date(p.end_date) >= new Date());
                 return current ? (
@@ -1082,7 +1235,15 @@ export default function ParticipantProfile() {
             <div className="profile-card">
               <div className="profile-card-header">
                 <h3 className="profile-card-title">Participant Details</h3>
-                <button className="btn btn-secondary" onClick={() => setEditForm(data)}>Edit</button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setEditForm({ ...data, invoice_emails: parseInvoiceEmailsField(data.invoice_emails) });
+                    setInvoiceEmailInput('');
+                  }}
+                >
+                  Edit
+                </button>
               </div>
               <CopyableField label="Email" value={data.email} />
               <CopyableField label="Phone" value={data.phone} />

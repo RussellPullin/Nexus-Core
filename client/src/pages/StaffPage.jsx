@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { payRateFormFieldsFromRow, payRateOverridesFromFormFields } from '../lib/payrollRates.js';
 import { Link } from 'react-router-dom';
 import { staff } from '../lib/api';
 
@@ -61,7 +62,17 @@ export default function StaffPage() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', phone: '', notify_email: true, notify_sms: false, role: '', employment_type: 'employee', hourly_rate: '' });
+  const [form, setForm] = useState(() => ({
+    name: '',
+    email: '',
+    phone: '',
+    notify_email: true,
+    notify_sms: false,
+    role: '',
+    employment_type: 'employee',
+    hourly_rate: '',
+    ...payRateFormFieldsFromRow({}),
+  }));
   const [selectedStaffIds, setSelectedStaffIds] = useState([]);
   const [shifterSavingId, setShifterSavingId] = useState(null);
   const [inviteSending, setInviteSending] = useState(false);
@@ -170,9 +181,30 @@ export default function StaffPage() {
   const handleCreate = async (e) => {
     e.preventDefault();
     try {
-      await staff.create(form);
+      const pay_rates = payRateOverridesFromFormFields(form);
+      await staff.create({
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        notify_email: form.notify_email,
+        notify_sms: form.notify_sms,
+        role: form.role,
+        employment_type: form.employment_type,
+        hourly_rate: form.hourly_rate,
+        pay_rates: pay_rates || null,
+      });
       setShowModal(false);
-      setForm({ name: '', email: '', phone: '', notify_email: true, notify_sms: false, role: '', employment_type: 'employee', hourly_rate: '' });
+      setForm({
+        name: '',
+        email: '',
+        phone: '',
+        notify_email: true,
+        notify_sms: false,
+        role: '',
+        employment_type: 'employee',
+        hourly_rate: '',
+        ...payRateFormFieldsFromRow({}),
+      });
       load();
     } catch (err) {
       alert(err.message);
@@ -423,8 +455,25 @@ export default function StaffPage() {
                 </select>
               </div>
               <div className="form-group">
-                <label>Hourly rate</label>
+                <label>Hourly rate (weekday default)</label>
                 <input type="number" step="0.01" min="0" value={form.hourly_rate} onChange={(e) => setForm({ ...form, hourly_rate: e.target.value })} placeholder="e.g. 35.00" />
+              </div>
+              <p style={{ color: '#64748b', fontSize: '0.88rem', margin: '0 0 0.5rem 0' }}>Optional weekend / evening rates (blank = use default). You can also set these on the staff profile later.</p>
+              <div className="form-group">
+                <label>Saturday ($/h)</label>
+                <input type="number" step="0.01" min="0" value={form.pay_saturday} onChange={(e) => setForm({ ...form, pay_saturday: e.target.value })} placeholder="Default" />
+              </div>
+              <div className="form-group">
+                <label>Sunday ($/h)</label>
+                <input type="number" step="0.01" min="0" value={form.pay_sunday} onChange={(e) => setForm({ ...form, pay_sunday: e.target.value })} placeholder="Default" />
+              </div>
+              <div className="form-group">
+                <label>Public holiday ($/h)</label>
+                <input type="number" step="0.01" min="0" value={form.pay_public_holiday} onChange={(e) => setForm({ ...form, pay_public_holiday: e.target.value })} placeholder="Default" />
+              </div>
+              <div className="form-group">
+                <label>Weekday evening ($/h)</label>
+                <input type="number" step="0.01" min="0" value={form.pay_evening} onChange={(e) => setForm({ ...form, pay_evening: e.target.value })} placeholder="Default" />
               </div>
               <div className="form-group">
                 <label>

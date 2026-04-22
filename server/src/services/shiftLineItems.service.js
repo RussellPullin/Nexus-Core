@@ -68,9 +68,8 @@ function getThirdCodeGroupFromSupportItemNumber(supportItemNumber) {
 }
 
 /**
- * Get non-provider (travel-with-participant) km line item linked to the same category as the hourly rate.
- * First preference: explicit km/kilometre items (excluding 02_051 and XX_799).
- * Fallback: XX_799 non-labour travel item (unit each) because many catalogues only include this for travel.
+ * Get non-provider (activity / travel-with-participant) km line item for the same category and registration group.
+ * 1) Explicit km-style items. 2) Activity Based Transport (e.g. 04_590_*). 3) Provider travel non-labour (XX_799) as last resort.
  */
 function getNonProviderKmItemForCategory(cat, thirdCodeGroup) {
   if (!cat || cat === '07') return null;
@@ -98,6 +97,20 @@ function getNonProviderKmItemForCategory(cat, thirdCodeGroup) {
       )
       .get(`${cat}_*_${thirdCodeGroup}_*`);
     if (explicitKmMatchingThird) return explicitKmMatchingThird;
+
+    const activityTransportMatchingThird = db
+      .prepare(
+        `
+        SELECT id, rate FROM ndis_line_items
+        WHERE support_item_number GLOB ?
+          AND LOWER(COALESCE(description, '')) LIKE '%activity based transport%'
+          AND support_item_number NOT LIKE '%_799_%'
+          AND support_item_number NOT LIKE '02_051%'
+        ORDER BY support_item_number LIMIT 1
+      `
+      )
+      .get(`${cat}_*_${thirdCodeGroup}_*`);
+    if (activityTransportMatchingThird) return activityTransportMatchingThird;
 
     const fallback799MatchingThird = db
       .prepare(
@@ -130,7 +143,17 @@ function getNonProviderKmItemForCategory(cat, thirdCodeGroup) {
   `).get(cat + '_%');
   if (explicitKm) return explicitKm;
 
-  // Fallback for price books that only contain provider-travel non-labour entries.
+  const activityTransport = db.prepare(`
+    SELECT id, rate FROM ndis_line_items
+    WHERE support_item_number LIKE ?
+      AND LOWER(COALESCE(description, '')) LIKE '%activity based transport%'
+      AND support_item_number NOT LIKE '%_799_%'
+      AND support_item_number NOT LIKE '02_051%'
+    ORDER BY support_item_number LIMIT 1
+  `).get(cat + '_%');
+  if (activityTransport) return activityTransport;
+
+  // Last resort: provider travel non-labour (799) if the catalogue has no activity-based or km-style row.
   return db.prepare(`
     SELECT id, rate FROM ndis_line_items
     WHERE support_item_number LIKE ?
@@ -145,7 +168,7 @@ function getNonProviderKmItemForCategory(cat, thirdCodeGroup) {
  * Populate shift_line_items for participant billing. Creates separate line items for:
  * - Support hours (main shift duration) - 1:1 community access, excludes group
  * - Travel time (if travelTimeMin > 0) - SAME line item as main support (provider travel)
- * - Travel KMs (if travelKm > 0) - Non-provider km charge in same category as hourly rate (not 02_051, not XX_799)
+ * - Travel KMs (if travelKm > 0) - Activity Based Transport (or explicit km) in same category as hourly rate; 799 only if no better match
  */
 export function populateShiftLineItems(
   shiftId,

@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { users, admin, participants, staff, billing, auth } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
 import { formatDate } from '../lib/dateUtils';
+import { effectivePayRates, computeSubcontractorLaborDollars } from '../lib/payrollRates.js';
 
 const ROLE_LABELS = { admin: 'Admin', support_coordinator: 'Support Coordinator', delegate: 'Delegate' };
 
@@ -206,7 +207,7 @@ export default function AdminPage() {
     URL.revokeObjectURL(url);
   };
 
-  /** Labor = profile hourly rate × total hours (same buckets as above; single rate from Staff profile). */
+  /** Labor = sum of hours per bucket × matching pay rate from the staff profile (default weekday + optional overrides). */
   const downloadSubcontractorPayCsv = () => {
     const headers = [
       'Staff Name',
@@ -219,7 +220,7 @@ export default function AdminPage() {
       'Sunday hours',
       'Public holiday hours',
       'Evening hours',
-      'Hourly rate ($)',
+      'Base hourly ($)',
       'Labor ($)',
       'Expenses ($)',
       'Total pay ($)',
@@ -228,12 +229,17 @@ export default function AdminPage() {
     const lines = [headers.map(escapeCsvCell).join(',')];
     subcontractorPayRows.forEach((r) => {
       const st = staffList.find((x) => String(x.id) === String(r.staff_id));
-      const rateRaw = st?.hourly_rate;
-      const rateNum = rateRaw != null && rateRaw !== '' ? Number(rateRaw) : NaN;
-      const totalH = getPayCell(r, 'totalHours');
-      const th = Number.isFinite(totalH) ? totalH : 0;
-      const labor =
-        Number.isFinite(rateNum) && Number.isFinite(th) ? Math.round(th * rateNum * 100) / 100 : 0;
+      const baseRate = st?.hourly_rate;
+      const rateNum = baseRate != null && baseRate !== '' ? Number(baseRate) : NaN;
+      const hours = {
+        weekdayHours: parseNum(getPayCell(r, 'weekdayHours'), 0),
+        eveningHours: parseNum(getPayCell(r, 'eveningHours'), 0),
+        saturdayHours: parseNum(getPayCell(r, 'saturdayHours'), 0),
+        sundayHours: parseNum(getPayCell(r, 'sundayHours'), 0),
+        holidayHours: parseNum(getPayCell(r, 'holidayHours'), 0),
+      };
+      const rates = st ? effectivePayRates(st) : null;
+      const labor = st ? computeSubcontractorLaborDollars(hours, rates) : 0;
       const expVal = getPayCell(r, 'totalExpenses');
       const expNum = Number.isFinite(expVal) ? expVal : 0;
       const totalPay = Math.round((labor + expNum) * 100) / 100;

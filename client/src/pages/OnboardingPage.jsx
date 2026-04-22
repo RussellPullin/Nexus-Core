@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { onboarding, participants, organisations, ndis, smartDefaults } from '../lib/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
@@ -205,8 +205,15 @@ const emptyIntake = () => ({
   mental_health_summary: ''
 });
 
+function formatParticipantDob(value) {
+  if (value == null || value === '') return '';
+  return String(value).slice(0, 10);
+}
+
 export default function OnboardingPage() {
   const { id } = useParams();
+  const idRef = useRef(id);
+  idRef.current = id;
   const [participant, setParticipant] = useState(null);
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -397,29 +404,35 @@ export default function OnboardingPage() {
     setIntake({ ...intake, ndia_managed_services: ndia, plan_managed_services: plan });
   };
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    const runId = id;
+    const parseArray = (v) => {
+      if (Array.isArray(v)) return v;
+      if (typeof v === 'string') {
+        try {
+          const p = JSON.parse(v);
+          return Array.isArray(p) ? p : [];
+        } catch {
+          return v ? [v] : [];
+        }
+      }
+      return [];
+    };
     try {
       const [participantData, onboardingData] = await Promise.all([
         participants.get(id),
         onboarding.get(id).catch(() => null)
       ]);
+      if (idRef.current !== runId) return;
       setParticipant(participantData);
       setProviderOrgId((prev) => prev || participantData?.plan_manager_id || '');
       if (onboardingData) {
         setState(onboardingData);
         const fields = onboardingData.intake_fields || {};
-        const parseArray = (v) => {
-          if (Array.isArray(v)) return v;
-          if (typeof v === 'string') {
-            try {
-              const p = JSON.parse(v);
-              return Array.isArray(p) ? p : [];
-            } catch {
-              return v ? [v] : [];
-            }
-          }
-          return [];
-        };
         const parseScheduleRows = (v) => {
           const norm = (r) => ({
             ndis_line_item_id: r.ndis_line_item_id ?? '',
@@ -451,7 +464,7 @@ export default function OnboardingPage() {
         const fromParticipant = participantData ? {
           full_legal_name: participantData.name,
           preferred_name: '',
-          date_of_birth: participantData.date_of_birth?.slice(0, 10),
+          date_of_birth: formatParticipantDob(participantData.date_of_birth),
           ndis_number: participantData.ndis_number,
           email: participantData.email,
           phone: participantData.phone,
@@ -466,17 +479,44 @@ export default function OnboardingPage() {
         setIntake((prev) => ({ ...emptyIntake(), ...fromParticipant, ...prev, ...normalizedFields }));
       } else {
         setState(null);
+        if (participantData) {
+          const fromParticipant = {
+            full_legal_name: participantData.name,
+            preferred_name: '',
+            date_of_birth: formatParticipantDob(participantData.date_of_birth),
+            ndis_number: participantData.ndis_number,
+            email: participantData.email,
+            phone: participantData.phone,
+            address: participantData.address,
+            primary_contact_phone: participantData.parent_guardian_phone,
+            primary_contact_email: participantData.parent_guardian_email,
+            plan_manager_id: participantData.plan_manager_id,
+            services_required: parseArray(participantData.services_required),
+            ndia_managed_services: parseArray(participantData.ndia_managed_services),
+            plan_managed_services: parseArray(participantData.plan_managed_services)
+          };
+          setIntake((prev) => ({ ...emptyIntake(), ...fromParticipant, ...prev }));
+        }
       }
     } catch (err) {
-      alert(err.message);
+      if (idRef.current === runId) {
+        alert(err.message);
+      }
     } finally {
-      setLoading(false);
+      if (idRef.current === runId) {
+        setLoading(false);
+      }
     }
-  };
+  }, [id]);
 
   useEffect(() => {
-    refresh();
-  }, [id]);
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    void refresh();
+  }, [id, refresh]);
 
   // Prefill plan manager company name and invoice email from directory when participant has plan_manager_id
   useEffect(() => {
@@ -646,6 +686,15 @@ export default function OnboardingPage() {
 
   const signatureForms = state?.forms?.filter((f) => ['service_agreement', 'support_plan', 'privacy_consent'].includes(f.form_type)) || [];
   const hasIntakeData = intake.full_legal_name || intake.email || intake.phone || Object.values(intake).some((v) => v && String(v).trim());
+
+  if (!id) {
+    return (
+      <div className="card">
+        <p>Missing participant in the URL. Open onboarding from a participant profile or the participants list.</p>
+        <Link to="/onboarding" className="btn btn-secondary">Back to list</Link>
+      </div>
+    );
+  }
 
   if (loading) return <div className="card"><p>Loading onboarding...</p></div>;
 
@@ -1118,7 +1167,7 @@ export default function OnboardingPage() {
                           const current = intake.service_schedule_rows || [];
                           const k = (scheduleTravelItems.nonProviderKm || scheduleTravelItems.km || [])[0];
                           if (!k) {
-                            alert('No non-provider travel (km) line item. Select category 02 or 04 and import NDIS pricing with km line items.');
+                            alert('No non-provider travel (km) line item. Select category 02 or 04 and import NDIS pricing (Activity Based Transport or km lines).');
                             return;
                           }
                           if (current.length >= 5) return;
@@ -1144,7 +1193,7 @@ export default function OnboardingPage() {
                 </div>
                 {(intake.services_required || []).some((c) => c === '02' || c === '04' || c === '07') ? (
                   <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.35rem' }}>
-                    Add one travel line at a time: <strong>Provider travel (time)</strong> and <strong>Non-provider travel (time)</strong> use your first support line&apos;s hourly rate; <strong>Provider travel (km)</strong> uses NDIS 799 km items; <strong>Non-provider travel (km)</strong> uses travel-with-participant km items (02/04). Select the relevant support categories and import NDIS pricing first.
+                    Add one travel line at a time: <strong>Provider travel (time)</strong> and <strong>Non-provider travel (time)</strong> use your first support line&apos;s hourly rate; <strong>Provider travel (km)</strong> uses NDIS <strong>799</strong> (provider travel – non-labour); <strong>Non-provider travel (km)</strong> uses <strong>Activity Based Transport</strong> (e.g. 04_590) or other km items in 02/04, not 799. Select the relevant support categories and import NDIS pricing first.
                   </p>
                 ) : null}
               </div>

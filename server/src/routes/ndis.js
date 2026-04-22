@@ -80,21 +80,27 @@ router.get('/categories', (req, res) => {
 });
 
 // Travel items for quick-add. Returns non-provider km, non-provider time (07_001), provider km (XX_799), provider time uses main line (client-side).
-// km = non-provider (travel with participant); excludes XX_799 and 02_051.
+// non-provider km = km-style lines and Activity Based Transport (590 family); 799 = provider travel (separate list).
 router.get('/travel-items', (req, res) => {
   try {
     const category = (req.query.category || '').toString().trim();
     const catMatch = category.match(/^(\d{2})$/);
     const cat = catMatch ? catMatch[1] : null;
-    // Non-provider km (travel with participant) – same category, exclude 799 and 02_051
+    // Non-provider km: explicit km, travel in description, or Activity Based Transport (E unit, not caught by "travel" alone)
     const nonProviderKm = !cat || cat === '07'
       ? []
       : db.prepare(`
           SELECT * FROM ndis_line_items
           WHERE support_item_number LIKE ? AND support_item_number NOT LIKE '%_799_%'
             AND support_item_number NOT LIKE '02_051%'
-            AND (unit = 'km' OR unit = 'kilometre' OR description LIKE '%travel%')
-          ORDER BY support_item_number
+            AND (
+              unit = 'km' OR unit = 'kilometre' OR LOWER(description) LIKE '%travel%'
+              OR LOWER(COALESCE(description, '')) LIKE '%activity based transport%'
+            )
+          ORDER BY CASE
+            WHEN LOWER(COALESCE(description, '')) LIKE '%activity based transport%' THEN 0
+            ELSE 1
+          END, support_item_number
         `).all(cat + '_%');
     // Non-provider time: 07_001 (Support Coordination travel); other categories use main line on client
     const nonProviderTime = db.prepare(`
