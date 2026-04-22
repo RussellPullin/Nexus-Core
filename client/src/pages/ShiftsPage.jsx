@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { formatDate, formatDateInTimeZone, formatDateLocal, formatTimeInTimeZone } from '../lib/dateUtils';
 import { useSearchParams } from 'react-router-dom';
-import { shifts, participants, staff, appShifts, settings, syncFromExcel, syncFromShifter } from '../lib/api';
+import { shifts, participants, staff, appShifts, settings, syncFromExcel, syncFromShifter, learning } from '../lib/api';
 import WeekPlanner from '../components/WeekPlanner';
 import SearchableSelect from '../components/SearchableSelect';
 import SuggestionPanel from '../components/SuggestionPanel';
@@ -21,6 +21,13 @@ function toDatetimeLocal(dt) {
   if (!dt) return '';
   const s = String(dt).slice(0, 19).replace(' ', 'T');
   return s.slice(0, 16);
+}
+
+/** datetime-local or API string → `YYYY-MM-DD HH:MM:SS` for availability API */
+function toApiDateTime(s) {
+  if (!s) return '';
+  const t = String(s).replace('T', ' ');
+  return t.length === 16 ? `${t}:00` : t;
 }
 
 export default function ShiftsPage() {
@@ -59,6 +66,8 @@ export default function ShiftsPage() {
   const [syncingExcel, setSyncingExcel] = useState(false);
   const [syncingShifter, setSyncingShifter] = useState(false);
   const [resolvingShift, setResolvingShift] = useState(null);
+  const [availabilityPreview, setAvailabilityPreview] = useState(null);
+  const [shiftSaveWarnings, setShiftSaveWarnings] = useState(null);
   const sendAfterRef = useRef(false);
   const formRef = useRef(null);
 
@@ -117,6 +126,40 @@ export default function ShiftsPage() {
       .then((r) => setOrgTimezone(String(r?.timezone || '').trim()))
       .catch(() => setOrgTimezone(''));
   }, []);
+
+  const showShiftAnomalies = async (shiftId) => {
+    if (!shiftId) return;
+    try {
+      const { anomalies } = await learning.anomalies(shiftId);
+      const items = (anomalies || []).filter(
+        (a) => a.type === 'outside_availability' || a.type === 'overlap'
+      );
+      if (items.length) setShiftSaveWarnings({ shiftId, items });
+      else setShiftSaveWarnings(null);
+    } catch {
+      setShiftSaveWarnings(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!showModal) {
+      setAvailabilityPreview(null);
+      return;
+    }
+    if (!form.staff_id || !form.start_time || !form.end_time) {
+      setAvailabilityPreview(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      const start = toApiDateTime(form.start_time);
+      const end = toApiDateTime(form.end_time);
+      learning
+        .availabilityPreview({ staff_id: form.staff_id, start_time: start, end_time: end })
+        .then((r) => setAvailabilityPreview(r))
+        .catch(() => setAvailabilityPreview(null));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [showModal, form.staff_id, form.start_time, form.end_time]);
 
   const loadAppShifts = () => {
     const from = formatDateLocal(weekStart);
@@ -265,8 +308,10 @@ export default function ShiftsPage() {
       setShowModal(false);
       setEditingShift(null);
       setForm({ participant_id: '', staff_id: '', start_time: '', end_time: '', notes: '' });
+      setAvailabilityPreview(null);
       load();
       window.history.replaceState({}, '', '/shifts');
+      showShiftAnomalies(shiftId);
     } catch (err) {
       alert(err.message);
     }
@@ -391,9 +436,11 @@ export default function ShiftsPage() {
   const handleMoveOne = async () => {
     if (!moveConfirm) return;
     try {
-      await shifts.update(moveConfirm.shift.id, moveConfirm.data);
+      const id = moveConfirm.shift.id;
+      await shifts.update(id, moveConfirm.data);
       setMoveConfirm(null);
       load({ silent: true });
+      showShiftAnomalies(id);
     } catch (err) {
       alert(err.message);
     }
@@ -478,6 +525,36 @@ export default function ShiftsPage() {
 
   return (
     <div>
+      {shiftSaveWarnings && (
+        <div
+          className="card"
+          style={{
+            marginBottom: '1rem',
+            background: '#fffbeb',
+            border: '1px solid #fbbf24',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '0.75rem',
+            justifyContent: 'space-between'
+          }}
+        >
+          <div>
+            <strong style={{ display: 'block', marginBottom: '0.35rem' }}>Rostering check</strong>
+            {shiftSaveWarnings.items.map((a, i) => (
+              <div key={i} style={{ fontSize: '0.9rem' }}>{a.message}</div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(`/shifts/${shiftSaveWarnings.shiftId}`)}>
+              Open shift
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShiftSaveWarnings(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       <div className="page-header">
         <h2>Shifts</h2>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -498,6 +575,7 @@ export default function ShiftsPage() {
             next.setDate(next.getDate() + 7);
             setWeekStart(next);
           }}>Next</button>
+          <Link to="/shifts/availability" className="btn btn-secondary">Roster availability</Link>
           <button className="btn btn-primary" onClick={() => { setEditingShift(null); setForm({ participant_id: '', staff_id: '', start_time: '', end_time: '', notes: '' }); setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' }); setShowModal(true); }}>New Shift</button>
           <button className="btn btn-secondary" onClick={handleSendRoster} disabled={sendingRoster || shiftList.length === 0} title="Email roster (ICS) to staff with unsent shifts this week. Sent shifts are highlighted; move or edit to send again.">
             {sendingRoster ? 'Sending…' : 'Send roster to all staff'}
@@ -704,6 +782,7 @@ export default function ShiftsPage() {
                   const created = await shifts.create(data);
                   setShiftList((prev) => [...prev, { ...created, participant_name: participantsList.find((p) => p.id === data.participant_id)?.name ?? '', staff_name: staffList.find((s) => s.id === data.staff_id)?.name ?? '' }]);
                   load({ silent: true });
+                  showShiftAnomalies(created.id);
                 } catch (err) {
                   alert(err.message);
                 }
@@ -718,6 +797,7 @@ export default function ShiftsPage() {
                   }
                   await shifts.update(id, data);
                   load({ silent: true });
+                  showShiftAnomalies(id);
                 } catch (err) {
                   alert(err.message);
                 }
@@ -838,6 +918,20 @@ export default function ShiftsPage() {
                   }
                 }}
               />
+              {availabilityPreview?.outside_availability && (
+                <div
+                  style={{
+                    margin: '0.5rem 0 0.75rem',
+                    padding: '0.6rem 0.75rem',
+                    borderRadius: 6,
+                    background: '#fffbeb',
+                    border: '1px solid #fbbf24',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <strong>Availability:</strong> {availabilityPreview.message}
+                </div>
+              )}
               <div className="form-group">
                 <label>Start *</label>
                 <input type="datetime-local" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} required step="1800" />

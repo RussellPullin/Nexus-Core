@@ -46,6 +46,10 @@ export default function AdminPage() {
   const [paySummaryLoading, setPaySummaryLoading] = useState(false);
   const [paySummaryErr, setPaySummaryErr] = useState('');
   const [registerSyncLoading, setRegisterSyncLoading] = useState(false);
+  const [caseNotesResult, setCaseNotesResult] = useState(null);
+  const [caseNotesDefaultPid, setCaseNotesDefaultPid] = useState('');
+  const [caseNotesDryRun, setCaseNotesDryRun] = useState(true);
+  const [caseNotesLoading, setCaseNotesLoading] = useState(false);
   const [payPeriodFilter, setPayPeriodFilter] = useState('');
   const [payAdjustMode, setPayAdjustMode] = useState(false);
   const [payEdits, setPayEdits] = useState({});
@@ -341,6 +345,35 @@ export default function AdminPage() {
     }
   };
 
+  const handleCaseNotesImport = async () => {
+    const el = document.getElementById('case-notes-csv-input');
+    const file = el?.files?.[0];
+    if (!file) {
+      setMsg('Choose a CSV file first');
+      return;
+    }
+    setCaseNotesLoading(true);
+    setCaseNotesResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (caseNotesDefaultPid) fd.append('default_participant_id', caseNotesDefaultPid);
+      if (caseNotesDryRun) fd.append('dry_run', '1');
+      const out = await admin.importCaseNotesCsv(fd);
+      setCaseNotesResult(out);
+      setMsg(
+        out.dry_run
+          ? `Preview: ${out.imported} row(s) would be imported. Turn off “Preview only” to save.`
+          : `Imported ${out.imported} case note(s).`
+      );
+    } catch (e) {
+      setCaseNotesResult(null);
+      setMsg(e.message || 'Import failed');
+    } finally {
+      setCaseNotesLoading(false);
+    }
+  };
+
   if (!canManageUsers) {
     return (
       <div className="content">
@@ -352,6 +385,7 @@ export default function AdminPage() {
 
   const tabs = [
     { id: 'users', label: 'Users & Roles' },
+    { id: 'case_notes_import', label: 'Case notes import' },
     { id: 'activity', label: 'Coordinator Activity' },
     { id: 'billable', label: 'Billing & Billable Hours' },
     { id: 'financial', label: 'Financial Overview' },
@@ -488,6 +522,85 @@ export default function AdminPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {tab === 'case_notes_import' && (
+        <div className="card">
+          <h3>Import case notes (CSV)</h3>
+          <p style={{ fontSize: '0.9rem', color: '#64748b', maxWidth: '48rem', marginBottom: '1rem' }}>
+            Upload a CSV export from your previous system. The importer looks for columns for <strong>date</strong> (e.g. contact_date, date, created_at),{' '}
+            <strong>notes</strong> (notes, text, description), and <strong>participant</strong> (participant_id, client_id, or ndis_number). If every row is for
+            the same person, you can pick a <strong>default participant</strong> and omit the participant column. Use comma- or semicolon-separated UTF-8 CSV.
+            Run a preview first, then import without preview to write into Nexus.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '32rem' }}>
+            <label style={{ display: 'block' }}>
+              CSV file
+              <input id="case-notes-csv-input" type="file" accept=".csv,.txt" style={{ display: 'block', marginTop: '0.35rem' }} />
+            </label>
+            <div>
+              <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.25rem' }}>Default participant (optional)</div>
+              <SearchableSelect
+                options={participantsList.map((p) => ({ id: p.id, label: p.name + (p.ndis_number ? ' (' + p.ndis_number + ')' : '') }))}
+                value={caseNotesDefaultPid}
+                onChange={setCaseNotesDefaultPid}
+                placeholder="None — use CSV participant column"
+              />
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <input type="checkbox" checked={caseNotesDryRun} onChange={(e) => setCaseNotesDryRun(e.target.checked)} />
+              Preview only (no changes to the database)
+            </label>
+            <button type="button" className="btn btn-primary" onClick={handleCaseNotesImport} disabled={caseNotesLoading}>
+              {caseNotesLoading ? 'Processing…' : caseNotesDryRun ? 'Run preview' : 'Import into Nexus'}
+            </button>
+          </div>
+          {caseNotesResult && (
+            <div style={{ marginTop: '1.25rem' }}>
+              {caseNotesResult.column_map && (
+                <p style={{ fontSize: '0.9rem' }}>
+                  <strong>Detected columns:</strong>{' '}
+                  {caseNotesResult.column_map.participant
+                    ? `${caseNotesResult.column_map.participant.kind} → ${caseNotesResult.column_map.participant.name || '—'}`
+                    : 'participant from default only'}
+                  {', '}
+                  date → {caseNotesResult.column_map.contact_date || '—'}
+                  {', '}
+                  notes → {caseNotesResult.column_map.notes || '—'}
+                  {caseNotesResult.column_map.contact_type ? `, type → ${caseNotesResult.column_map.contact_type}` : ''}
+                </p>
+              )}
+              {Number(caseNotesResult.skipped) > 0 && (
+                <p style={{ fontSize: '0.9rem', color: '#64748b' }}>Blank rows skipped: {caseNotesResult.skipped}</p>
+              )}
+              {Array.isArray(caseNotesResult.errors) && caseNotesResult.errors.length > 0 && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <strong>Row issues ({caseNotesResult.errors.length})</strong>
+                  <ul style={{ maxHeight: '12rem', overflow: 'auto', fontSize: '0.85rem', marginTop: '0.35rem' }}>
+                    {caseNotesResult.errors.map((e, i) => (
+                      <li key={i}>
+                        Line {e.line}: {e.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {Array.isArray(caseNotesResult.preview) && caseNotesResult.preview.length > 0 && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <strong>Sample (first rows)</strong>
+                  <ul style={{ fontSize: '0.85rem', marginTop: '0.35rem' }}>
+                    {caseNotesResult.preview.map((p, i) => (
+                      <li key={i} style={{ marginBottom: '0.5rem' }}>
+                        {p.contact_date} · {p.contact_type}
+                        <div style={{ whiteSpace: 'pre-wrap', color: '#475569' }}>{p.notes}</div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

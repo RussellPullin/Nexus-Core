@@ -6,8 +6,7 @@ import { generateICS, generateICSForMultipleShifts } from '../services/calendar.
 import { recordEvent } from '../services/learningEvent.service.js';
 import { updateAggregatesForShift } from '../services/featureStore.service.js';
 import { pullShiftsFromExcel } from '../services/excelPull.service.js';
-import { getShifterOrgTimezoneSpecForNexusOrg } from '../services/supabaseStaffShifter.service.js';
-import { normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
+import { getEffectiveOrgTzSpecForUser } from '../lib/orgShiftTimezone.js';
 import {
   scheduleMirrorShiftToNexusSupabase,
   scheduleRemoveShiftFromNexusSupabase,
@@ -22,15 +21,6 @@ import {
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 
 const router = Router();
-
-async function getEffectiveOrgTzSpecForUser(userId) {
-  const u = userId ? db.prepare('SELECT org_id FROM users WHERE id = ?').get(userId) : null;
-  const orgId = u?.org_id || null;
-  let spec = orgId ? await getShifterOrgTimezoneSpecForNexusOrg(orgId) : null;
-  if (!spec) spec = normalizeOrgTimezoneRaw(process.env.NEXUS_SHIFT_TIMEZONE_FALLBACK);
-  if (!spec) spec = { kind: 'iana', zone: 'Australia/Sydney' };
-  return spec;
-}
 
 /**
  * SQLite often returns "YYYY-MM-DD HH:MM:SS" while clients send ISO "YYYY-MM-DDTHH:MM:SS".

@@ -10,6 +10,10 @@ import { recordEvent } from '../services/learningEvent.service.js';
 import { getShiftSuggestions, detectAnomalies } from '../services/suggestionEngine.service.js';
 import { suggestMapping, recordMapping, recordCorrection } from '../services/csvMappingLearner.service.js';
 import { computeMetrics } from '../services/featureStore.service.js';
+import { isShiftInRequesterTenant } from '../lib/orgScopeSql.js';
+import { getProviderOrgIdForUser } from '../middleware/roles.js';
+import { getEffectiveOrgTzSpecForUser } from '../lib/orgShiftTimezone.js';
+import { checkShiftAgainstStaffAvailability } from '../lib/staffShiftAvailabilityCheck.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -34,8 +38,11 @@ router.get('/suggestions/shifts', (req, res) => {
 /**
  * GET /api/suggestions/anomalies/:shift_id
  */
-router.get('/suggestions/anomalies/:shift_id', (req, res) => {
+router.get('/suggestions/anomalies/:shift_id', async (req, res) => {
   try {
+    if (!isShiftInRequesterTenant(req.params.shift_id, req.session?.user?.id)) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
     const shift = db.prepare(`
       SELECT s.*, p.management_type FROM shifts s
       JOIN participants p ON s.participant_id = p.id
@@ -45,6 +52,7 @@ router.get('/suggestions/anomalies/:shift_id', (req, res) => {
 
     const lineItems = db.prepare('SELECT * FROM shift_line_items WHERE shift_id = ?').all(req.params.shift_id);
 
+    const orgTzSpec = await getEffectiveOrgTzSpecForUser(req.session?.user?.id);
     const anomalies = detectAnomalies({
       shift_id: shift.id,
       participant_id: shift.participant_id,
@@ -52,10 +60,42 @@ router.get('/suggestions/anomalies/:shift_id', (req, res) => {
       start_time: shift.start_time,
       end_time: shift.end_time,
       line_items: lineItems,
-      date: shift.start_time
+      date: shift.start_time,
+      orgTzSpec
     });
 
     res.json({ anomalies });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/suggestions/availability-preview
+ * Body: { staff_id, start_time, end_time }
+ */
+router.post('/suggestions/availability-preview', async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Not logged in' });
+    const { staff_id, start_time, end_time } = req.body || {};
+    if (!staff_id || !start_time || !end_time) {
+      return res.status(400).json({ error: 'staff_id, start_time, and end_time are required' });
+    }
+    const orgId = getProviderOrgIdForUser(userId);
+    if (!orgId) {
+      return res.status(400).json({ error: 'No organisation on your account.' });
+    }
+    const st = db.prepare('SELECT id, availability_json FROM staff WHERE id = ? AND org_id = ?').get(staff_id, orgId);
+    if (!st) return res.status(404).json({ error: 'Staff not found' });
+    const spec = await getEffectiveOrgTzSpecForUser(userId);
+    const r = checkShiftAgainstStaffAvailability(st.availability_json, start_time, end_time, spec);
+    res.json({
+      status: r.status,
+      outside_availability: r.status === 'outside',
+      message: r.status === 'outside' ? r.message : undefined,
+      allowed_label: r.status === 'outside' ? r.allowed_label : undefined
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

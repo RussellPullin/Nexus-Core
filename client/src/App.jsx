@@ -10,6 +10,7 @@ import DirectoryPage from './pages/DirectoryPage';
 import StaffPage from './pages/StaffPage';
 import StaffProfile from './pages/StaffProfile';
 import ShiftsPage from './pages/ShiftsPage';
+import StaffAvailabilityReportPage from './pages/StaffAvailabilityReportPage';
 import ShiftDetailPage from './pages/ShiftDetailPage';
 import NDISPage from './pages/NDISPage';
 import FinancialPage from './pages/FinancialPage';
@@ -208,6 +209,7 @@ export default function App() {
           <Route path="/directory" element={<ProtectedRoute><Layout><DirectoryPage /></Layout></ProtectedRoute>} />
           <Route path="/staff" element={<ProtectedRoute><Layout><StaffPage /></Layout></ProtectedRoute>} />
           <Route path="/staff/:id" element={<ProtectedRoute><Layout><StaffProfile /></Layout></ProtectedRoute>} />
+          <Route path="/shifts/availability" element={<ProtectedRoute><Layout><StaffAvailabilityReportPage /></Layout></ProtectedRoute>} />
           <Route path="/shifts/:id" element={<ProtectedRoute><Layout><ShiftDetailPage /></Layout></ProtectedRoute>} />
           <Route path="/shifts" element={<ProtectedRoute><Layout><ShiftsPage /></Layout></ProtectedRoute>} />
           <Route path="/ndis" element={<ProtectedRoute><Layout><NDISPage /></Layout></ProtectedRoute>} />

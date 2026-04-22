@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { shifts, ndis, invoices } from '../lib/api';
+import { shifts, ndis, invoices, learning } from '../lib/api';
 import { formatDate, formatDateLocal } from '../lib/dateUtils';
 import { getEffectiveNdisRate } from '../lib/ndisRates';
 
@@ -61,6 +61,7 @@ export default function ShiftDetailPage() {
   const [periodNavShifts, setPeriodNavShifts] = useState(null);
   const [periodNavLoading, setPeriodNavLoading] = useState(false);
   const [effectivePeriod, setEffectivePeriod] = useState(null);
+  const [shiftAnomalies, setShiftAnomalies] = useState(null);
 
   const handleCancelShift = async () => {
     if (!shift?.id) return;
@@ -162,6 +163,25 @@ export default function ShiftDetailPage() {
       cancelled = true;
     };
   }, [shift?.start_time, periodStartQ, periodEndQ, id]);
+
+  useEffect(() => {
+    if (!id) {
+      setShiftAnomalies(null);
+      return;
+    }
+    let cancelled = false;
+    learning
+      .anomalies(id)
+      .then((r) => {
+        if (!cancelled) setShiftAnomalies(Array.isArray(r?.anomalies) && r.anomalies.length > 0 ? r.anomalies : null);
+      })
+      .catch(() => {
+        if (!cancelled) setShiftAnomalies(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   const { prevShift, nextShift, periodQueryStr, showPeriodNav } = useMemo(() => {
     if (!effectivePeriod || !periodNavShifts?.length) {
@@ -432,6 +452,30 @@ export default function ShiftDetailPage() {
             )}
           </div>
         </div>
+
+        {shiftAnomalies && (
+          <div
+            className="card"
+            style={{
+              marginBottom: '1rem',
+              fontSize: '0.9rem',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0'
+            }}
+          >
+            <strong style={{ display: 'block', marginBottom: '0.5rem' }}>Rostering and checks</strong>
+            <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
+              {shiftAnomalies.map((a, i) => (
+                <li key={i} style={{ marginBottom: '0.35rem' }}>
+                  {a.severity && (
+                    <span style={{ textTransform: 'capitalize', fontWeight: 600, marginRight: '0.35rem' }}>{a.severity}:</span>
+                  )}
+                  {a.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1rem', borderBottom: '1px solid #e2e8f0' }}>
           <button

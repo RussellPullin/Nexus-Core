@@ -46,7 +46,21 @@ export const admin = {
   billableSummary: (params) => fetchApi(`/admin/billable-summary?${new URLSearchParams(params || {}).toString()}`),
   financialOverview: (params) => fetchApi(`/admin/financial-overview?${new URLSearchParams(params || {}).toString()}`),
   paySummary: () => fetchApi('/admin/pay-summary'),
-  refreshRegisters: () => fetchApi('/integrations/microsoft-drive/refresh-registers', { method: 'POST' })
+  refreshRegisters: () => fetchApi('/integrations/microsoft-drive/refresh-registers', { method: 'POST' }),
+  /** Multipart: file, optional default_participant_id, optional dry_run=1 (preview only). */
+  importCaseNotesCsv: async (formData) => {
+    const res = await fetch(`${API}/admin/case-notes-import`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || res.statusText);
+    }
+    return text ? JSON.parse(text) : null;
+  }
 };
 
 /** Per-org flags in Supabase org_features; server uses service role. */
@@ -519,6 +533,8 @@ export const smartDefaults = {
 export const learning = {
   shiftSuggestions: (params) => fetchApi(`/suggestions/shifts?${new URLSearchParams(params).toString()}`),
   anomalies: (shiftId) => fetchApi(`/suggestions/anomalies/${shiftId}`),
+  availabilityPreview: (data) =>
+    fetchApi('/suggestions/availability-preview', { method: 'POST', body: JSON.stringify(data) }),
   submitFeedback: (data) => fetchApi('/feedback/suggestions', { method: 'POST', body: JSON.stringify(data) }),
   previewMapping: (data) => fetchApi('/imports/csv/preview-mapping', { method: 'POST', body: JSON.stringify(data) }),
   mappingFeedback: (data) => fetchApi('/imports/csv/mapping-feedback', { method: 'POST', body: JSON.stringify(data) }),
@@ -526,6 +542,11 @@ export const learning = {
   updateConfig: (data) => fetchApi('/learning/config', { method: 'PUT', body: JSON.stringify(data) }),
   audit: (params) => fetchApi(`/learning/audit?${new URLSearchParams(params || {}).toString()}`),
   metrics: () => fetchApi('/learning/metrics')
+};
+
+export const reports = {
+  staffAvailability: (start, end) =>
+    fetchApi(`/reports/staff-availability?${new URLSearchParams({ start, end }).toString()}`)
 };
 
 export const billing = {

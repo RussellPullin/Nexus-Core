@@ -8,6 +8,8 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
+import { normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
+import { checkShiftAgainstStaffAvailability } from '../lib/staffShiftAvailabilityCheck.js';
 import { getAggregates, getTopValue, dayName } from './featureStore.service.js';
 import { getDayOfWeek, getTimeBucket } from './learningEvent.service.js';
 
@@ -165,8 +167,9 @@ export function getShiftSuggestions({ participant_id, staff_id, date, shift_type
 
 /**
  * Detect anomalies for a specific shift.
+ * @param {{ orgTzSpec?: { kind: 'iana', zone: string } | { kind: 'fixed', offsetMinutes: number } }} opts
  */
-export function detectAnomalies({ shift_id, participant_id, staff_id, start_time, end_time, line_items, date }) {
+export function detectAnomalies({ shift_id, participant_id, staff_id, start_time, end_time, line_items, date, orgTzSpec }) {
   const anomalies = [];
 
   // Overlapping shifts: same staff, overlapping time window
@@ -188,6 +191,20 @@ export function detectAnomalies({ shift_id, participant_id, staff_id, start_time
           message: `Overlaps with shift for ${o.participant_name} (${o.start_time} - ${o.end_time})`,
           related_shift_id: o.id
         });
+      }
+
+      const st = db.prepare('SELECT availability_json FROM staff WHERE id = ?').get(staff_id);
+      if (st) {
+        const spec =
+          orgTzSpec || normalizeOrgTimezoneRaw(process.env.NEXUS_SHIFT_TIMEZONE_FALLBACK) || { kind: 'iana', zone: 'Australia/Sydney' };
+        const ar = checkShiftAgainstStaffAvailability(st.availability_json, start_time, end_time, spec);
+        if (ar.status === 'outside') {
+          anomalies.push({
+            type: 'outside_availability',
+            severity: 'warning',
+            message: ar.message
+          });
+        }
       }
     } catch { /* ignore */ }
   }

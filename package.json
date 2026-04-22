@@ -29,7 +29,8 @@
     "deploy:fly:commit": "DEPLOY_AUTO_COMMIT=1 bash scripts/deploy-nexus.sh",
     "deploy:fly:no-commit": "bash scripts/deploy-nexus.sh",
     "deploy:fly:push": "DEPLOY_AUTO_COMMIT=1 DEPLOY_AUTO_PUSH=1 bash scripts/deploy-nexus.sh",
-    "verify:server-syntax": "bash scripts/verify-server-syntax.sh"
+    "verify:server-syntax": "bash scripts/verify-server-syntax.sh",
+    "test:server": "node --test server/src/lib/staffShiftAvailabilityCheck.test.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

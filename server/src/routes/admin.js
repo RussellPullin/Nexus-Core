@@ -3,13 +3,16 @@
  * Requires admin or delegate with active grant.
  */
 import { Router } from 'express';
+import multer from 'multer';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { billingParticipantFilterFromRequest, staffTableOrgFilterFromRequest } from '../lib/orgScopeSql.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
+import { fileToRows, importCaseNotesFromRows } from '../lib/caseNotesCsvImport.js';
 
 const router = Router();
+const caseNotesUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 router.use(requireAuth);
 router.use(requireAdminOrDelegate);
 
@@ -333,5 +336,39 @@ router.get('/pay-summary', (req, res) => {
     res.status(500).json({ error: err.message || 'Failed to load pay summary' });
   }
 });
+
+/**
+ * Import historical case notes from a CSV (e.g. legacy CRM export).
+ * Form fields: file (required), default_participant_id (optional), dry_run (optional "1" or "true") — preview only, no insert.
+ * Recognises columns: participant_id / ndis_number, date, notes, optional contact_type. Semicolon- or comma-separated.
+ */
+router.post(
+  '/case-notes-import',
+  caseNotesUpload.single('file'),
+  (req, res) => {
+    try {
+      if (!req.file?.buffer) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+      const name = (req.file.originalname || '').toLowerCase();
+      if (!name.endsWith('.csv') && !name.endsWith('.txt')) {
+        return res.status(400).json({ error: 'Upload a .csv (or .txt) file' });
+      }
+      const userId = req.session.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
+      const defaultPid = (req.body?.default_participant_id || '').trim() || null;
+      const dryRun = req.body?.dry_run === '1' || String(req.body?.dry_run || '').toLowerCase() === 'true';
+
+      const rows = fileToRows(req.file.buffer);
+      const out = importCaseNotesFromRows(rows, defaultPid, userId, { dryRun });
+      res.json(out);
+    } catch (err) {
+      console.error('[admin case-notes-import]', err);
+      res.status(500).json({ error: err.message || 'Import failed' });
+    }
+  }
+);
 
 export default router;

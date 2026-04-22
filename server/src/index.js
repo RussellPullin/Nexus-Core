@@ -133,6 +133,7 @@ import xeroWebhookRouter from './routes/xeroWebhook.js';
 import receiptsRouter from './routes/receipts.js';
 import settingsRouter from './routes/settings.js';
 import learningRouter from './routes/learning.js';
+import reportsRouter from './routes/reports.js';
 import usersRouter from './routes/users.js';
 import adminRouter from './routes/admin.js';
 import orgFeaturesRouter from './routes/orgFeatures.js';
@@ -264,6 +265,7 @@ app.use('/api/users', usersRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/org-features', orgFeaturesRouter);
 app.use('/api', requireAuth, learningRouter);
+app.use('/api/reports', requireAuth, reportsRouter);
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
