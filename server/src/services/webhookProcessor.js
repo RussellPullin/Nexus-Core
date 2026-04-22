@@ -19,7 +19,7 @@ import { scheduleMirrorShiftToNexusSupabase } from './nexusPublicShiftsSync.serv
 import { syncCaseNoteFromShift } from './shiftCaseNoteSync.service.js';
 import { populateShiftLineItems } from './shiftLineItems.service.js';
 import { resolveProgressNoteDurationHours } from '../lib/shiftDuration.js';
-import { isShifterShiftIdSuppressedForOrg } from './shiftImportSuppression.service.js';
+import { isShifterShiftIdSuppressedForOrg, isShifterShiftIdSuppressedGlobally } from './shiftImportSuppression.service.js';
 
 function normNameShifts(n) {
   return String(n || '')
@@ -126,6 +126,11 @@ export function processShifts(shiftsArray, options = {}) {
       if (scopeOrg && isShifterShiftIdSuppressedForOrg(scopeOrg, shiftId)) {
         skipped++;
         log('Skipped shift (suppressed after hard delete)', { shiftId, orgId: scopeOrg });
+        continue;
+      }
+      if (!scopeOrg && isShifterShiftIdSuppressedGlobally(shiftId)) {
+        skipped++;
+        log('Skipped shift (suppressed globally; org unknown in payload)', { shiftId });
         continue;
       }
     }
@@ -259,32 +264,41 @@ export function processShifts(shiftsArray, options = {}) {
       }
     } else {
       try {
-        const expensesVal = Number.isFinite(expenses) ? expenses : 0;
-        db.prepare(`
-          INSERT OR REPLACE INTO app_shifts (
-            shift_id, date, staff_name, client_name, start_time, finish_time,
-            duration, travel_km, travel_time_minutes, expenses, incidents, mood, session_details,
-            goals_worked_towards, medication_checks, source_org_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          shiftId,
-          dateStr,
-          staffName,
-          clientName,
-          startTime,
-          finishTime,
-          duration ?? null,
-          travelKm,
-          travelTimeMin,
-          expensesVal,
-          incidents,
-          mood,
-          sessionDetails,
-          String(s.goalsWorkedTowards ?? s.goals_worked_towards ?? '').trim() || null,
-          JSON.stringify(s.medicationChecks ?? s.medication_checks ?? {}),
-          orgId
-        );
-        unmatched++;
+        const scopeUnmatched = orgId || null;
+        if (scopeUnmatched && isShifterShiftIdSuppressedForOrg(scopeUnmatched, shiftId)) {
+          skipped++;
+          log('Skipped unmatched shift (suppressed after dismiss/hard delete)', { shiftId, orgId: scopeUnmatched });
+        } else if (!scopeUnmatched && isShifterShiftIdSuppressedGlobally(shiftId)) {
+          skipped++;
+          log('Skipped unmatched shift (suppressed globally; org unknown in payload)', { shiftId });
+        } else {
+          const expensesVal = Number.isFinite(expenses) ? expenses : 0;
+          db.prepare(`
+            INSERT OR REPLACE INTO app_shifts (
+              shift_id, date, staff_name, client_name, start_time, finish_time,
+              duration, travel_km, travel_time_minutes, expenses, incidents, mood, session_details,
+              goals_worked_towards, medication_checks, source_org_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            shiftId,
+            dateStr,
+            staffName,
+            clientName,
+            startTime,
+            finishTime,
+            duration ?? null,
+            travelKm,
+            travelTimeMin,
+            expensesVal,
+            incidents,
+            mood,
+            sessionDetails,
+            String(s.goalsWorkedTowards ?? s.goals_worked_towards ?? '').trim() || null,
+            JSON.stringify(s.medicationChecks ?? s.medication_checks ?? {}),
+            orgId
+          );
+          unmatched++;
+        }
       } catch (err) {
         logError('app_shifts insert error:', err);
       }

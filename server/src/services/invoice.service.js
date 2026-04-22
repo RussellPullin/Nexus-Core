@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { recordEvent } from './learningEvent.service.js';
 import { syncShiftLineItemsWithProgressNote } from './shiftLineItems.service.js';
 import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
+import { getShiftLocalDateString } from '../lib/ndisDay.js';
 
 export function createInvoiceForShift(shiftId) {
   const existing = db.prepare('SELECT id FROM invoices WHERE shift_id = ?').get(shiftId);
@@ -60,8 +61,9 @@ export function getInvoiceData(invoiceId) {
     WHERE sli.shift_id = ?
   `).all(invoice.shift_id);
 
-  // Shift times are stored as local wall times in SQLite; do not convert with Date()/toISOString() (server TZ may be UTC).
-  const supportDate = shift.start_time ? String(shift.start_time).replace(' ', 'T').slice(0, 10) : null;
+  const supportDate = shift.start_time
+    ? getShiftLocalDateString(shift.start_time) || String(shift.start_time).replace(' ', 'T').slice(0, 10)
+    : null;
   const includesGst = participantInvoiceIncludesGst(shift.invoice_includes_gst);
   let subtotal = 0;
   const items = lineItems.map(li => {

@@ -7,6 +7,7 @@ import { db } from '../db/index.js';
 import { syncShiftLineItemsWithProgressNote } from './shiftLineItems.service.js';
 import { buildBillingLinePayloadForScDayBucket, ALL_BUCKETS, resolveSupportCoordProviderTravelKmItem } from './coordinatorTasks.service.js';
 import { getDefaultLineItemForParticipant } from './progressNoteMatcher.js';
+import { getShiftLocalDateString } from '../lib/ndisDay.js';
 
 export function rebuildBillingInvoiceLineItems(invoiceId) {
   const inv = db.prepare('SELECT id, participant_id, status FROM billing_invoices WHERE id = ?').get(invoiceId);
@@ -81,7 +82,9 @@ export function rebuildBillingInvoiceLineItems(invoiceId) {
       )
       .all(sid);
     const shift = db.prepare('SELECT participant_id, start_time, end_time FROM shifts WHERE id = ?').get(sid);
-    const lineDate = shift?.start_time ? shift.start_time.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const lineDate = shift?.start_time
+      ? getShiftLocalDateString(shift.start_time) || shift.start_time.slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
     if (shiftLines.length > 0) {
       for (const li of shiftLines) {
         insLine.run(

@@ -33,8 +33,16 @@ export function getTimeBucket(timeStr) {
 
 export function getDayOfWeek(dateStr) {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
-  return isNaN(d.getTime()) ? null : d.getDay();
+  const s = String(dateStr).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const y = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10);
+    const d = parseInt(m[3], 10);
+    return new Date(Date.UTC(y, mo - 1, d, 12, 0, 0)).getUTCDay();
+  }
+  const d2 = new Date(s);
+  return isNaN(d2.getTime()) ? null : d2.getDay();
 }
 
 function computeDurationMinutes(startTime, endTime) {

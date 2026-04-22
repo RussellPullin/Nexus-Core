@@ -301,8 +301,8 @@ router.get('/pay-summary', (req, res) => {
       .all(...sf.params);
     const shiftStmt = db.prepare(`
       SELECT s.id, s.start_time, s.end_time, s.expenses,
-        (SELECT pn.travel_time_min FROM progress_notes pn WHERE pn.shift_id = s.id LIMIT 1) as travel_time_min,
-        (SELECT pn.travel_km FROM progress_notes pn WHERE pn.shift_id = s.id LIMIT 1) as travel_km
+        (SELECT MAX(pn.travel_time_min) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_time_min,
+        (SELECT MAX(pn.travel_km) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_km
       FROM shifts s
       WHERE s.staff_id = ?
         AND s.status IN ('completed', 'completed_by_admin')

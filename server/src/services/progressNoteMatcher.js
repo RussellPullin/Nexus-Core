@@ -4,7 +4,7 @@
  */
 import { db } from '../db/index.js';
 import { tenantParticipantClause } from '../lib/orgScopeSql.js';
-import { getShiftDayType, getShiftTimeBand } from '../lib/ndisDay.js';
+import { getShiftDayType, getShiftTimeBand, getShiftLocalDateString, getShiftWallClockMinutes } from '../lib/ndisDay.js';
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 
 /**
@@ -152,7 +152,7 @@ function getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime, dayType) {
   const premiumDay =
     dayType === 'saturday' || dayType === 'sunday' || dayType === 'public_holiday';
   if (!premiumDay) {
-    const endMins = parseTimeToMinutes(String(shiftEndTime || '').slice(11, 16));
+    const endMins = getShiftWallClockMinutes(shiftEndTime);
     if (endMins != null && endMins >= 20 * 60) {
       return 'evening';
     }
@@ -256,7 +256,7 @@ export function findMatchingShift({ participantId, staffId, supportDate, startTi
 export function getDefaultLineItemForParticipant(participantId, shiftStartTime, supportDate, shiftEndTime = null) {
   const dayType = getShiftDayType(shiftStartTime);
   const timeBand = getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime, dayType);
-  const dateStr = supportDate || (shiftStartTime ? shiftStartTime.slice(0, 10) : null) || new Date().toISOString().slice(0, 10);
+  const dateStr = supportDate || getShiftLocalDateString(shiftStartTime) || new Date().toISOString().slice(0, 10);
 
   const toResult = (item, remoteness) => ({
     id: item.id,

@@ -13,6 +13,7 @@ import {
 } from '../services/orgOnedriveSync.service.js';
 import { getOnedriveLinkRow } from '../services/orgOnedriveTokens.service.js';
 import { getDefaultLineItemForParticipant } from '../services/progressNoteMatcher.js';
+import { getShiftLocalDateString } from '../lib/ndisDay.js';
 import { syncShiftLineItemsWithProgressNote } from '../services/shiftLineItems.service.js';
 import {
   participantInvoiceIncludesGst,
@@ -206,7 +207,7 @@ router.get('/draft-batch', (req, res) => {
       `).all(s.shift_id);
 
       if (lineItemsForShift.length === 0) {
-        const supportDate = s.start_time ? s.start_time.slice(0, 10) : '';
+        const supportDate = s.start_time ? getShiftLocalDateString(s.start_time) || s.start_time.slice(0, 10) : '';
         const defaultItem = getDefaultLineItemForParticipant(s.participant_id, s.start_time, supportDate, s.end_time);
         if (defaultItem) {
           const nli = db.prepare('SELECT support_item_number, description, unit FROM ndis_line_items WHERE id = ?').get(defaultItem.id);
@@ -225,7 +226,7 @@ router.get('/draft-batch', (req, res) => {
         }
       }
 
-      const supportDate = s.start_time ? s.start_time.slice(0, 10) : '';
+      const supportDate = s.start_time ? getShiftLocalDateString(s.start_time) || s.start_time.slice(0, 10) : '';
       lineItemsForShift.forEach((li) => {
         const rawUnit = li.unit || 'hour';
         lineItems.push({
@@ -477,7 +478,9 @@ router.post('/create-batch', (req, res) => {
           WHERE sli.shift_id = ?
         `).all(sid);
         const shift = db.prepare('SELECT participant_id, start_time, end_time FROM shifts WHERE id = ?').get(sid);
-        const lineDate = shift?.start_time ? shift.start_time.slice(0, 10) : from_date;
+        const lineDate = shift?.start_time
+          ? getShiftLocalDateString(shift.start_time) || shift.start_time.slice(0, 10)
+          : from_date;
         let addedAny = false;
 
         const toUnit = (u) => (u === 'each' ? 'unit' : (u || 'hour'));

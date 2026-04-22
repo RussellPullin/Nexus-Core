@@ -2,6 +2,7 @@
  * Compute staff hours breakdown from Nexus shifts.
  * Ports logic from Shifter StaffDetailScreen for pay period aggregation.
  */
+import { getShiftLocalDateString, getShiftWallClockMinutes } from '../lib/ndisDay.js';
 
 const AU_PUBLIC_HOLIDAYS_2025_2026 = [
   '2025-01-01', '2025-01-27', '2025-04-18', '2025-04-19',
@@ -128,13 +129,25 @@ export function computeHoursFromShifts(shifts, options = {}) {
   const periodMap = new Map();
 
   for (const s of shifts || []) {
-    const dateStr = (s.start_time || s.startTime || '').toString().slice(0, 10);
+    const rawStart = (s.start_time || s.startTime || '').toString();
+    if (!rawStart) continue;
+    const dateStr = getShiftLocalDateString(rawStart) || rawStart.slice(0, 10);
     if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
 
     const startTime = (s.start_time || s.startTime || '').toString();
     const finishTime = (s.end_time || s.endTime || '').toString();
-    const startTimeStr = startTime.includes('T') ? startTime.slice(11, 16) : startTime;
-    const finishTimeStr = finishTime.includes('T') ? finishTime.slice(11, 16) : finishTime;
+    const wStart = getShiftWallClockMinutes(startTime);
+    const wEnd = getShiftWallClockMinutes(finishTime);
+    const startTimeStr = wStart != null
+      ? `${String(Math.floor(wStart / 60)).padStart(2, '0')}:${String(wStart % 60).padStart(2, '0')}`
+      : startTime.includes('T')
+        ? startTime.slice(11, 16)
+        : startTime;
+    const finishTimeStr = wEnd != null
+      ? `${String(Math.floor(wEnd / 60)).padStart(2, '0')}:${String(wEnd % 60).padStart(2, '0')}`
+      : finishTime.includes('T')
+        ? finishTime.slice(11, 16)
+        : finishTime;
 
     const period = getPayPeriodForDate(dateStr, payPeriodStart);
     if (!period) continue;

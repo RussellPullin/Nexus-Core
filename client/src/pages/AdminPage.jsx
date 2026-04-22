@@ -151,7 +151,7 @@ export default function AdminPage() {
       fields.forEach((f) => {
         const raw = payEdits[k]?.[f];
         const val = raw !== undefined && raw !== '' ? parseNum(raw, r[f]) : r[f];
-        t[f] += Number.isFinite(val) ? val : 0;
+        t[f] += parseNum(val, 0);
       });
     });
     return t;
@@ -734,10 +734,12 @@ export default function AdminPage() {
                 <tbody>
                   {payFilteredRows.map((r) => {
                     const k = payRowKey(r);
+                    const exDisplay = parseNum(getPayCell(r, 'totalExpenses'), NaN);
+                    const kmDisplay = parseNum(getPayCell(r, 'totalKm'), NaN);
                     const hourFields = ['totalHours', 'weekdayHours', 'saturdayHours', 'sundayHours', 'holidayHours', 'eveningHours'];
                     const renderHour = (f) => {
-                      const display = getPayCell(r, f);
-                      if (!payAdjustMode) return <td key={f}>{Number.isFinite(display) ? display.toFixed(1) : '—'}</td>;
+                      const n = parseNum(getPayCell(r, f), NaN);
+                      if (!payAdjustMode) return <td key={f}>{Number.isFinite(n) ? n.toFixed(1) : '—'}</td>;
                       return (
                         <td key={f}>
                           <input
@@ -745,7 +747,7 @@ export default function AdminPage() {
                             step="0.1"
                             className="form-input"
                             style={{ width: '4.5rem', padding: '0.2rem 0.35rem' }}
-                            value={payEdits[k]?.[f] !== undefined ? payEdits[k][f] : (Number.isFinite(r[f]) ? String(r[f]) : '')}
+                            value={payEdits[k]?.[f] !== undefined ? payEdits[k][f] : (Number.isFinite(parseNum(r[f], NaN)) ? String(r[f]) : '')}
                             onChange={(e) => setPayCell(r, f, e.target.value)}
                           />
                         </td>
@@ -766,8 +768,8 @@ export default function AdminPage() {
                         {hourFields.map((f) => renderHour(f))}
                         <td>
                           {!payAdjustMode ? (
-                            getPayCell(r, 'totalExpenses') != null && getPayCell(r, 'totalExpenses') !== 0
-                              ? `$${Number(getPayCell(r, 'totalExpenses')).toFixed(2)}`
+                            Number.isFinite(exDisplay) && exDisplay !== 0
+                              ? `$${exDisplay.toFixed(2)}`
                               : '—'
                           ) : (
                             <input
@@ -782,8 +784,8 @@ export default function AdminPage() {
                         </td>
                         <td>
                           {!payAdjustMode ? (
-                            Number.isFinite(getPayCell(r, 'totalKm')) && getPayCell(r, 'totalKm') !== 0
-                              ? getPayCell(r, 'totalKm').toFixed(1)
+                            Number.isFinite(kmDisplay) && kmDisplay !== 0
+                              ? kmDisplay.toFixed(1)
                               : '—'
                           ) : (
                             <input

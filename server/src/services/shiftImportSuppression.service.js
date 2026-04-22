@@ -52,3 +52,20 @@ export function isShifterShiftIdSuppressedForOrg(nexusOrgId, shifterShiftId) {
     .get(org, sid);
   return Boolean(row?.ok);
 }
+
+/** When org is unknown (e.g. webhook without org_id), any suppression for this external id is a strong signal to skip. */
+export function isShifterShiftIdSuppressedGlobally(shifterShiftId) {
+  const sid = normId(shifterShiftId);
+  if (!sid) return false;
+  const row = db
+    .prepare(
+      `
+    SELECT 1 AS ok
+    FROM shift_import_suppressed_shifter_ids
+    WHERE shifter_shift_id = ?
+    LIMIT 1
+  `,
+    )
+    .get(sid);
+  return Boolean(row?.ok);
+}

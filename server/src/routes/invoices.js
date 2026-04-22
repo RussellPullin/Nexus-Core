@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/index.js';
 import { generateInvoicePDF, getInvoiceData } from '../services/invoice.service.js';
 import { tenantParticipantAndStaffClause, isShiftInRequesterTenant } from '../lib/orgScopeSql.js';
+import { getShiftLocalDateString } from '../lib/ndisDay.js';
 
 const router = Router();
 
@@ -58,7 +59,9 @@ router.get('/ndia-managed-csv', (req, res) => {
         JOIN ndis_line_items nli ON sli.ndis_line_item_id = nli.id
         WHERE sli.shift_id = ?
       `).all(inv.shift_id);
-      const supportDate = inv.start_time ? new Date(inv.start_time).toISOString().slice(0, 10) : '';
+      const supportDate = inv.start_time
+        ? getShiftLocalDateString(inv.start_time) || new Date(inv.start_time).toISOString().slice(0, 10)
+        : '';
       const ndiaCats = (() => { try { return JSON.parse(inv.ndia_managed_services || '[]'); } catch { return []; } })();
       for (const li of lineItems) {
         const cat = getSupportCategory(li.support_item_number) || li.support_category;

@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { getProviderOrgIdForUser, getSingleDistinctUserOrgId } from '../middleware/roles.js';
 import { processShifts } from '../services/webhookProcessor.js';
+import { recordSuppressedShifterShiftId } from '../services/shiftImportSuppression.service.js';
 
 const router = Router();
 
@@ -165,6 +166,15 @@ router.delete('/:shift_id', (req, res) => {
     const { shift_id } = req.params;
     const row = db.prepare('SELECT * FROM app_shifts WHERE shift_id = ?').get(shift_id);
     if (!row) return res.status(404).json({ error: 'App shift not found' });
+    const sessionOrg = getProviderOrgIdForUser(req.session?.user?.id);
+    const nexusOrgId = String(
+      row.source_org_id && String(row.source_org_id).trim()
+        ? row.source_org_id
+        : sessionOrg || ''
+    ).trim();
+    if (nexusOrgId && shift_id && String(shift_id).trim()) {
+      recordSuppressedShifterShiftId(nexusOrgId, shift_id, 'dismiss_app_shift');
+    }
     db.prepare('DELETE FROM app_shifts WHERE shift_id = ?').run(shift_id);
     res.status(204).send();
   } catch (err) {
