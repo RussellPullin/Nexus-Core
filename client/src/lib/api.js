@@ -426,6 +426,12 @@ export const shifts = {
       method: 'POST',
       body: JSON.stringify({ confirm: 'DELETE' })
     }),
+  /** Block external shiftId from re-import (admin/delegate). */
+  suppressShifterId: (shifterShiftId, nexusOrgId) =>
+    fetchApi('/shifts/suppress-shifter-id', {
+      method: 'POST',
+      body: JSON.stringify({ shifter_shift_id: shifterShiftId, nexus_org_id: nexusOrgId || undefined })
+    }),
   lineItems: {
     list: (shiftId) => fetchApi(`/shifts/${shiftId}/line-items`),
     add: (shiftId, data) => fetchApi(`/shifts/${shiftId}/line-items`, { method: 'POST', body: JSON.stringify(data) }),

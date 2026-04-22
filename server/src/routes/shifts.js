@@ -19,8 +19,16 @@ import {
   tenantParticipantAndStaffClause,
 } from '../lib/orgScopeSql.js';
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
+import { recordSuppressedShifterShiftId } from '../services/shiftImportSuppression.service.js';
 
 const router = Router();
+
+function isEnvTruthyTrue(v) {
+  const s = String(v ?? '')
+    .trim()
+    .toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes';
+}
 
 /**
  * SQLite often returns "YYYY-MM-DD HH:MM:SS" while clients send ISO "YYYY-MM-DDTHH:MM:SS".
@@ -254,6 +262,34 @@ router.get('/duplicates', (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/shifts/suppress-shifter-id
+ * Block a Progress/Excel "shiftId" from being re-imported after it was removed from Nexus.
+ * Use when the shift row is already gone but Pull from Excel keeps recreating it.
+ * Body: { shifter_shift_id, nexus_org_id? } — org defaults to signed-in user's org.
+ */
+router.post('/suppress-shifter-id', requireAdminOrDelegate, (req, res) => {
+  try {
+    const shifterShiftId = String(req.body?.shifter_shift_id || '').trim();
+    if (!shifterShiftId) {
+      return res.status(400).json({ error: 'shifter_shift_id is required' });
+    }
+    const bodyOrg = String(req.body?.nexus_org_id || '').trim();
+    const sessionOrg = getProviderOrgIdForUser(req.session?.user?.id);
+    const nexusOrgId = bodyOrg || sessionOrg;
+    if (!nexusOrgId) {
+      return res.status(400).json({ error: 'nexus_org_id is required (or sign in with an org-scoped user)' });
+    }
+    const r = recordSuppressedShifterShiftId(nexusOrgId, shifterShiftId, 'manual_suppress');
+    if (!r.ok) {
+      return res.status(500).json({ error: r.error || 'Failed to record suppression' });
+    }
+    return res.json({ ok: true, nexus_org_id: nexusOrgId, shifter_shift_id: shifterShiftId });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
   }
 });
 
@@ -503,10 +539,10 @@ router.post('/:id/hard-delete', requireAdminOrDelegate, (req, res) => {
   if (!isShiftInRequesterTenant(id, req.session?.user?.id)) {
     return res.status(404).json({ error: 'Shift not found' });
   }
-  if (process.env.ALLOW_SHIFT_HARD_DELETE !== 'true') {
+  if (!isEnvTruthyTrue(process.env.ALLOW_SHIFT_HARD_DELETE)) {
     return res.status(403).json({
       error: 'Hard delete is disabled on this server.',
-      errorDetail: 'Set ALLOW_SHIFT_HARD_DELETE=true to enable.',
+      errorDetail: 'Set ALLOW_SHIFT_HARD_DELETE to true, 1, or yes, then restart the API.',
       code: 'SHIFT_HARD_DELETE_DISABLED',
     });
   }
@@ -519,9 +555,23 @@ router.post('/:id/hard-delete', requireAdminOrDelegate, (req, res) => {
     });
   }
 
-  const existing = db.prepare('SELECT id FROM shifts WHERE id = ?').get(id);
+  const existing = db
+    .prepare(
+      `
+    SELECT s.id, s.shifter_shift_id, p.provider_org_id AS participant_provider_org_id
+    FROM shifts s
+    JOIN participants p ON p.id = s.participant_id
+    WHERE s.id = ?
+  `,
+    )
+    .get(id);
   if (!existing) {
     return res.status(404).json({ error: 'Shift not found' });
+  }
+
+  const nexusOrgId = String(existing.participant_provider_org_id || getProviderOrgIdForUser(req.session?.user?.id) || '').trim();
+  if (existing.shifter_shift_id && String(existing.shifter_shift_id).trim()) {
+    recordSuppressedShifterShiftId(nexusOrgId, existing.shifter_shift_id, 'hard_delete');
   }
 
   // Remove dependent rows so FK constraints don't block shift delete

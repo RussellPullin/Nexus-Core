@@ -297,6 +297,16 @@ CREATE TABLE IF NOT EXISTS shifts (
   FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
 );
 
+-- External shift ids to skip on Excel/Shifter import after a hard delete (nexus org UUID + shifter "shiftId")
+CREATE TABLE IF NOT EXISTS shift_import_suppressed_shifter_ids (
+  nexus_org_id TEXT NOT NULL,
+  shifter_shift_id TEXT NOT NULL,
+  reason TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (nexus_org_id, shifter_shift_id)
+);
+CREATE INDEX IF NOT EXISTS idx_shift_import_supp_shifter_id ON shift_import_suppressed_shifter_ids(shifter_shift_id);
+
 -- Shift Line Items (NDIS items linked to shift)
 CREATE TABLE IF NOT EXISTS shift_line_items (
   id TEXT PRIMARY KEY,

@@ -19,6 +19,7 @@ import { scheduleMirrorShiftToNexusSupabase } from './nexusPublicShiftsSync.serv
 import { syncCaseNoteFromShift } from './shiftCaseNoteSync.service.js';
 import { populateShiftLineItems } from './shiftLineItems.service.js';
 import { resolveProgressNoteDurationHours } from '../lib/shiftDuration.js';
+import { isShifterShiftIdSuppressedForOrg } from './shiftImportSuppression.service.js';
 
 function normNameShifts(n) {
   return String(n || '')
@@ -115,6 +116,18 @@ export function processShifts(shiftsArray, options = {}) {
     }
     if (!staff && staffName) {
       logWarn('Staff not found in Nexus - add staff with matching name', { staffName });
+    }
+
+    if (participant && staff) {
+      const participantOrg =
+        db.prepare('SELECT provider_org_id FROM participants WHERE id = ?').get(participant.id)?.provider_org_id || null;
+      const staffOrg = db.prepare('SELECT org_id FROM staff WHERE id = ?').get(staff.id)?.org_id || null;
+      const scopeOrg = orgId || participantOrg || staffOrg;
+      if (scopeOrg && isShifterShiftIdSuppressedForOrg(scopeOrg, shiftId)) {
+        skipped++;
+        log('Skipped shift (suppressed after hard delete)', { shiftId, orgId: scopeOrg });
+        continue;
+      }
     }
 
     if (participant && staff) {

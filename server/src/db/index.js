@@ -192,6 +192,25 @@ try {
       if (!e.message?.includes('duplicate column')) console.warn('shifts.shifter_shift_id migration:', e.message);
     }
   }
+  // Prevent re-importing the same external shift after hard-delete (Excel / Shifter pull)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS shift_import_suppressed_shifter_ids (
+        nexus_org_id TEXT NOT NULL,
+        shifter_shift_id TEXT NOT NULL,
+        reason TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (nexus_org_id, shifter_shift_id)
+      );
+    `);
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_shift_import_supp_shifter_id ON shift_import_suppressed_shifter_ids(shifter_shift_id);',
+    );
+  } catch (e) {
+    if (!/already exists|duplicate table/i.test(String(e.message || ''))) {
+      console.warn('shift_import_suppressed_shifter_ids migration:', e.message);
+    }
+  }
   // plan_budgets: hours_planned and frequency for SC configuration (e.g. 10 hrs/week)
   try {
     const pbCols = db.prepare("PRAGMA table_info(plan_budgets)").all();
