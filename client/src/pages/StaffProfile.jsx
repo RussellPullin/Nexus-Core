@@ -130,6 +130,15 @@ export default function StaffProfile() {
     [staffShifts]
   );
 
+  const viewAvail = useMemo(
+    () => (data ? parseStaffAvailabilityFromRow(data) : null),
+    [data]
+  );
+  const viewPayRates = useMemo(
+    () => (data ? effectivePayRates(data) : null),
+    [data]
+  );
+
   const handleAssign = async () => {
     if (!assignParticipantId) return;
     setSaving(true);
@@ -364,9 +373,6 @@ export default function StaffProfile() {
       </div>
     );
   }
-
-  const viewAvail = parseStaffAvailabilityFromRow(data);
-  const viewPayRates = useMemo(() => (data ? effectivePayRates(data) : null), [data]);
 
   return (
     <div className="content">

@@ -156,7 +156,15 @@ export async function fetchApi(path, options = {}) {
   const text = await res.text();
   if (!res.ok) {
     if (res.status === 401 && !isAuthPath) {
-      window.location.href = '/login';
+      // Avoid hard reload loops (flash-then-disappear). Let AuthProvider/ProtectedRoute
+      // handle redirect by clearing user state.
+      try {
+        if (typeof window !== 'undefined' && window.dispatchEvent) {
+          window.dispatchEvent(new CustomEvent('nexus:auth-required', { detail: { path } }));
+        }
+      } catch {
+        // ignore
+      }
     }
     const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
     const msg = err?.error || text || res.statusText;

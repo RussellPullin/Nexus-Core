@@ -10,6 +10,17 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const onAuthRequired = () => {
+      setUser(null);
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('nexus:auth-required', onAuthRequired);
+      return () => window.removeEventListener('nexus:auth-required', onAuthRequired);
+    }
+    return undefined;
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
