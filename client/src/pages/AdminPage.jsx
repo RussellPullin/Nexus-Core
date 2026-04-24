@@ -24,6 +24,13 @@ function parseNum(v, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** CSV hour values to 2 decimal places (avoids long floats from aggregations). */
+function csvHours2dp(val) {
+  const n = parseNum(val, NaN);
+  if (!Number.isFinite(n)) return '';
+  return (Math.round(n * 100) / 100).toFixed(2);
+}
+
 export default function AdminPage() {
   const { canManageUsers } = useAuth();
   const [tab, setTab] = useState('users');
@@ -165,6 +172,13 @@ export default function AdminPage() {
     });
   }, [payFilteredRows, staffList]);
 
+  const employeePayRows = useMemo(() => {
+    return payFilteredRows.filter((r) => {
+      const s = staffList.find((x) => String(x.id) === String(r.staff_id));
+      return s?.employment_type === 'employee';
+    });
+  }, [payFilteredRows, staffList]);
+
   const downloadPayCsv = () => {
     const headers = [
       'Staff Name',
@@ -208,7 +222,7 @@ export default function AdminPage() {
   };
 
   /** Labor = sum of hours per bucket × matching pay rate from the staff profile (default weekday + optional overrides). */
-  const downloadSubcontractorPayCsv = () => {
+  const downloadLaborPayCsv = (payRows, filenamePrefix) => {
     const headers = [
       'Staff Name',
       'Nexus staff ID',
@@ -227,7 +241,7 @@ export default function AdminPage() {
       'Total km',
     ];
     const lines = [headers.map(escapeCsvCell).join(',')];
-    subcontractorPayRows.forEach((r) => {
+    payRows.forEach((r) => {
       const st = staffList.find((x) => String(x.id) === String(r.staff_id));
       const baseRate = st?.hourly_rate;
       const rateNum = baseRate != null && baseRate !== '' ? Number(baseRate) : NaN;
@@ -248,12 +262,12 @@ export default function AdminPage() {
         r.staff_id ?? '',
         r.periodStart,
         r.periodEnd,
-        getPayCell(r, 'totalHours'),
-        getPayCell(r, 'weekdayHours'),
-        getPayCell(r, 'saturdayHours'),
-        getPayCell(r, 'sundayHours'),
-        getPayCell(r, 'holidayHours'),
-        getPayCell(r, 'eveningHours'),
+        csvHours2dp(getPayCell(r, 'totalHours')),
+        csvHours2dp(getPayCell(r, 'weekdayHours')),
+        csvHours2dp(getPayCell(r, 'saturdayHours')),
+        csvHours2dp(getPayCell(r, 'sundayHours')),
+        csvHours2dp(getPayCell(r, 'holidayHours')),
+        csvHours2dp(getPayCell(r, 'eveningHours')),
         Number.isFinite(rateNum) ? rateNum : '',
         labor,
         expNum,
@@ -266,10 +280,13 @@ export default function AdminPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `subcontractor-pay-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const downloadSubcontractorPayCsv = () => downloadLaborPayCsv(subcontractorPayRows, 'subcontractor-pay');
+  const downloadEmployeePayCsv = () => downloadLaborPayCsv(employeePayRows, 'employee-pay');
 
   const handleSetRole = async (userId, role) => {
     try {
@@ -658,8 +675,8 @@ export default function AdminPage() {
           </p>
           <p style={{ color: '#64748b', marginBottom: '1rem', fontSize: '0.9rem', maxWidth: '48rem' }}>
             Download CSV for a spreadsheet-friendly file you can adjust and then use in Xero (manual timesheets or your payroll import).{' '}
-            <strong>Subcontractor CSV</strong> includes only staff with Employment type Subcontractor; <strong>Labor ($)</strong> is hourly rate from their
-            profile × total hours, and <strong>Total pay ($)</strong> adds expenses (reimbursements) on top.
+            <strong>Subcontractor CSV</strong> and <strong>Employee CSV</strong> include only staff with that employment type; hour columns are exported to two decimal places. <strong>Labor ($)</strong> is hourly rate from their
+            profile × hours by bucket, and <strong>Total pay ($)</strong> adds expenses (reimbursements) on top.
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
             <label>
@@ -702,6 +719,19 @@ export default function AdminPage() {
               }
             >
               Download subcontractor CSV ($)
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={downloadEmployeePayCsv}
+              disabled={paySummaryLoading || !employeePayRows.length}
+              title={
+                !employeePayRows.length
+                  ? 'No employee rows in the current filter (set staff to Employee and ensure they have shifts).'
+                  : undefined
+              }
+            >
+              Download employee CSV ($)
             </button>
             {payAdjustMode && Object.keys(payEdits).length > 0 && (
               <button
