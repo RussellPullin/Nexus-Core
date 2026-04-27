@@ -1224,6 +1224,8 @@ try {
       db.exec('ALTER TABLE business_settings ADD COLUMN accounting_provider TEXT');
     }
     for (const col of [
+      // Org-specific pay period anchor date (yyyy-mm-dd). If null, fallback to DEFAULT_PAY_PERIOD_START in shiftHours.service.js.
+      'pay_period_start',
       'xero_client_id',
       'xero_client_secret',
       'xero_redirect_uri',

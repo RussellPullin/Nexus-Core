@@ -297,7 +297,7 @@ router.get('/pay-summary', (req, res) => {
       return res.json([]);
     }
     const staffRows = db
-      .prepare(`SELECT st.id, st.name FROM staff st WHERE (${sf.sql}) ORDER BY st.name COLLATE NOCASE`)
+      .prepare(`SELECT st.id, st.name, st.org_id FROM staff st WHERE (${sf.sql}) ORDER BY st.name COLLATE NOCASE`)
       .all(...sf.params);
     const shiftStmt = db.prepare(`
       SELECT s.id, s.start_time, s.end_time, s.expenses,
@@ -312,7 +312,11 @@ router.get('/pay-summary', (req, res) => {
     const rows = [];
     for (const st of staffRows) {
       const shifts = shiftStmt.all(st.id);
-      const summaryRows = computeHoursFromShifts(shifts);
+      const orgId = st.org_id || null;
+      const payPeriodStart = orgId
+        ? (db.prepare('SELECT pay_period_start FROM business_settings WHERE org_id = ?').get(orgId)?.pay_period_start || null)
+        : null;
+      const summaryRows = computeHoursFromShifts(shifts, { payPeriodStart });
       for (const r of summaryRows) {
         rows.push({
           ...r,

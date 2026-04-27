@@ -406,6 +406,11 @@ router.get('/:id/shift-hours-summary', (req, res) => {
   try {
     const s = db.prepare('SELECT id FROM staff WHERE id = ?').get(req.params.id);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
+    const staffOrg = db.prepare('SELECT org_id FROM staff WHERE id = ?').get(req.params.id);
+    const orgId = staffOrg?.org_id || null;
+    const payPeriodStart = orgId
+      ? (db.prepare('SELECT pay_period_start FROM business_settings WHERE org_id = ?').get(orgId)?.pay_period_start || null)
+      : null;
     const shifts = db.prepare(`
       SELECT s.id, s.start_time, s.end_time, s.expenses,
         (SELECT MAX(pn.travel_time_min) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_time_min,
@@ -415,7 +420,7 @@ router.get('/:id/shift-hours-summary', (req, res) => {
         AND s.status IN ('completed', 'completed_by_admin')
       ORDER BY s.start_time
     `).all(req.params.id);
-    const summaryRows = computeHoursFromShifts(shifts);
+    const summaryRows = computeHoursFromShifts(shifts, { payPeriodStart });
     res.json({ summaryRows });
   } catch (err) {
     console.error('[staff shift-hours-summary]', err);

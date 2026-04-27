@@ -277,23 +277,53 @@ export function processShifts(shiftsArray, options = {}) {
         const shifterShiftId = shiftId || null;
         if (matchingShift) {
           resolvedShiftId = matchingShift.id;
-          // Update existing shift (full refresh when re-imported so participant/staff/times stay in sync)
-          db.prepare(`
-            UPDATE shifts SET
-              participant_id = ?, staff_id = ?, start_time = ?, end_time = ?,
-              status = 'completed', notes = ?, expenses = ?, shifter_shift_id = ?,
-              updated_at = datetime('now')
-            WHERE id = ?
-          `).run(
-            participant.id,
-            staff.id,
-            startDateTime,
-            endDateTime,
-            sessionDetails || null,
-            expensesVal,
-            shifterShiftId,
-            resolvedShiftId
-          );
+          const lockedByAdmin = String(matchingShift.status || '').trim().toLowerCase() === 'completed_by_admin';
+          if (lockedByAdmin) {
+            // Admin-edited shifts must remain authoritative. Imports should not overwrite participant/staff/times/notes/status.
+            // We still capture the progress note, and we can backfill missing import linkage fields.
+            const shouldBackfillShifterId =
+              shifterShiftId &&
+              (!matchingShift.shifter_shift_id || String(matchingShift.shifter_shift_id).trim() === '');
+            const existingExpenses = Number.isFinite(Number(matchingShift.expenses)) ? Number(matchingShift.expenses) : 0;
+            const shouldBackfillExpenses = existingExpenses <= 0 && expensesVal > 0;
+            if (shouldBackfillShifterId || shouldBackfillExpenses) {
+              db.prepare(`
+                UPDATE shifts SET
+                  shifter_shift_id = CASE
+                    WHEN (shifter_shift_id IS NULL OR TRIM(shifter_shift_id) = '') THEN ?
+                    ELSE shifter_shift_id
+                  END,
+                  expenses = CASE
+                    WHEN (expenses IS NULL OR expenses <= 0) THEN ?
+                    ELSE expenses
+                  END,
+                  updated_at = datetime('now')
+                WHERE id = ?
+              `).run(
+                shouldBackfillShifterId ? shifterShiftId : (matchingShift.shifter_shift_id || null),
+                shouldBackfillExpenses ? expensesVal : existingExpenses,
+                resolvedShiftId
+              );
+            }
+          } else {
+            // Update existing shift (full refresh when re-imported so participant/staff/times stay in sync)
+            db.prepare(`
+              UPDATE shifts SET
+                participant_id = ?, staff_id = ?, start_time = ?, end_time = ?,
+                status = 'completed', notes = ?, expenses = ?, shifter_shift_id = ?,
+                updated_at = datetime('now')
+              WHERE id = ?
+            `).run(
+              participant.id,
+              staff.id,
+              startDateTime,
+              endDateTime,
+              sessionDetails || null,
+              expensesVal,
+              shifterShiftId,
+              resolvedShiftId
+            );
+          }
         } else {
           resolvedShiftId = uuidv4();
           db.prepare(`

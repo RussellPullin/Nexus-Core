@@ -1197,6 +1197,7 @@ function BusinessSetup() {
     setMsg('');
     try {
       await settings.updateBusiness({
+        pay_period_start: biz.pay_period_start || null,
         company_name: biz.company_name || null,
         company_abn: biz.company_abn || null,
         company_acn: biz.company_acn || null,
@@ -1281,6 +1282,19 @@ function BusinessSetup() {
           placeholder="Your business name"
           className="form-input"
         />
+      </div>
+      <div className="form-group">
+        <label>Pay period start (anchor date)</label>
+        <input
+          type="date"
+          value={biz.pay_period_start || ''}
+          onChange={(e) => setBiz({ ...biz, pay_period_start: e.target.value || null })}
+          className="form-input"
+          style={{ maxWidth: 180 }}
+        />
+        <small className="form-hint">
+          Fortnightly pay periods are calculated from this start date. Keep this stable per organisation so hours summaries and payroll exports don’t shift.
+        </small>
       </div>
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
         <div className="form-group" style={{ flex: 1, minWidth: 140 }}>

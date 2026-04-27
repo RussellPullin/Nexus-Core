@@ -67,6 +67,7 @@ function mergeWithEnv(row, options = {}) {
   const envBsb = noOrgRowYet ? '' : (process.env.COMPANY_BSB ?? '');
   const envAccount = noOrgRowYet ? '' : (process.env.COMPANY_ACCOUNT ?? '');
   return {
+    pay_period_start: row?.pay_period_start ?? null,
     company_name: row?.company_name ?? envName,
     company_abn: row?.company_abn ?? envAbn,
     company_acn: row?.company_acn ?? '',
@@ -260,6 +261,7 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
     const orgId = resolveTargetOrgId(req);
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
     const {
+      pay_period_start,
       company_name,
       company_abn,
       company_acn,
@@ -281,7 +283,16 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
     }
     if (accountingProviderValue === '') accountingProviderValue = null;
 
+    const payPeriodStartValue =
+      pay_period_start !== undefined
+        ? (String(pay_period_start || '').trim() || null)
+        : (existing?.pay_period_start ?? null);
+    if (payPeriodStartValue && !/^\d{4}-\d{2}-\d{2}$/.test(payPeriodStartValue)) {
+      return res.status(400).json({ error: 'Pay period start must be a date in yyyy-mm-dd format.' });
+    }
+
     const updates = {
+      pay_period_start: payPeriodStartValue,
       company_name: company_name !== undefined ? (company_name || null) : existing?.company_name,
       company_abn: company_abn !== undefined ? (company_abn || null) : existing?.company_abn,
       company_acn: company_acn !== undefined ? (company_acn || null) : existing?.company_acn,
@@ -299,6 +310,7 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
     };
 
     const bizParams = [
+      updates.pay_period_start,
       updates.company_name,
       updates.company_abn,
       updates.company_acn,
@@ -315,6 +327,7 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
     if (hasBusinessSettingsForOrg(orgId)) {
       db.prepare(`
         UPDATE business_settings SET
+          pay_period_start = ?,
           company_name = ?, company_abn = ?, company_acn = ?, ndis_provider_number = ?,
           company_email = ?, company_address = ?, company_phone = ?, account_name = ?, bsb = ?, account_number = ?,
           payment_terms_days = ?, accounting_provider = ?, updated_at = datetime('now')
@@ -322,9 +335,9 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
       `).run(...bizParams, orgId);
     } else {
       db.prepare(`
-        INSERT INTO business_settings (id, org_id, company_name, company_abn, company_acn, ndis_provider_number,
+        INSERT INTO business_settings (id, org_id, pay_period_start, company_name, company_abn, company_acn, ndis_provider_number,
           company_email, company_address, company_phone, account_name, bsb, account_number, payment_terms_days, accounting_provider, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(orgId, orgId, ...bizParams);
     }
 
