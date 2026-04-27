@@ -46,6 +46,19 @@ function getOnboarding(staffId) {
   return db.prepare('SELECT * FROM staff_onboarding WHERE staff_id = ?').get(staffId);
 }
 
+/** Organisation that owns this staff record — same scoping as the rest of the API (never notify a different tenant). */
+function resolveStaffOrganisationId(staffId, onboardingRow) {
+  const staffOrg = db.prepare('SELECT org_id FROM staff WHERE id = ?').get(staffId);
+  if (staffOrg?.org_id) return staffOrg.org_id;
+  if (onboardingRow?.provider_profile_id) {
+    const pp = db
+      .prepare('SELECT organisation_id FROM provider_profiles WHERE id = ?')
+      .get(onboardingRow.provider_profile_id);
+    if (pp?.organisation_id) return pp.organisation_id;
+  }
+  return null;
+}
+
 function validateRenewalToken(token) {
   if (!token) return null;
   const row = db.prepare('SELECT id, staff_id, token, expires_at FROM staff_renewal_tokens WHERE token = ?').get(token);
@@ -369,14 +382,22 @@ router.post('/:token/submit', async (req, res) => {
     db.prepare('UPDATE staff_onboarding SET status = \'complete\', completed_at = datetime(\'now\'), current_step = 5, updated_at = datetime(\'now\') WHERE id = ?').run(onboarding.id);
     db.prepare('UPDATE staff SET onboarding_status = \'complete\', onboarding_token = NULL, onboarding_token_expires_at = NULL, updated_at = datetime(\'now\') WHERE id = ?').run(staff.id);
 
-    const adminUser = db.prepare('SELECT id, email FROM users WHERE role = \'admin\' ORDER BY created_at ASC LIMIT 1').get();
-    if (adminUser?.email && isEmailConfiguredForUser(adminUser.id)) {
+    const orgId = resolveStaffOrganisationId(staff.id, onboarding);
+    if (!orgId) {
+      console.warn('[staff-onboarding submit] Cannot resolve organisation for staff; skipping admin notification', staff.id);
+    } else {
+      const adminUsers = db
+        .prepare(`SELECT id, email FROM users WHERE role = 'admin' AND org_id = ? ORDER BY created_at ASC`)
+        .all(orgId);
       const subject = 'Staff onboarding complete – ' + (staffRow?.name || staff.id);
       const text = `Staff member ${staffRow?.name || staff.id} has completed their onboarding form. Review their profile and compliance documents in Nexus Core.`;
-      try {
-        await sendEmailViaRelay(adminUser.id, adminUser.email, subject, text, null, null);
-      } catch (e) {
-        console.warn('[staff-onboarding submit] Admin notify failed:', e?.message);
+      for (const adminUser of adminUsers) {
+        if (!adminUser?.email || !isEmailConfiguredForUser(adminUser.id)) continue;
+        try {
+          await sendEmailViaRelay(adminUser.id, adminUser.email, subject, text, null, null);
+        } catch (e) {
+          console.warn('[staff-onboarding submit] Admin notify failed:', e?.message);
+        }
       }
     }
 

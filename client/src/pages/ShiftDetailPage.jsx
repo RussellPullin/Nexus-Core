@@ -35,16 +35,36 @@ function toDatetimeLocal(dt) {
   return s.slice(0, 16);
 }
 
+/** Restore Shifts list week + view (planner vs table) from URL or fallbacks. */
+function buildShiftsListPath(searchParams, shift) {
+  const listV = searchParams.get('listView') === 'table' ? 'table' : 'planner';
+  let week = searchParams.get('listWeek');
+  if (!week || !/^\d{4}-\d{2}-\d{2}$/.test(week)) {
+    const ps = searchParams.get('periodStart');
+    if (ps && /^\d{4}-\d{2}-\d{2}$/.test(ps)) week = ps;
+    else if (shift?.start_time) {
+      const r = weekRangeFromShiftStart(shift.start_time);
+      week = r?.periodStart;
+    }
+  }
+  if (!week) week = formatDateLocal(mondayOfWeekContaining(new Date()));
+  return `/shifts?week=${encodeURIComponent(week)}&view=${encodeURIComponent(listV)}`;
+}
+
 export default function ShiftDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const periodStartQ = searchParams.get('periodStart');
   const periodEndQ = searchParams.get('periodEnd');
+  const listWeekQ = searchParams.get('listWeek');
+  const listViewQ = searchParams.get('listView');
   const [shift, setShift] = useState(null);
   const [lineItems, setLineItems] = useState([]);
   const [ndisItems, setNdisItems] = useState([]);
   const [invoice, setInvoice] = useState(null);
+  /** Set when a row exists in the legacy `invoices` table (per-shift), vs Financial batch only. */
+  const [legacyInvoiceRow, setLegacyInvoiceRow] = useState(null);
   const [tab, setTab] = useState('finance');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(true);
@@ -82,7 +102,7 @@ export default function ShiftDetailPage() {
     try {
       await shifts.hardDelete(shift.id);
       alert('Shift deleted.');
-      navigate('/shifts');
+      navigate(buildShiftsListPath(searchParams, null));
     } catch (err) {
       alert(err?.message || 'Failed to delete shift');
     }
@@ -109,7 +129,11 @@ export default function ShiftDetailPage() {
       setShift(s);
       setLineItems(items);
       setNotes(s?.notes || '');
-      setInvoice(invList?.[0] || null);
+      setLegacyInvoiceRow(invList?.[0] || null);
+      setInvoice(
+        invList?.[0] ||
+          (s?.invoice_number ? { invoice_number: s.invoice_number, status: s.invoice_status } : null)
+      );
       setShiftReceipts(Array.isArray(receipts) ? receipts : []);
     } catch (e) {
       console.error(e);
@@ -187,7 +211,13 @@ export default function ShiftDetailPage() {
     if (!effectivePeriod || !periodNavShifts?.length) {
       return { prevShift: null, nextShift: null, periodQueryStr: '', showPeriodNav: false };
     }
-    const q = `periodStart=${encodeURIComponent(effectivePeriod.periodStart)}&periodEnd=${encodeURIComponent(effectivePeriod.periodEnd)}`;
+    const p = new URLSearchParams();
+    p.set('periodStart', effectivePeriod.periodStart);
+    p.set('periodEnd', effectivePeriod.periodEnd);
+    const listW = listWeekQ || effectivePeriod.periodStart;
+    p.set('listWeek', listW);
+    p.set('listView', listViewQ === 'table' ? 'table' : 'planner');
+    const q = p.toString();
     const navIdx = periodNavShifts.findIndex((s) => s.id === id);
     if (navIdx < 0) return { prevShift: null, nextShift: null, periodQueryStr: q, showPeriodNav: false };
     const show = periodNavShifts.length > 1;
@@ -197,7 +227,7 @@ export default function ShiftDetailPage() {
       periodQueryStr: q,
       showPeriodNav: show
     };
-  }, [effectivePeriod, periodNavShifts, id]);
+  }, [effectivePeriod, periodNavShifts, id, listWeekQ, listViewQ]);
 
   // When existing line items exist, filter by same support_category so next items suit the first
   const getSupportCategoryFromItem = (item) => {
@@ -400,7 +430,7 @@ export default function ShiftDetailPage() {
               Retry
             </button>
           )}
-          <button type="button" className="btn btn-secondary" onClick={() => navigate('/shifts')}>
+          <button type="button" className="btn btn-secondary" onClick={() => navigate(buildShiftsListPath(searchParams, null))}>
             Back to Shifts
           </button>
         </div>
@@ -417,12 +447,21 @@ export default function ShiftDetailPage() {
               type="button"
               className="btn btn-secondary"
               style={{ marginRight: '0.5rem', marginBottom: '0.5rem' }}
-              onClick={() => navigate('/shifts')}
+              onClick={() => navigate(buildShiftsListPath(searchParams, shift))}
             >
               ← Back
             </button>
             <h2 style={{ margin: '0.5rem 0 0', display: 'inline-block' }}>
               {shift.participant_name} – {formatDate(shift.start_time)}
+              {invoice && (
+                <span
+                  className={`badge badge-${invoice.status || 'sent'}`}
+                  style={{ marginLeft: '0.5rem', fontSize: '0.8rem', verticalAlign: 'middle' }}
+                  title={invoice.status ? `Invoice ${invoice.status}` : 'Invoiced'}
+                >
+                  {invoice.invoice_number}
+                </span>
+              )}
             </h2>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -446,7 +485,10 @@ export default function ShiftDetailPage() {
               {shift.roster_sent_at ? 'Sent ✓' : 'Send to staff'}
             </button>
             {invoice && (
-              <Link to="/invoices" className="btn btn-primary">
+              <Link
+                to={legacyInvoiceRow ? '/invoices' : shift?.billing_invoice_id ? '/financial' : '/invoices'}
+                className="btn btn-primary"
+              >
                 View Invoice
               </Link>
             )}

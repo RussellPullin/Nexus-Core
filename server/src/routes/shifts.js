@@ -40,6 +40,35 @@ function normalizeShiftTimeForCompare(t) {
   return String(t).replace(/^(\d{4}-\d{2}-\d{2}) /, '$1T');
 }
 
+/** Financial batch (billing_invoices) or legacy one-row-per-shift `invoices` table. */
+const SHIFT_INVOICE_RESOLVE = `
+  COALESCE(bi_inv.invoice_number, (SELECT inv_r.invoice_number FROM invoices inv_r WHERE inv_r.shift_id = s.id LIMIT 1)) AS invoice_number,
+  COALESCE(bi_inv.status, (SELECT inv_r.status FROM invoices inv_r WHERE inv_r.shift_id = s.id LIMIT 1)) AS invoice_status
+`;
+
+/** Shift row for API (incl. Financial + legacy resolved invoice), or undefined if not in tenant. */
+function getShiftByIdForUser(shiftId, userId) {
+  const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+  if (!c.orgId) return null;
+  return db
+    .prepare(
+      `
+      SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
+             p.provider_org_id as participant_provider_org_id,
+             p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
+             p.remoteness as participant_remoteness,
+             st.name as staff_name, st.email as staff_email, st.phone as staff_phone,
+             ${SHIFT_INVOICE_RESOLVE}
+      FROM shifts s
+      JOIN participants p ON s.participant_id = p.id
+      JOIN staff st ON s.staff_id = st.id
+      LEFT JOIN billing_invoices bi_inv ON bi_inv.id = s.billing_invoice_id
+      WHERE s.id = ? AND (${c.sql})
+    `
+    )
+    .get(shiftId, ...c.params);
+}
+
 router.get('/', (req, res) => {
   try {
     const userId = req.session?.user?.id;
@@ -54,10 +83,12 @@ router.get('/', (req, res) => {
           SELECT SUM(sli.quantity * sli.unit_price)
           FROM shift_line_items sli
           WHERE sli.shift_id = s.id
-        ), 0) AS charges_total
+        ), 0) AS charges_total,
+        ${SHIFT_INVOICE_RESOLVE}
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
       JOIN staff st ON s.staff_id = st.id
+      LEFT JOIN billing_invoices bi_inv ON bi_inv.id = s.billing_invoice_id
       WHERE (${c.sql})
       ORDER BY s.start_time
     `).all(...c.params);
@@ -296,18 +327,7 @@ router.post('/suppress-shifter-id', requireAdminOrDelegate, (req, res) => {
 router.get('/:id', (req, res) => {
   try {
     const userId = req.session?.user?.id;
-    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
-    if (!c.orgId) return res.status(404).json({ error: 'Shift not found' });
-    const shift = db.prepare(`
-      SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
-             p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
-             p.remoteness as participant_remoteness,
-             st.name as staff_name, st.email as staff_email, st.phone as staff_phone
-      FROM shifts s
-      JOIN participants p ON s.participant_id = p.id
-      JOIN staff st ON s.staff_id = st.id
-      WHERE s.id = ? AND (${c.sql})
-    `).get(req.params.id, ...c.params);
+    const shift = getShiftByIdForUser(req.params.id, userId);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
     res.json(shift);
   } catch (err) {
@@ -318,19 +338,7 @@ router.get('/:id', (req, res) => {
 router.get('/:id/refresh-expense', async (req, res) => {
   try {
     const userId = req.session?.user?.id;
-    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
-    if (!c.orgId) return res.status(404).json({ error: 'Shift not found' });
-    const shift = db.prepare(`
-      SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
-             p.provider_org_id as participant_provider_org_id,
-             p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
-             p.remoteness as participant_remoteness,
-             st.name as staff_name, st.email as staff_email, st.phone as staff_phone
-      FROM shifts s
-      JOIN participants p ON s.participant_id = p.id
-      JOIN staff st ON s.staff_id = st.id
-      WHERE s.id = ? AND (${c.sql})
-    `).get(req.params.id, ...c.params);
+    const shift = getShiftByIdForUser(req.params.id, userId);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
     if (!shift.shifter_shift_id) {
       return res.json(shift);
@@ -345,17 +353,8 @@ router.get('/:id/refresh-expense', async (req, res) => {
     if (excelShift && (parseFloat(excelShift.expenses) || 0) > 0) {
       const expensesVal = parseFloat(excelShift.expenses) || 0;
       db.prepare('UPDATE shifts SET expenses = ?, updated_at = datetime(\'now\') WHERE id = ?').run(expensesVal, req.params.id);
-      const updated = db.prepare(`
-        SELECT s.*, p.name as participant_name, p.ndis_number, p.email as participant_email,
-               p.default_ndis_line_item_id as participant_default_ndis_line_item_id,
-               p.remoteness as participant_remoteness,
-               st.name as staff_name, st.email as staff_email, st.phone as staff_phone
-        FROM shifts s
-        JOIN participants p ON s.participant_id = p.id
-        JOIN staff st ON s.staff_id = st.id
-        WHERE s.id = ? AND (${c.sql})
-      `).get(req.params.id, ...c.params);
-      return res.json(updated);
+      const updated = getShiftByIdForUser(req.params.id, userId);
+      return res.json(updated || shift);
     }
     res.json(shift);
   } catch (err) {
@@ -411,7 +410,7 @@ router.post('/', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?)
     `).run(id, participant_id, staff_id, start_time, end_time, notes || null, recurring_group_id || null);
 
-    const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(id);
+    const shift = getShiftByIdForUser(id, userId);
 
     try {
       recordEvent({
@@ -428,7 +427,7 @@ router.post('/', async (req, res) => {
     } catch (e) { console.warn('[shifts] learning event error:', e.message); }
 
     scheduleMirrorShiftToNexusSupabase(id);
-    res.status(201).json(shift);
+    res.status(201).json(shift || { id, participant_id, staff_id, start_time, end_time, notes, status: 'scheduled', recurring_group_id: recurring_group_id || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -479,7 +478,7 @@ router.put('/:id', async (req, res) => {
       req.params.id
     );
 
-    const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id);
+    const shift = getShiftByIdForUser(req.params.id, userId);
     // Invoicing is done via batch (Financial > Batch invoices); no per-shift invoice creation.
 
     try {
@@ -507,6 +506,9 @@ router.put('/:id', async (req, res) => {
 
     scheduleMirrorShiftToNexusSupabase(req.params.id);
     syncCaseNoteFromShift(req.params.id);
+    if (!shift) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
     res.json(shift);
   } catch (err) {
     res.status(500).json({ error: err.message });

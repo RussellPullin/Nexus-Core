@@ -459,7 +459,9 @@ export default function OnboardingPage() {
           services_required: parseArray(fields.services_required),
           ndia_managed_services: parseArray(fields.ndia_managed_services),
           plan_managed_services: parseArray(fields.plan_managed_services),
-          service_schedule_rows: parseScheduleRows(fields.service_schedule_rows)
+          service_schedule_rows: parseScheduleRows(fields.service_schedule_rows),
+          // Stored as JSON string in DB after save; must be an array or .map throws (blank page).
+          additional_invoice_emails: parseArray(fields.additional_invoice_emails)
         };
         const fromParticipant = participantData ? {
           full_legal_name: participantData.name,

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { backToPreviousListPath, participantProfileBackLabel } from '../lib/listViewUrl.js';
 import { participants, organisations, ndis, smartDefaults, onboarding } from '../lib/api';
 import CopyableField from '../components/CopyableField';
 import AddressAutocomplete from '../components/AddressAutocomplete';
@@ -125,6 +126,7 @@ function resolveInvoiceRecipientsForDisplay(p) {
 export default function ParticipantProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(true);
@@ -211,7 +213,7 @@ export default function ParticipantProfile() {
     if (!confirm(`Archive ${data?.name}? They will be hidden from the list but can be restored.`)) return;
     try {
       await participants.archive(id);
-      navigate('/participants');
+      navigate(backToPreviousListPath(searchParams));
     } catch (err) {
       alert(err.message || 'Could not archive participant.');
     }
@@ -230,7 +232,7 @@ export default function ParticipantProfile() {
     if (!confirm(`Permanently delete ${data?.name}? This cannot be undone. All plans, goals, documents, shifts and related data will be removed.`)) return;
     try {
       await participants.delete(id);
-      navigate('/participants');
+      navigate(backToPreviousListPath(searchParams));
     } catch (err) {
       alert(err.message || 'Could not delete participant.');
     }
@@ -902,7 +904,7 @@ export default function ParticipantProfile() {
           {data.archived_at && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', fontWeight: 'normal', color: '#64748b' }}>(archived)</span>}
         </h2>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <Link to="/participants" className="btn btn-secondary">Back to list</Link>
+          <Link to={backToPreviousListPath(searchParams)} className="btn btn-secondary">{participantProfileBackLabel(searchParams)}</Link>
           {data.archived_at ? (
             <button type="button" className="btn btn-secondary" onClick={handleUnarchive}>Restore</button>
           ) : (

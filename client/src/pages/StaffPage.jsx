@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { payRateFormFieldsFromRow, payRateOverridesFromFormFields } from '../lib/payrollRates.js';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { staff } from '../lib/api';
+import { STAFF_LIST_STORAGE_KEY, staffProfileQueryFromList } from '../lib/listViewUrl.js';
 
 /** Matches profiles.role enum-style values used in NexusCore. */
 const ROLE_FILTER_OPTIONS = [
@@ -56,11 +57,14 @@ function ShifterStatusBadge({ status }) {
 }
 
 export default function StaffPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const listHydratedRef = useRef(false);
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showArchived, setShowArchived] = useState(false);
-  const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState('');
+  const q = searchParams.get('q') ?? '';
+  const showArchived = searchParams.get('archived') === '1';
+  const roleFilter = searchParams.get('role') ?? '';
+  const search = q;
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(() => ({
     name: '',
@@ -77,6 +81,46 @@ export default function StaffPage() {
   const [shifterSavingId, setShifterSavingId] = useState(null);
   const [inviteSending, setInviteSending] = useState(false);
   const selectAllRef = useRef(null);
+
+  useEffect(() => {
+    if (searchParams.toString() !== '') {
+      listHydratedRef.current = true;
+      return;
+    }
+    if (listHydratedRef.current) return;
+    listHydratedRef.current = true;
+    try {
+      const raw = sessionStorage.getItem(STAFF_LIST_STORAGE_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (!p?.q && !p?.archived && !p?.role) return;
+      setSearchParams(
+        (prev) => {
+          const n = new URLSearchParams(prev);
+          if (p?.q) n.set('q', p.q);
+          if (p?.archived) n.set('archived', '1');
+          if (p?.role) n.set('role', p.role);
+          return n;
+        },
+        { replace: true }
+      );
+    } catch (_) { /* ignore */ }
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        STAFF_LIST_STORAGE_KEY,
+        JSON.stringify({ q, archived: showArchived, role: roleFilter || '' })
+      );
+    } catch (_) { /* ignore */ }
+  }, [q, showArchived, roleFilter]);
+
+  const staffProfileQuery = useMemo(
+    () =>
+      staffProfileQueryFromList({ q, archived: showArchived, role: roleFilter || '' }),
+    [q, showArchived, roleFilter]
+  );
 
   const displayList = useMemo(
     () => list.filter((s) => staffMatchesSearch(s, search) && staffMatchesRoleFilter(s, roleFilter)),
@@ -254,15 +298,37 @@ export default function StaffPage() {
         <input
           type="text"
           placeholder="Search by name, email, or phone..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={q}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSearchParams(
+              (prev) => {
+                const n = new URLSearchParams(prev);
+                if (v) n.set('q', v);
+                else n.delete('q');
+                return n;
+              },
+              { replace: true }
+            );
+          }}
           aria-label="Search staff"
         />
         <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span style={{ color: '#64748b', fontSize: '0.9rem', whiteSpace: 'nowrap' }}>Role</span>
           <select
             value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSearchParams(
+                (prev) => {
+                  const n = new URLSearchParams(prev);
+                  if (v) n.set('role', v);
+                  else n.delete('role');
+                  return n;
+                },
+                { replace: true }
+              );
+            }}
             aria-label="Filter by role"
             style={{ minWidth: '11rem' }}
           >
@@ -274,7 +340,21 @@ export default function StaffPage() {
           </select>
         </label>
         <label className="checkbox-label" style={{ margin: 0 }}>
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => {
+              setSearchParams(
+                (prev) => {
+                  const n = new URLSearchParams(prev);
+                  if (e.target.checked) n.set('archived', '1');
+                  else n.delete('archived');
+                  return n;
+                },
+                { replace: true }
+              );
+            }}
+          />
           Show archived
         </label>
       </div>
@@ -297,8 +377,15 @@ export default function StaffPage() {
               type="button"
               className="btn btn-secondary"
               onClick={() => {
-                setSearch('');
-                setRoleFilter('');
+                setSearchParams(
+                  (prev) => {
+                    const n = new URLSearchParams(prev);
+                    n.delete('q');
+                    n.delete('role');
+                    return n;
+                  },
+                  { replace: true }
+                );
               }}
             >
               Clear search and role
@@ -371,7 +458,7 @@ export default function StaffPage() {
                         </td>
                       )}
                       <td>
-                        <Link to={`/staff/${s.id}`} className="participant-name-link">{s.name}</Link>
+                        <Link to={`/staff/${s.id}?${staffProfileQuery}`} className="participant-name-link">{s.name}</Link>
                         {s.archived_at && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#64748b' }}>(archived)</span>}
                       </td>
                       <td>{s.role || '-'}</td>
@@ -409,7 +496,7 @@ export default function StaffPage() {
                         </div>
                       </td>
                       <td style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                        <Link to={`/staff/${s.id}`} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', textDecoration: 'none' }}>View</Link>
+                        <Link to={`/staff/${s.id}?${staffProfileQuery}`} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', textDecoration: 'none' }}>View</Link>
                         {s.archived_at ? (
                           <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }} onClick={() => handleUnarchive(s)}>Restore</button>
                         ) : (

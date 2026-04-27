@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { PARTICIPANTS_LIST_STORAGE_KEY, participantsProfileQueryFromList } from '../lib/listViewUrl.js';
 import { useAuth } from '../context/AuthContext';
 import { useFeatureFlag } from '../context/FeatureFlagContext';
 import { participants, organisations, ndis } from '../lib/api';
@@ -40,10 +41,12 @@ const defaultForm = () => ({
 export default function ParticipantsPage() {
   const { canManageUsers, isAdmin, user } = useAuth();
   const { enabled: aiStaffLocalOllama } = useFeatureFlag('ai_staff_local_ollama');
+  const [searchParams, setSearchParams] = useSearchParams();
   const [list, setList] = useState([]);
-  const [search, setSearch] = useState('');
-  const [showArchived, setShowArchived] = useState(false);
-  const [showOrgOrphans, setShowOrgOrphans] = useState(false);
+  const listHydratedRef = useRef(false);
+  const q = searchParams.get('q') ?? '';
+  const showArchived = searchParams.get('archived') === '1';
+  const search = q;
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showIntakeModal, setShowIntakeModal] = useState(false);
@@ -63,10 +66,52 @@ export default function ParticipantsPage() {
   const [orgs, setOrgs] = useState([]);
   const [supportCategories, setSupportCategories] = useState([]);
 
+  useEffect(() => {
+    if (searchParams.toString() !== '') {
+      listHydratedRef.current = true;
+      return;
+    }
+    if (listHydratedRef.current) return;
+    listHydratedRef.current = true;
+    try {
+      const raw = sessionStorage.getItem(PARTICIPANTS_LIST_STORAGE_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (!p?.q && !p?.archived) return;
+      setSearchParams(
+        (prev) => {
+          const n = new URLSearchParams(prev);
+          if (p?.q) n.set('q', p.q);
+          if (p?.archived) n.set('archived', '1');
+          return n;
+        },
+        { replace: true }
+      );
+    } catch (_) { /* ignore */ }
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        PARTICIPANTS_LIST_STORAGE_KEY,
+        JSON.stringify({ q, archived: showArchived })
+      );
+    } catch (_) { /* ignore */ }
+  }, [q, showArchived]);
+
+  const profileListQuery = useMemo(
+    () =>
+      participantsProfileQueryFromList({
+        q,
+        archived: showArchived
+      }),
+    [q, showArchived]
+  );
+
   const load = async () => {
     setLoading(true);
     try {
-      const p = await participants.list(search, showArchived, isAdmin && showOrgOrphans);
+      const p = await participants.list(search, showArchived, false);
       setList(p);
     } catch (e) {
       console.error(e);
@@ -77,7 +122,7 @@ export default function ParticipantsPage() {
 
   useEffect(() => {
     load();
-  }, [search, showArchived, showOrgOrphans, isAdmin]);
+  }, [search, showArchived]);
 
   useEffect(() => {
     organisations.list('', 'plan_manager').then(setOrgs).catch(() => {});
@@ -310,19 +355,38 @@ export default function ParticipantsPage() {
         <input
           type="text"
           placeholder="Search by name or NDIS number..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={q}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSearchParams(
+              (prev) => {
+                const n = new URLSearchParams(prev);
+                if (v) n.set('q', v);
+                else n.delete('q');
+                return n;
+              },
+              { replace: true }
+            );
+          }}
         />
         <label className="checkbox-label" style={{ margin: 0 }}>
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => {
+              setSearchParams(
+                (prev) => {
+                  const n = new URLSearchParams(prev);
+                  if (e.target.checked) n.set('archived', '1');
+                  else n.delete('archived');
+                  return n;
+                },
+                { replace: true }
+              );
+            }}
+          />
           Show archived
         </label>
-        {isAdmin && (
-          <label className="checkbox-label" style={{ margin: 0 }} title="Shows clients whose record has no organisation set (common after imports). You can then open each profile and they stay visible once assigned to your org.">
-            <input type="checkbox" checked={showOrgOrphans} onChange={(e) => setShowOrgOrphans(e.target.checked)} />
-            Include participants with no organisation
-          </label>
-        )}
       </div>
       <div className="card">
         {loading ? (
@@ -330,10 +394,10 @@ export default function ParticipantsPage() {
         ) : list.length === 0 ? (
           <div className="empty-state">
             <p>No participants yet.</p>
-            {isAdmin && !showOrgOrphans && (
+            {isAdmin && (
               <p style={{ color: '#64748b', fontSize: '0.95rem', marginTop: '0.75rem', maxWidth: 560 }}>
-                If you imported clients but they do not appear, tick <strong>Include participants with no organisation</strong> above
-                (their records may lack an organisation link), or re-import the CSV with <strong>Move duplicate NDIS rows into my organisation</strong>.
+                If you imported clients but they do not appear, re-import the CSV with <strong>Move duplicate NDIS rows into my organisation</strong>
+                (their records may lack an organisation link).
               </p>
             )}
             {!canManageUsers && (
@@ -361,14 +425,14 @@ export default function ParticipantsPage() {
                 {list.map((p) => (
                   <tr key={p.id} style={p.archived_at ? { opacity: 0.7 } : undefined}>
                     <td>
-                      <Link to={`/participants/${p.id}`} className="participant-name-link">{p.name}</Link>
+                      <Link to={`/participants/${p.id}?${profileListQuery}`} className="participant-name-link">{p.name}</Link>
                       {p.archived_at && <span className="archived-badge">(archived)</span>}
                     </td>
                     <td>{p.ndis_number || '-'}</td>
                     <td>{p.management_type === 'plan' ? 'Plan' : p.management_type === 'ndia' ? 'NDIA' : 'Self'}</td>
                     <td>{p.phone || p.email || '-'}</td>
                     <td className="participant-actions">
-                      <Link to={`/participants/${p.id}`} className="btn btn-secondary btn-sm">View</Link>
+                      <Link to={`/participants/${p.id}?${profileListQuery}`} className="btn btn-secondary btn-sm">View</Link>
                       <Link to={`/onboarding/${p.id}`} className="btn btn-secondary btn-sm">Onboarding</Link>
                       {p.archived_at ? (
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleUnarchive(p)}>Restore</button>

@@ -215,6 +215,16 @@ router.post('/from-shifter', async (req, res) => {
   const fromDate = req.body?.from_date || req.query?.from_date || '';
   const toDate = req.body?.to_date || req.query?.to_date || '';
   const limit = req.body?.limit || req.query?.limit;
+  const forceFull =
+    req.body?.force_full_reprocess === true ||
+    String(req.body?.force_full_reprocess || req.query?.force_full_reprocess || '')
+      .toLowerCase() === 'true';
+  const rawSkipUnchanged = req.body?.skip_unchanged ?? req.query?.skip_unchanged;
+  const skipUnchanged = forceFull
+    ? false
+    : rawSkipUnchanged === false || String(rawSkipUnchanged || '').toLowerCase() === 'false'
+      ? false
+      : true;
 
   try {
     const pulled = await pullShiftsFromShifterSupabase({
@@ -228,6 +238,7 @@ router.post('/from-shifter', async (req, res) => {
 
     const result = processShifts(pulled.shifts, {
       orgId,
+      skipUnchanged,
       log: (msg, data) => console.log('[sync-from-shifter]', msg, data || ''),
       logWarn: (msg, data) => console.warn('[sync-from-shifter]', msg, data || ''),
       logError: (msg, err) => console.error('[sync-from-shifter]', msg, err),
@@ -243,6 +254,7 @@ router.post('/from-shifter', async (req, res) => {
       pulled_rows: pulled.pulledRows,
       mapped_rows: pulled.mappedRows,
       skipped_rows: pulled.skippedRows,
+      skip_unchanged: skipUnchanged,
       ...result,
     });
   } catch (err) {

@@ -1,17 +1,52 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { organisations } from '../lib/api';
+import { DIRECTORY_LIST_STORAGE_KEY, participantsProfileQueryFromDirectory } from '../lib/listViewUrl.js';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 
 export default function DirectoryPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const listHydratedRef = useRef(false);
   const [orgs, setOrgs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const q = searchParams.get('q') ?? '';
+  const orgFromUrl = searchParams.get('org') || '';
+  const search = q;
   const [showModal, setShowModal] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState(null);
   const [form, setForm] = useState({ name: '', type: '', abn: '', ndis_reg_number: '', email: '', phone: '', address: '', website: '' });
   const [contactForm, setContactForm] = useState({ name: '', email: '', phone: '', role: '' });
   const [showContactModal, setShowContactModal] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.toString() !== '') {
+      listHydratedRef.current = true;
+      return;
+    }
+    if (listHydratedRef.current) return;
+    listHydratedRef.current = true;
+    try {
+      const raw = sessionStorage.getItem(DIRECTORY_LIST_STORAGE_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (!p?.q && !p?.org) return;
+      setSearchParams(
+        (prev) => {
+          const n = new URLSearchParams(prev);
+          if (p?.q) n.set('q', p.q);
+          if (p?.org) n.set('org', p.org);
+          return n;
+        },
+        { replace: true }
+      );
+    } catch (_) { /* ignore */ }
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(DIRECTORY_LIST_STORAGE_KEY, JSON.stringify({ q, org: orgFromUrl || '' }));
+    } catch (_) { /* ignore */ }
+  }, [q, orgFromUrl]);
 
   const load = async () => {
     setLoading(true);
@@ -29,6 +64,36 @@ export default function DirectoryPage() {
     load();
   }, [search]);
 
+  useEffect(() => {
+    if (!orgFromUrl) {
+      setSelectedOrg(null);
+      return;
+    }
+    let cancelled = false;
+    organisations
+      .get(orgFromUrl)
+      .then((o) => {
+        if (!cancelled) setSelectedOrg(o);
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedOrg(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgFromUrl]);
+
+  const selectOrgInUrl = (id) => {
+    setSearchParams(
+      (prev) => {
+        const n = new URLSearchParams(prev);
+        n.set('org', id);
+        return n;
+      },
+      { replace: true }
+    );
+  };
+
   const handleCreate = async (e) => {
     e.preventDefault();
     try {
@@ -41,21 +106,13 @@ export default function DirectoryPage() {
     }
   };
 
-  const handleSelectOrg = async (id) => {
-    try {
-      const o = await organisations.get(id);
-      setSelectedOrg(o);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   const handleUpdateOrg = async (e) => {
     e.preventDefault();
     if (!selectedOrg) return;
     try {
       await organisations.update(selectedOrg.id, form);
-      handleSelectOrg(selectedOrg.id);
+      const o = await organisations.get(selectedOrg.id);
+      setSelectedOrg(o);
       load();
     } catch (err) {
       alert(err.message);
@@ -69,7 +126,8 @@ export default function DirectoryPage() {
       await organisations.addContact(selectedOrg.id, contactForm);
       setContactForm({ name: '', email: '', phone: '', role: '' });
       setShowContactModal(false);
-      handleSelectOrg(selectedOrg.id);
+      const o = await organisations.get(selectedOrg.id);
+      setSelectedOrg(o);
     } catch (err) {
       alert(err.message);
     }
@@ -79,7 +137,17 @@ export default function DirectoryPage() {
     if (!confirm(`Delete "${org.name}"? This will remove it from the directory. Participants linked to this plan manager will have their plan manager cleared.`)) return;
     try {
       await organisations.delete(org.id);
-      if (selectedOrg?.id === org.id) setSelectedOrg(null);
+      if (selectedOrg?.id === org.id) {
+        setSelectedOrg(null);
+        setSearchParams(
+          (prev) => {
+            const n = new URLSearchParams(prev);
+            n.delete('org');
+            return n;
+          },
+          { replace: true }
+        );
+      }
       load();
     } catch (err) {
       alert(err.message || 'Failed to delete organisation.');
@@ -98,7 +166,22 @@ export default function DirectoryPage() {
           <button className="btn btn-primary" onClick={() => setShowModal(true)}>Add Organisation</button>
         </div>
         <div className="search-bar">
-          <input placeholder="Search organisations..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input
+            placeholder="Search organisations..."
+            value={q}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSearchParams(
+                (prev) => {
+                  const n = new URLSearchParams(prev);
+                  if (v) n.set('q', v);
+                  else n.delete('q');
+                  return n;
+                },
+                { replace: true }
+              );
+            }}
+          />
         </div>
         <div className="card">
           {loading ? <p>Loading...</p> : orgs.length === 0 ? (
@@ -121,7 +204,7 @@ export default function DirectoryPage() {
                       <td>{o.contact_count || 0}</td>
                       <td>{o.participant_count ?? 0}</td>
                       <td>
-                        <button className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => handleSelectOrg(o.id)}>View</button>
+                        <button className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => selectOrgInUrl(o.id)}>View</button>
                         {' '}
                         <button className="btn btn-secondary" style={{ fontSize: '0.8rem', color: '#c53030' }} onClick={() => handleDeleteOrg(o)} title="Delete">Delete</button>
                       </td>
@@ -214,7 +297,15 @@ export default function DirectoryPage() {
                   <tr key={p.id}>
                     <td>{p.name}</td>
                     <td>{p.ndis_number || '-'}</td>
-                    <td><Link to={`/participants/${p.id}`} className="btn btn-secondary" style={{ fontSize: '0.8rem' }}>View</Link></td>
+                    <td>
+                      <Link
+                        to={`/participants/${p.id}?${participantsProfileQueryFromDirectory({ q, orgId: orgFromUrl || selectedOrg?.id })}`}
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.8rem' }}
+                      >
+                        View
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { formatDate, formatDateInTimeZone, formatDateLocal, formatTimeInTimeZone } from '../lib/dateUtils';
 import { useSearchParams } from 'react-router-dom';
@@ -30,16 +30,30 @@ function toApiDateTime(s) {
   return t.length === 16 ? `${t}:00` : t;
 }
 
+const SHIFTS_LIST_STORAGE_KEY = 'nexus_shifts_list';
+
+function parseWeekParam(w) {
+  if (!w || !/^\d{4}-\d{2}-\d{2}$/.test(w)) return null;
+  const d = new Date(`${w}T12:00:00`);
+  if (isNaN(d.getTime())) return null;
+  return getWeekStart(d);
+}
+
 export default function ShiftsPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [shiftList, setShiftList] = useState([]);
   const [orgTimezone, setOrgTimezone] = useState('');
   const [participantsList, setParticipantsList] = useState([]);
   const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('planner');
-  const [weekStart, setWeekStart] = useState(getWeekStart(new Date()));
+  const weekStart = useMemo(() => {
+    return parseWeekParam(searchParams.get('week')) ?? getWeekStart(new Date());
+  }, [searchParams]);
+  const view = useMemo(
+    () => (searchParams.get('view') === 'table' ? 'table' : 'planner'),
+    [searchParams]
+  );
   const [showModal, setShowModal] = useState(false);
   const [editingShift, setEditingShift] = useState(null);
   const [form, setForm] = useState({
@@ -71,6 +85,95 @@ export default function ShiftsPage() {
   const sendAfterRef = useRef(false);
   const formRef = useRef(null);
 
+  useEffect(() => {
+    if (searchParams.get('week') && searchParams.get('view')) return;
+    setSearchParams(
+      (prev) => {
+        const n = new URLSearchParams(prev);
+        if (!n.get('week')) {
+          let week = formatDateLocal(getWeekStart(new Date()));
+          try {
+            const raw = sessionStorage.getItem(SHIFTS_LIST_STORAGE_KEY);
+            if (raw) {
+              const p = JSON.parse(raw);
+              if (p?.week && /^\d{4}-\d{2}-\d{2}$/.test(p.week)) week = p.week;
+            }
+          } catch (_) { /* ignore */ }
+          n.set('week', week);
+        }
+        if (!n.get('view')) {
+          let v = 'planner';
+          try {
+            const raw = sessionStorage.getItem(SHIFTS_LIST_STORAGE_KEY);
+            if (raw) {
+              const p = JSON.parse(raw);
+              if (p?.view === 'table' || p?.view === 'planner') v = p.view;
+            }
+          } catch (_) { /* ignore */ }
+          n.set('view', v);
+        }
+        return n;
+      },
+      { replace: true }
+    );
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        SHIFTS_LIST_STORAGE_KEY,
+        JSON.stringify({ week: formatDateLocal(weekStart), view })
+      );
+    } catch (_) { /* ignore */ }
+  }, [weekStart, view]);
+
+  const replaceShiftsListUrl = useCallback(
+    (opts = {}) => {
+      setSearchParams(
+        (prev) => {
+          const n = new URLSearchParams(prev);
+          n.set('week', formatDateLocal(weekStart));
+          n.set('view', view);
+          if (opts.removeShift) n.delete('shift');
+          return n;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams, weekStart, view]
+  );
+
+  const setListWeek = useCallback(
+    (d) => {
+      const mon = getWeekStart(d);
+      setSearchParams(
+        (prev) => {
+          const n = new URLSearchParams(prev);
+          n.set('week', formatDateLocal(mon));
+          if (!n.get('view')) n.set('view', view);
+          return n;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams, view]
+  );
+
+  const setListView = useCallback(
+    (v) => {
+      setSearchParams(
+        (prev) => {
+          const n = new URLSearchParams(prev);
+          n.set('view', v);
+          n.set('week', formatDateLocal(weekStart));
+          return n;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams, weekStart]
+  );
+
   const handleDeleteDuplicateShift = async (s) => {
     if (!confirm(`Delete this shift (${s.participant_name} · ${s.staff_name} · ${s.start_time?.slice(0, 16)})? This cannot be undone.`)) return;
     try {
@@ -95,7 +198,12 @@ export default function ShiftsPage() {
 
   const shiftDetailPeriodQuery = () => {
     const { start, endStr } = getDisplayedWeekRange();
-    return `periodStart=${encodeURIComponent(start)}&periodEnd=${encodeURIComponent(endStr)}`;
+    const p = new URLSearchParams();
+    p.set('periodStart', start);
+    p.set('periodEnd', endStr);
+    p.set('listWeek', formatDateLocal(weekStart));
+    p.set('listView', view);
+    return p.toString();
   };
 
   const load = async (opts = {}) => {
@@ -310,7 +418,7 @@ export default function ShiftsPage() {
       setForm({ participant_id: '', staff_id: '', start_time: '', end_time: '', notes: '' });
       setAvailabilityPreview(null);
       load();
-      window.history.replaceState({}, '', '/shifts');
+      replaceShiftsListUrl({ removeShift: true });
       showShiftAnomalies(shiftId);
     } catch (err) {
       alert(err.message);
@@ -546,7 +654,7 @@ export default function ShiftsPage() {
             ))}
           </div>
           <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(`/shifts/${shiftSaveWarnings.shiftId}`)}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(`/shifts/${shiftSaveWarnings.shiftId}?${shiftDetailPeriodQuery()}`)}>
               Open shift
             </button>
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShiftSaveWarnings(null)}>
@@ -559,13 +667,13 @@ export default function ShiftsPage() {
         <h2>Shifts</h2>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: '0.25rem', marginRight: '0.5rem' }}>
-            <button className={`btn ${view === 'planner' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('planner')}>Week Planner</button>
-            <button className={`btn ${view === 'table' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('table')}>Table</button>
+            <button className={`btn ${view === 'planner' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setListView('planner')}>Week Planner</button>
+            <button className={`btn ${view === 'table' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setListView('table')}>Table</button>
           </div>
           <button className="btn btn-secondary" onClick={() => {
             const prev = new Date(weekStart);
             prev.setDate(prev.getDate() - 7);
-            setWeekStart(prev);
+            setListWeek(prev);
           }}>Prev</button>
           <span style={{ minWidth: 140, textAlign: 'center' }}>
             {formatDate(weekStart)} – {formatDate(days[6])}
@@ -573,7 +681,7 @@ export default function ShiftsPage() {
           <button className="btn btn-secondary" onClick={() => {
             const next = new Date(weekStart);
             next.setDate(next.getDate() + 7);
-            setWeekStart(next);
+            setListWeek(next);
           }}>Next</button>
           <Link to="/shifts/availability" className="btn btn-secondary">Roster availability</Link>
           <button className="btn btn-primary" onClick={() => { setEditingShift(null); setForm({ participant_id: '', staff_id: '', start_time: '', end_time: '', notes: '' }); setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' }); setShowModal(true); }}>New Shift</button>
@@ -720,7 +828,7 @@ export default function ShiftsPage() {
                             {(Array.isArray(grp) ? grp : []).map((s) => (
                               <li key={s.id} style={{ marginBottom: '0.25rem' }}>
                                 {s.start_time?.slice(0, 16)} – {s.end_time?.slice(11, 16)} —{' '}
-                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDuplicatesOpen(false); navigate(`/shifts/${s.id}`); }}>View</button>
+                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDuplicatesOpen(false); navigate(`/shifts/${s.id}?${shiftDetailPeriodQuery()}`); }}>View</button>
                                 <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '0.25rem' }} onClick={() => { setDuplicatesOpen(false); handleEditShift(s); }}>Edit</button>
                                 <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '0.25rem', color: '#b91c1c' }} onClick={() => handleDeleteDuplicateShift(s)} title="Delete this duplicate">Delete</button>
                               </li>
@@ -743,7 +851,7 @@ export default function ShiftsPage() {
                             {(grp.shifts ?? []).map((s) => (
                               <li key={s.id} style={{ marginBottom: '0.25rem' }}>
                                 {s.participant_name} · {s.staff_name} · {s.start_time?.slice(0, 16)} —{' '}
-                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDuplicatesOpen(false); navigate(`/shifts/${s.id}`); }}>View</button>
+                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDuplicatesOpen(false); navigate(`/shifts/${s.id}?${shiftDetailPeriodQuery()}`); }}>View</button>
                                 <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '0.25rem' }} onClick={() => { setDuplicatesOpen(false); handleEditShift(s); }}>Edit</button>
                                 <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '0.25rem', color: '#b91c1c' }} onClick={() => handleDeleteDuplicateShift(s)} title="Delete this duplicate">Delete</button>
                               </li>
@@ -834,6 +942,7 @@ export default function ShiftsPage() {
                     <th>Participant</th>
                     <th>Staff</th>
                     <th>Status</th>
+                    <th>Invoice</th>
                     <th style={{ textAlign: 'right' }}>Charges</th>
                     <th></th>
                   </tr>
@@ -851,6 +960,19 @@ export default function ShiftsPage() {
                       <td>{s.participant_name}</td>
                       <td>{s.staff_name}</td>
                       <td><span className={`badge badge-${s.status}`}>{s.status}</span></td>
+                      <td>
+                        {s.invoice_number ? (
+                          <span
+                            className={`badge badge-${s.invoice_status || 'sent'}`}
+                            style={{ fontSize: '0.75rem' }}
+                            title={s.invoice_status ? `Invoice (${s.invoice_status})` : 'On an invoice'}
+                          >
+                            {s.invoice_number}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94a3b8' }}>—</span>
+                        )}
+                      </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                         ${Number(s.charges_total ?? 0).toFixed(2)}
                       </td>
@@ -879,7 +1001,7 @@ export default function ShiftsPage() {
           if (window.getSelection?.()?.toString?.()) return;
           setShowModal(false);
           setEditingShift(null);
-          window.history.replaceState({}, '', '/shifts');
+          replaceShiftsListUrl({ removeShift: true });
         }}>
           <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
             <h3>{editingShift ? 'Edit Shift' : 'New Shift'}</h3>
@@ -996,7 +1118,7 @@ export default function ShiftsPage() {
                     View / Charges
                   </button>
                 )}
-                <button type="button" className="btn btn-secondary" onClick={() => { setShowModal(false); setEditingShift(null); window.history.replaceState({}, '', '/shifts'); }}>Cancel</button>
+                <button type="button" className="btn btn-secondary" onClick={() => { setShowModal(false); setEditingShift(null); replaceShiftsListUrl({ removeShift: true }); }}>Cancel</button>
               </div>
             </form>
           </div>

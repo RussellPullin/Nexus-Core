@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { backToStaffListPath } from '../lib/listViewUrl.js';
 import { staff, participants, shifts, forms } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
 import { groupShiftsByExcelPeriods, groupShiftsByPayPeriod } from '../lib/payPeriod';
@@ -36,6 +37,8 @@ function staffEditFormFromRow(staffRow) {
 
 export default function StaffProfile() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const staffListPath = backToStaffListPath(searchParams);
   const [data, setData] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [participantsList, setParticipantsList] = useState([]);
@@ -349,7 +352,7 @@ export default function StaffProfile() {
     return (
       <div className="content">
         <p>Invalid staff link.</p>
-        <Link to="/staff" className="btn btn-primary" style={{ display: 'inline-block', marginTop: '1rem' }}>Back to Staff</Link>
+        <Link to={staffListPath} className="btn btn-primary" style={{ display: 'inline-block', marginTop: '1rem' }}>Back to Staff</Link>
       </div>
     );
   }
@@ -369,7 +372,7 @@ export default function StaffProfile() {
         <p style={{ marginTop: '0.5rem', color: '#64748b' }}>
           Staff must be added on the Staff page first. Go to Staff and click &quot;Add Staff&quot; to create support workers.
         </p>
-        <Link to="/staff" className="btn btn-primary" style={{ display: 'inline-block', marginTop: '1rem' }}>Back to Staff</Link>
+        <Link to={staffListPath} className="btn btn-primary" style={{ display: 'inline-block', marginTop: '1rem' }}>Back to Staff</Link>
       </div>
     );
   }
@@ -377,7 +380,7 @@ export default function StaffProfile() {
   return (
     <div className="content">
       <div className="page-header" style={{ marginBottom: '1rem' }}>
-        <Link to="/staff" className="participant-name-link" style={{ marginRight: '0.5rem' }}>← Staff</Link>
+        <Link to={staffListPath} className="participant-name-link" style={{ marginRight: '0.5rem' }}>← Staff</Link>
       </div>
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>

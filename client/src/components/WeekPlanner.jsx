@@ -268,6 +268,14 @@ export default function WeekPlanner({
         }}
       >
         <div className="week-planner-shift-card-inner">
+          {shift.invoice_number && (
+            <span
+              className="week-planner-shift-invoice-badge"
+              title={`Invoiced: ${shift.invoice_number}${shift.invoice_status ? ` (${shift.invoice_status})` : ''}`}
+            >
+              {shift.invoice_number.length > 10 ? `${shift.invoice_number.slice(0, 8)}…` : shift.invoice_number}
+            </span>
+          )}
           {shift.roster_sent_at && (
             <span className="week-planner-shift-sent-badge" title="Roster sent">✓</span>
           )}

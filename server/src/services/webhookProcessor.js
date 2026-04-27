@@ -61,14 +61,82 @@ function dedupeIncomingShifts(shiftsArray) {
   return [...Array.from(bySlot.values()), ...withoutId];
 }
 
+function strNormForCompare(s) {
+  if (s == null || s === '') return '';
+  return String(s).trim();
+}
+
+/** Compare by wall-clock (YYYY-MM-DDTHH:mm); avoids :00 vs :00.000 mismatches. */
+function isoDateTimeMinutePrefix(iso) {
+  const s = strNormForCompare(iso);
+  if (s.length >= 16) return s.slice(0, 16);
+  return s;
+}
+
+function optFloatEqual(a, b) {
+  const na = a == null || a === '' ? null : parseFloat(String(a));
+  const nb = b == null || b === '' ? null : parseFloat(String(b));
+  if (na == null && nb == null) return true;
+  if (na == null || nb == null || !Number.isFinite(na) || !Number.isFinite(nb)) return false;
+  return Math.abs(na - nb) < 0.0001;
+}
+
+function optIntEqual(a, b) {
+  const na = a == null || a === '' ? null : parseInt(String(a), 10);
+  const nb = b == null || b === '' ? null : parseInt(String(b), 10);
+  if (na == null && nb == null) return true;
+  if (na == null || nb == null || !Number.isFinite(na) || !Number.isFinite(nb)) return false;
+  return na === nb;
+}
+
+/**
+ * Shifter re-pull: skip the heavy path when this shift is already in Nexus and matches the payload.
+ * Requires a stable shifter id + an existing progress note to compare against (avoids duplicating PNs on repeat imports).
+ */
+function isReimportPayloadUnchanged({
+  existingRow,
+  latestProgressNote,
+  participantId,
+  staffId,
+  startDateTime,
+  endDateTime,
+  sessionDetails,
+  expensesVal,
+  travelKm,
+  travelTimeMin,
+  startTime,
+  finishTime,
+  mood,
+  incidents,
+}) {
+  if (!existingRow) return false;
+  if (existingRow.participant_id !== participantId || existingRow.staff_id !== staffId) return false;
+  if (isoDateTimeMinutePrefix(existingRow.start_time) !== isoDateTimeMinutePrefix(startDateTime)) return false;
+  if (isoDateTimeMinutePrefix(existingRow.end_time) !== isoDateTimeMinutePrefix(endDateTime)) return false;
+  if (strNormForCompare(existingRow.notes) !== strNormForCompare(sessionDetails)) return false;
+  const rowExp = Number.isFinite(Number(existingRow.expenses)) ? Number(existingRow.expenses) : 0;
+  if (rowExp !== expensesVal) return false;
+  if (!latestProgressNote) return false;
+  if (!optFloatEqual(latestProgressNote.travel_km, travelKm)) return false;
+  if (!optIntEqual(latestProgressNote.travel_time_min, travelTimeMin)) return false;
+  if (strNormForCompare(latestProgressNote.session_details) !== strNormForCompare(sessionDetails)) return false;
+  if (strNormForCompare(latestProgressNote.mood) !== strNormForCompare(mood)) return false;
+  if (strNormForCompare(latestProgressNote.incidents) !== strNormForCompare(incidents)) return false;
+  if (strNormForCompare(latestProgressNote.start_time) !== strNormForCompare(startTime)) return false;
+  if (strNormForCompare(latestProgressNote.end_time) !== strNormForCompare(finishTime)) return false;
+  return true;
+}
+
 /**
  * Process an array of shifts (from webhook or Excel).
  * @param {Array} shiftsArray - Shifts in webhook format
- * @param {object} options - { orgId, log }
- * @returns {{ processed, matched, unmatched, skipped }}
+ * @param {object} options - { orgId, log, skipUnchanged?: boolean } — when skipUnchanged, matched shifts that
+ *   already match Nexus (by shifter_shift_id + latest progress note) are not written again.
+ * @returns {{ processed, matched, unmatched, skipped, unchanged? }}
  */
 export function processShifts(shiftsArray, options = {}) {
   const orgId = options.orgId ?? null;
+  const skipUnchanged = !!options.skipUnchanged;
   const log = options.log || console.log;
   const logWarn = options.logWarn || console.warn;
   const logError = options.logError || console.error;
@@ -77,6 +145,7 @@ export function processShifts(shiftsArray, options = {}) {
   let matched = 0;
   let unmatched = 0;
   let skipped = 0;
+  let unchanged = 0;
 
   const deduped = dedupeIncomingShifts(shiftsArray);
   if (deduped.length < shiftsArray.length) {
@@ -149,6 +218,45 @@ export function processShifts(shiftsArray, options = {}) {
           duration
         });
 
+        const expensesVal = Number.isFinite(expenses) ? expenses : 0;
+        if (skipUnchanged && shiftId) {
+          const byShifter = findShiftByShifterShiftId(shiftId);
+          if (byShifter && byShifter.participant_id === participant.id && byShifter.staff_id === staff.id) {
+            const byTime = findShiftByParticipantStaffAndStartTime(participant.id, staff.id, startDateTime);
+            if (!byTime || byTime.id === byShifter.id) {
+              const latestPn = db
+                .prepare(
+                  `SELECT travel_km, travel_time_min, session_details, mood, incidents, start_time, end_time
+                   FROM progress_notes WHERE shift_id = ? ORDER BY created_at DESC LIMIT 1`,
+                )
+                .get(byShifter.id);
+              if (
+                isReimportPayloadUnchanged({
+                  existingRow: byShifter,
+                  latestProgressNote: latestPn,
+                  participantId: participant.id,
+                  staffId: staff.id,
+                  startDateTime,
+                  endDateTime,
+                  sessionDetails,
+                  expensesVal,
+                  travelKm,
+                  travelTimeMin,
+                  startTime,
+                  finishTime,
+                  mood,
+                  incidents,
+                })
+              ) {
+                unchanged++;
+                processed++;
+                log('Skip unchanged re-import (already in Nexus; no write)', { shiftId });
+                continue;
+              }
+            }
+          }
+        }
+
         // Prevent duplicate shifts: 1) same participant + staff + date + time (primary), 2) same import ID, 3) scheduled shift overlap.
         let matchingShift = findShiftByParticipantStaffAndStartTime(participant.id, staff.id, startDateTime);
         if (!matchingShift && shiftId) {
@@ -166,7 +274,6 @@ export function processShifts(shiftsArray, options = {}) {
         }
 
         let resolvedShiftId;
-        const expensesVal = Number.isFinite(expenses) ? expenses : 0;
         const shifterShiftId = shiftId || null;
         if (matchingShift) {
           resolvedShiftId = matchingShift.id;
@@ -306,5 +413,5 @@ export function processShifts(shiftsArray, options = {}) {
     processed++;
   }
 
-  return { processed, matched, unmatched, skipped };
+  return { processed, matched, unmatched, skipped, unchanged };
 }
