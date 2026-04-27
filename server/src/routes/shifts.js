@@ -12,6 +12,7 @@ import {
   scheduleRemoveShiftFromNexusSupabase,
 } from '../services/nexusPublicShiftsSync.service.js';
 import { syncCaseNoteFromShift } from '../services/shiftCaseNoteSync.service.js';
+import { recalculateShiftLineItemsFromShift } from '../services/shiftLineItems.service.js';
 import { getProviderOrgIdForUser, requireAdminOrDelegate } from '../middleware/roles.js';
 import {
   isParticipantInRequesterTenant,
@@ -477,6 +478,12 @@ router.put('/:id', async (req, res) => {
       rgId,
       req.params.id
     );
+
+    try {
+      recalculateShiftLineItemsFromShift(req.params.id);
+    } catch (e) {
+      console.warn('[shifts] recalculateShiftLineItemsFromShift', e?.message || e);
+    }
 
     const shift = getShiftByIdForUser(req.params.id, userId);
     // Invoicing is done via batch (Financial > Batch invoices); no per-shift invoice creation.

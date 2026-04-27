@@ -330,3 +330,67 @@ export function syncShiftLineItemsWithProgressNote(shiftId) {
 
   supplementShiftTravelLineItemsFromProgressNote(shiftId);
 }
+
+/**
+ * Rebuild shift_line_items from the current shift row (start/end, participant) and the latest
+ * progress note (travel km / time). Use after admin edits in Nexus so billing quantities and
+ * day/time-based NDIS line items stay aligned.
+ * Does nothing (returns skipped) if the shift is already on a billing invoice. Clears line items
+ * for cancelled shifts.
+ * @param {string} shiftId
+ * @returns {{ ok: boolean, skipped?: string, recalculated?: boolean, cleared?: boolean }}
+ */
+export function recalculateShiftLineItemsFromShift(shiftId) {
+  if (!shiftId) return { ok: false, skipped: 'no_id' };
+  const shift = db
+    .prepare(
+      `SELECT s.id, s.participant_id, s.start_time, s.end_time, s.billing_invoice_id, s.status,
+         (SELECT 1 FROM invoices i WHERE i.shift_id = s.id LIMIT 1) AS has_legacy_invoice
+       FROM shifts s WHERE s.id = ?`
+    )
+    .get(shiftId);
+  if (!shift) return { ok: false, skipped: 'not_found' };
+
+  const billed = shift.billing_invoice_id != null && String(shift.billing_invoice_id).trim() !== '';
+  if (billed || shift.has_legacy_invoice) {
+    return { ok: false, skipped: 'billed' };
+  }
+
+  const st = String(shift.status || '').toLowerCase();
+  if (st === 'cancelled' || st === 'canceled') {
+    db.prepare('DELETE FROM shift_line_items WHERE shift_id = ?').run(shiftId);
+    return { ok: true, cleared: true };
+  }
+
+  const fromShift = hoursBetweenIsoDateTimes(shift.start_time, shift.end_time);
+  const durationHours = fromShift != null ? fromShift : 0;
+
+  const supportDateFromShift =
+    shift.start_time && String(shift.start_time).length >= 10
+      ? String(shift.start_time).replace(' ', 'T').slice(0, 10)
+      : null;
+
+  const pn = db
+    .prepare(
+      `SELECT travel_km, travel_time_min, support_date
+       FROM progress_notes
+       WHERE shift_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+    .get(shiftId);
+
+  const supportDate = supportDateFromShift || pn?.support_date || new Date().toISOString().slice(0, 10);
+
+  populateShiftLineItems(
+    shiftId,
+    shift.participant_id,
+    durationHours,
+    shift.start_time,
+    shift.end_time,
+    supportDate,
+    pn?.travel_km ?? null,
+    pn?.travel_time_min ?? null
+  );
+  return { ok: true, recalculated: true };
+}
