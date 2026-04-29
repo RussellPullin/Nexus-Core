@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { formTemplates } from '../lib/api';
 
 function interpolatePreview(template, map) {
@@ -7,6 +8,7 @@ function interpolatePreview(template, map) {
 }
 
 export default function FormTemplatesSettings() {
+  const [searchParams] = useSearchParams();
   const [masters, setMasters] = useState([]);
   const [instances, setInstances] = useState([]);
   const [selectedId, setSelectedId] = useState('');
@@ -35,6 +37,12 @@ export default function FormTemplatesSettings() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    const tid = searchParams.get('templateInstance');
+    if (!tid || !instances.length) return;
+    if (instances.some((x) => x.id === tid)) setSelectedId(tid);
+  }, [searchParams, instances]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -69,7 +77,7 @@ export default function FormTemplatesSettings() {
   }, [selectedId]);
 
   const serviceAgreementMaster = useMemo(
-    () => (masters || []).find((m) => m.template_key === 'service_agreement_spring2_v3'),
+    () => (masters || []).find((m) => m.template_key === 'service_agreement_standard_v3'),
     [masters]
   );
 
@@ -163,11 +171,11 @@ export default function FormTemplatesSettings() {
         </div>
       )}
 
-      {!instances.some((i) => i.template_key === 'service_agreement_spring2_v3') && (
+      {!instances.some((i) => i.template_key === 'service_agreement_standard_v3') && (
         <div style={{ marginBottom: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
           <h4 style={{ margin: '0 0 0.5rem 0' }}>Service Agreement</h4>
           <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: '#475569' }}>
-            Clone the Spring 2 Health Services Agreement (Version 3 structure) for your organisation.
+            Clone the standard NDIS-style Services Agreement template for your organisation.
           </p>
           <button type="button" className="btn btn-primary" disabled={saving || !serviceAgreementMaster} onClick={setupClone}>
             {saving ? 'Working…' : 'Set up Service Agreement'}

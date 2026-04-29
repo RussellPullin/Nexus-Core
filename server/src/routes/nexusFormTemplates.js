@@ -12,9 +12,10 @@ import { requireAdminOrDelegate } from '../middleware/roles.js';
 import {
   mergeVariableValues,
   mergeBranding,
-  parseJson
+  parseJson,
+  baselineVariableDefaults
 } from '../services/nexusFormTemplateRuntime.service.js';
-import { VARIABLE_GROUPS, VARIABLE_DEFAULTS } from '../data/serviceAgreementSpring2V3/variableSchema.js';
+import { VARIABLE_GROUPS } from '../data/serviceAgreementSpring2V3/variableSchema.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -165,7 +166,7 @@ ROUTER.get('/instances/:id/preview-model', requireAdminOrDelegate, (req, res) =>
     const branding = mergeBranding(row.branding_json);
     res.json({
       variable_values: merged,
-      variable_defaults: { ...VARIABLE_DEFAULTS, ...(parseJson(row.master_variable_schema_json, {})?.defaults || {}) },
+      variable_defaults: baselineVariableDefaults(row.master_variable_schema_json),
       branding,
       variable_groups: VARIABLE_GROUPS,
       definition_json: parseJson(row.master_definition_json, {}),

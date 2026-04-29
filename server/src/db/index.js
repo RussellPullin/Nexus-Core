@@ -1671,6 +1671,16 @@ try {
       CREATE INDEX IF NOT EXISTS idx_nexus_generated_org_participant ON nexus_generated_form_documents(org_id, participant_id);
       CREATE INDEX IF NOT EXISTS idx_nexus_generated_participant ON nexus_generated_form_documents(participant_id);
     `);
+    try {
+      db.prepare(
+        `UPDATE nexus_form_template_masters
+         SET template_key = 'service_agreement_standard_v3',
+             title = 'Standard NDIS Services Agreement (Version 3 structure)'
+         WHERE template_key = 'service_agreement_spring2_v3'`
+      ).run();
+    } catch (e) {
+      if (!e.message?.includes('no such table')) console.warn('nexus_form_template master rename:', e.message);
+    }
     const seedResult = seedNexusFormTemplateMastersIfNeeded(db);
     if (seedResult?.seeded) {
       console.log('[nexus] Seeded default Service Agreement master template:', seedResult.master_id);

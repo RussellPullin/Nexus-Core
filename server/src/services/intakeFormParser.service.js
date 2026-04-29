@@ -1,7 +1,7 @@
 /**
  * Intake Form Parser - extracts structured data from completed Client Intake Form PDFs.
  * Uses LLM to parse free-form text into participant profile and intake fields.
- * Based on: Client Intake Form (Pristine Lifestyle Solutions / Spring 2 Health) Version 3.
+ * Field labels align with common NDIS Client Intake Form layouts (Version 3–style).
  */
 
 import * as llm from './llm.service.js';
@@ -99,7 +99,7 @@ export async function parseIntakeFormText(pdfText) {
  * LLM-based parsing for flexible extraction from handwritten or varied layouts.
  */
 async function parseWithLlm(text) {
-  const prompt = `You are parsing a completed "Client Intake Form" from Pristine Lifestyle Solutions / Spring 2 Health.
+  const prompt = `You are parsing a completed NDIS Client Intake Form (standard multi-page layout).
 Extract all filled-in fields from the form text below. Return valid JSON only, no markdown or explanation.
 
 Form structure (3 pages):

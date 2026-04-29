@@ -1,5 +1,5 @@
 /**
- * Variable merge, template interpolation, and org profile resolution for Nexus form templates.
+ * Variable merge, template interpolation, and org profile resolution for structured form templates.
  */
 import { VARIABLE_DEFAULTS } from '../data/serviceAgreementSpring2V3/variableSchema.js';
 
@@ -13,9 +13,19 @@ export function parseJson(value, fallback = null) {
   }
 }
 
-export function mergeVariableValues(variableSchemaJson, orgVariableValuesJson) {
+/** Baseline defaults from code always win over stored `schema.defaults` (avoids stale seeded names in older DB rows). */
+export function baselineVariableDefaults(variableSchemaJson) {
   const schema = parseJson(variableSchemaJson, {});
-  const defaults = { ...VARIABLE_DEFAULTS, ...(schema.defaults || {}) };
+  const merged = { ...VARIABLE_DEFAULTS, ...(schema.defaults || {}) };
+  const out = { ...merged };
+  for (const key of Object.keys(VARIABLE_DEFAULTS)) {
+    out[key] = VARIABLE_DEFAULTS[key];
+  }
+  return out;
+}
+
+export function mergeVariableValues(variableSchemaJson, orgVariableValuesJson) {
+  const defaults = baselineVariableDefaults(variableSchemaJson);
   const orgVals = parseJson(orgVariableValuesJson, {}) || {};
   return { ...defaults, ...orgVals };
 }

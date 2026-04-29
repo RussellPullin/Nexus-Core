@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { canAccessParticipant } from '../middleware/roles.js';
 import { buildServiceAgreementSnapshot } from '../services/serviceAgreementSnapshot.service.js';
+import { computeServiceAgreementGaps } from '../services/serviceAgreementGaps.service.js';
 import { generateServiceAgreementPdfBuffer } from '../services/serviceAgreementPdf.service.js';
 import { tryPushParticipantDocument } from '../services/orgOnedriveSync.service.js';
 
@@ -32,6 +33,42 @@ function assertParticipantOrg(participantId, orgId) {
 }
 
 const ROUTER = Router({ mergeParams: true });
+
+ROUTER.post('/:participantId/service-agreements/preflight', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const userId = req.session.user.id;
+    const { participantId } = req.params;
+    if (!canAccessParticipant(userId, participantId)) return res.status(403).json({ error: 'Access denied' });
+
+    const orgId = userOrgId(userId);
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account.' });
+
+    const gate = assertParticipantOrg(participantId, orgId);
+    if (!gate.ok) return res.status(404).json({ error: gate.error });
+
+    const orgTemplateId = req.body?.org_template_id || req.body?.org_template_instance_id;
+    if (!orgTemplateId) return res.status(400).json({ error: 'org_template_id is required.' });
+
+    const orgTpl = db.prepare(`SELECT * FROM nexus_org_form_templates WHERE id = ? AND org_id = ?`).get(orgTemplateId, orgId);
+    if (!orgTpl) return res.status(404).json({ error: 'Organisation template not found.' });
+
+    const master = db.prepare(`SELECT * FROM nexus_form_template_masters WHERE id = ?`).get(orgTpl.master_id);
+    if (!master) return res.status(500).json({ error: 'Master template missing.' });
+
+    const instanceOverrides = req.body?.instance_overrides || {};
+    const result = computeServiceAgreementGaps({
+      participantId,
+      orgId,
+      masterRow: master,
+      orgTemplateRow: orgTpl,
+      instanceOverrides
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 ROUTER.post('/:participantId/service-agreements/generate', async (req, res) => {
   try {
@@ -60,6 +97,22 @@ ROUTER.post('/:participantId/service-agreements/generate', async (req, res) => {
     if (!master) return res.status(500).json({ error: 'Master template missing.' });
 
     const instanceOverrides = req.body?.instance_overrides || {};
+
+    const gapResult = computeServiceAgreementGaps({
+      participantId,
+      orgId,
+      masterRow: master,
+      orgTemplateRow: orgTpl,
+      instanceOverrides
+    });
+    if (!gapResult.can_generate) {
+      return res.status(400).json({
+        error: 'Complete required fields before generating this agreement.',
+        gaps: gapResult.gaps,
+        blocking_count: gapResult.blocking_count,
+        warning_count: gapResult.warning_count
+      });
+    }
 
     const snapshot = buildServiceAgreementSnapshot({
       participantId,

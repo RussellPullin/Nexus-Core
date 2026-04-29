@@ -175,6 +175,7 @@ export async function fetchApi(path, options = {}) {
       extraStr && extraStr.trim() !== msgStr.trim() ? `\n\n${extraStr}` : '';
     const e = new Error(msgStr + detail);
     if (err?.code) e.code = err.code;
+    if (err && typeof err === 'object') e.apiPayload = err;
     throw e;
   }
   if (res.status === 204 || !text.trim()) return null;
@@ -358,6 +359,11 @@ export const participants = {
     return text ? JSON.parse(text) : null;
   },
   listServiceAgreements: (participantId) => fetchApi(`/participants/${participantId}/service-agreements`),
+  preflightServiceAgreement: (participantId, body) =>
+    fetchApi(`/participants/${participantId}/service-agreements/preflight`, {
+      method: 'POST',
+      body: JSON.stringify(body || {})
+    }),
   generateServiceAgreement: (participantId, body) =>
     fetchApi(`/participants/${participantId}/service-agreements/generate`, {
       method: 'POST',

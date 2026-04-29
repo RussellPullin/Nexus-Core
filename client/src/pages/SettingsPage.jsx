@@ -92,6 +92,29 @@ export default function SettingsPage() {
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams, refreshUser]);
+
+  useEffect(() => {
+    const expand = searchParams.get('expand');
+    if (!expand) return;
+    const t = window.setTimeout(() => {
+      if (expand === 'form-templates') {
+        const el = document.getElementById('settings-section-form-templates');
+        if (el) {
+          el.open = true;
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+      if (expand === 'company') {
+        const el = document.getElementById('settings-section-company');
+        if (el) {
+          el.open = true;
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+    }, 150);
+    return () => clearTimeout(t);
+  }, [searchParams]);
+
   useEffect(() => {
     if (!isAdmin) return;
     microsoftDrive
@@ -497,7 +520,7 @@ export default function SettingsPage() {
       </details>
 
       {isAdmin && (
-        <details className="card settings-collapsible">
+        <details id="settings-section-form-templates" className="card settings-collapsible">
           <summary className="settings-collapsible-summary">
             <span className="settings-collapsible-summary-main">
               <span className="settings-collapsible-title">Form templates</span>
@@ -1277,7 +1300,7 @@ function BusinessSetup() {
   if (!biz) return null;
 
   return (
-    <details className="card settings-collapsible">
+    <details id="settings-section-company" className="card settings-collapsible">
       <summary className="settings-collapsible-summary">
         <span className="settings-collapsible-summary-main">
           <span className="settings-collapsible-title">Business setup</span>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { backToPreviousListPath, participantProfileBackLabel } from '../lib/listViewUrl.js';
 import { participants, organisations, ndis, smartDefaults, onboarding, formTemplates } from '../lib/api';
@@ -200,6 +200,101 @@ export default function ParticipantProfile() {
     other_provider_consultation_frequency: '',
     communication_preferences: ''
   });
+  const [saGaps, setSaGaps] = useState(null);
+  const [saPreflightLoading, setSaPreflightLoading] = useState(false);
+  const [saScrollTarget, setSaScrollTarget] = useState(null);
+
+  const saInstanceOverridesPayload = useMemo(() => {
+    const o = saOverrides;
+    const instance_overrides = {};
+    if (o.agreement_date) instance_overrides.agreement_date = o.agreement_date;
+    if (o.scheduled_review_date) instance_overrides.scheduled_review_date = o.scheduled_review_date;
+    if (o.monitoring_worker_frequency?.trim()) instance_overrides.monitoring_worker_frequency = o.monitoring_worker_frequency.trim();
+    if (o.other_provider_consultation_frequency?.trim()) {
+      instance_overrides.other_provider_consultation_frequency = o.other_provider_consultation_frequency.trim();
+    }
+    if (o.communication_preferences?.trim()) instance_overrides.communication_preferences = o.communication_preferences.trim();
+    return instance_overrides;
+  }, [saOverrides]);
+
+  const navigateToGapFix = useCallback(
+    (gap) => {
+      const fix = gap?.fix;
+      if (!fix || !data) return;
+      if (fix.kind === 'participant_profile') {
+        setTab(fix.tab || 'overview');
+        if (fix.open_edit) {
+          setEditForm({ ...data, invoice_emails: parseInvoiceEmailsField(data.invoice_emails) });
+          setInvoiceEmailInput('');
+        }
+        if (fix.anchor_id) setSaScrollTarget(fix.anchor_id);
+        return;
+      }
+      if (fix.kind === 'settings') {
+        const sec = fix.section === 'company' ? 'company' : 'form-templates';
+        const q = new URLSearchParams({ expand: sec });
+        if (fix.template_instance_id) q.set('templateInstance', fix.template_instance_id);
+        navigate(`/settings?${q.toString()}`);
+        return;
+      }
+      if (fix.kind === 'agreements_tab') {
+        setTab('agreements');
+        if (fix.anchor_id) setSaScrollTarget(fix.anchor_id);
+      }
+    },
+    [data, navigate]
+  );
+
+  useEffect(() => {
+    if (tab !== 'agreements') {
+      setSaGaps(null);
+      setSaPreflightLoading(false);
+      return;
+    }
+    if (!id || !saSelectedTemplate || !data) {
+      setSaGaps(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setSaPreflightLoading(true);
+      participants
+        .preflightServiceAgreement(id, {
+          org_template_id: saSelectedTemplate,
+          instance_overrides: saInstanceOverridesPayload
+        })
+        .then((res) => {
+          if (!cancelled) setSaGaps(res);
+        })
+        .catch(() => {
+          if (!cancelled) setSaGaps(null);
+        })
+        .finally(() => {
+          if (!cancelled) setSaPreflightLoading(false);
+        });
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [tab, id, saSelectedTemplate, saInstanceOverridesPayload, data]);
+
+  useEffect(() => {
+    if (!saScrollTarget) return undefined;
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(saScrollTarget);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.transition = 'box-shadow 0.25s ease';
+        el.style.boxShadow = '0 0 0 3px rgba(234, 179, 8, 0.95)';
+        window.setTimeout(() => {
+          el.style.boxShadow = '';
+        }, 2400);
+      }
+      setSaScrollTarget(null);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [saScrollTarget, tab, editForm]);
 
   const copyGoalLine = async (key, text) => {
     if (!String(text || '').trim()) return;
@@ -287,7 +382,7 @@ export default function ParticipantProfile() {
         const inst = ti.instances || [];
         setSaTemplates(inst);
         setSaAgreements(list.items || []);
-        const svc = inst.find((x) => x.template_key === 'service_agreement_spring2_v3');
+        const svc = inst.find((x) => x.template_key === 'service_agreement_standard_v3');
         setSaSelectedTemplate((prev) => prev || svc?.id || '');
       })
       .catch(() => {})
@@ -975,34 +1070,47 @@ export default function ParticipantProfile() {
         <div className="card">
           <h3>Edit Profile</h3>
           <form onSubmit={handleSaveProfile}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <div className="form-group">
-                <label>Name</label>
-                <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} required />
+            <div id="sa-gap-key-information">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group" id="sa-gap-edit-name">
+                  <label>Name</label>
+                  <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} required />
+                </div>
+                <div className="form-group">
+                  <label>NDIS Number</label>
+                  <input value={editForm.ndis_number || ''} onChange={(e) => setEditForm({ ...editForm, ndis_number: e.target.value })} />
+                </div>
               </div>
               <div className="form-group">
-                <label>NDIS Number</label>
-                <input value={editForm.ndis_number || ''} onChange={(e) => setEditForm({ ...editForm, ndis_number: e.target.value })} />
+                <label>Management Type</label>
+                <div className="management-type-options">
+                  <label className="checkbox-label">
+                    <input type="radio" name="management_type" checked={(editForm.management_type || 'self') === 'self'} onChange={() => setEditForm({ ...editForm, management_type: 'self', plan_manager_id: '' })} />
+                    <span>Self-managed</span>
+                  </label>
+                  <label className="checkbox-label">
+                    <input type="radio" name="management_type" checked={(editForm.management_type || 'self') === 'plan'} onChange={() => setEditForm({ ...editForm, management_type: 'plan' })} />
+                    <span>Plan-managed</span>
+                  </label>
+                  <label className="checkbox-label">
+                    <input type="radio" name="management_type" checked={(editForm.management_type || 'self') === 'ndia'} onChange={() => setEditForm({ ...editForm, management_type: 'ndia', plan_manager_id: '' })} />
+                    <span>NDIA-managed</span>
+                  </label>
+                </div>
               </div>
+              {(editForm.management_type || 'self') === 'plan' && (
+                <div className="form-group">
+                  <label>Plan Manager (optional – can leave blank; org email is used for invoices if no list below)</label>
+                  <select value={editForm.plan_manager_id || ''} onChange={(e) => setEditForm({ ...editForm, plan_manager_id: e.target.value || '' })}>
+                    <option value="">Select plan manager...</option>
+                    {orgs.map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
-            <div className="form-group">
-              <label>Management Type</label>
-              <div className="management-type-options">
-                <label className="checkbox-label">
-                  <input type="radio" name="management_type" checked={(editForm.management_type || 'self') === 'self'} onChange={() => setEditForm({ ...editForm, management_type: 'self', plan_manager_id: '' })} />
-                  <span>Self-managed</span>
-                </label>
-                <label className="checkbox-label">
-                  <input type="radio" name="management_type" checked={(editForm.management_type || 'self') === 'plan'} onChange={() => setEditForm({ ...editForm, management_type: 'plan' })} />
-                  <span>Plan-managed</span>
-                </label>
-                <label className="checkbox-label">
-                  <input type="radio" name="management_type" checked={(editForm.management_type || 'self') === 'ndia'} onChange={() => setEditForm({ ...editForm, management_type: 'ndia', plan_manager_id: '' })} />
-                  <span>NDIA-managed</span>
-                </label>
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }} id="sa-gap-participant-details">
               <div className="form-group">
                 <label>Email (optional – for self‑managed, used for invoices if no “Invoice email(s)” below)</label>
                 <input type="email" value={editForm.email || ''} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} placeholder="Leave blank if not needed" />
@@ -1012,17 +1120,6 @@ export default function ParticipantProfile() {
                 <input value={editForm.phone || ''} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} />
               </div>
             </div>
-            {(editForm.management_type || 'self') === 'plan' && (
-              <div className="form-group">
-                <label>Plan Manager (optional – can leave blank; org email is used for invoices if no list below)</label>
-                <select value={editForm.plan_manager_id || ''} onChange={(e) => setEditForm({ ...editForm, plan_manager_id: e.target.value || '' })}>
-                  <option value="">Select plan manager...</option>
-                  {orgs.map((o) => (
-                    <option key={o.id} value={o.id}>{o.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
             <div className="form-group">
               <label>
                 Invoice email(s) — where financial batch PDFs and Xero contact email go
@@ -1097,7 +1194,7 @@ export default function ParticipantProfile() {
                 <input type="email" value={editForm.parent_guardian_email || ''} onChange={(e) => setEditForm({ ...editForm, parent_guardian_email: e.target.value })} placeholder="Leave blank if not needed" />
               </div>
             </div>
-            <div className="form-group">
+            <div className="form-group" id="sa-gap-address">
               <label>Address</label>
               <AddressAutocomplete value={editForm.address || ''} onChange={(v) => setEditForm({ ...editForm, address: v })} placeholder="Start typing an address..." />
             </div>
@@ -1506,7 +1603,7 @@ export default function ParticipantProfile() {
       )}
 
       {tab === 'plans' && (
-        <div className="card">
+        <div className="card" id="sa-gap-plans">
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
             <h3>NDIS Plans</h3>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
@@ -2532,7 +2629,83 @@ export default function ParticipantProfile() {
                   ))}
                 </select>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+              {saSelectedTemplate && (saPreflightLoading || (saGaps?.gaps?.length ?? 0) > 0) ? (
+                <div
+                  style={{
+                    marginBottom: '1rem',
+                    padding: '0.85rem 1rem',
+                    borderRadius: 8,
+                    border: '1px solid #e2e8f0',
+                    background: '#fffbeb'
+                  }}
+                >
+                  {saPreflightLoading ? (
+                    <p style={{ margin: 0, color: '#92400e', fontSize: '0.92rem' }}>Checking agreement fields…</p>
+                  ) : (
+                    <>
+                      {(saGaps?.blocking_count ?? 0) > 0 ? (
+                        <div style={{ marginBottom: (saGaps?.warning_count ?? 0) > 0 ? '0.85rem' : 0 }}>
+                          <p style={{ margin: '0 0 0.5rem 0', fontWeight: 700, color: '#991b1b' }}>
+                            Required before PDF: {saGaps.blocking_count} missing field{saGaps.blocking_count === 1 ? '' : 's'}
+                          </p>
+                          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#450a0a', fontSize: '0.9rem', lineHeight: 1.45 }}>
+                            {(saGaps.gaps || [])
+                              .filter((g) => g.severity === 'blocking')
+                              .map((g) => (
+                                <li key={g.id} style={{ marginBottom: '0.35rem' }}>
+                                  <strong>{g.title}</strong>
+                                  {g.section ? (
+                                    <span style={{ color: '#64748b' }}>
+                                      {' '}
+                                      ({g.section})
+                                    </span>
+                                  ) : null}
+                                  {g.fix ? (
+                                    <div style={{ marginTop: '0.25rem' }}>
+                                      <button type="button" className="btn btn-secondary" style={{ fontSize: '0.82rem', padding: '0.2rem 0.55rem' }} onClick={() => navigateToGapFix(g)}>
+                                        Go to fix
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </li>
+                              ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {(saGaps?.warning_count ?? 0) > 0 ? (
+                        <div>
+                          <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600, color: '#92400e' }}>
+                            May appear empty in the PDF: {saGaps.warning_count} optional field{saGaps.warning_count === 1 ? '' : 's'}
+                          </p>
+                          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#78350f', fontSize: '0.88rem', lineHeight: 1.45 }}>
+                            {(saGaps.gaps || [])
+                              .filter((g) => g.severity === 'warning')
+                              .map((g) => (
+                                <li key={g.id} style={{ marginBottom: '0.35rem' }}>
+                                  <strong>{g.title}</strong>
+                                  {g.section ? (
+                                    <span style={{ color: '#64748b' }}>
+                                      {' '}
+                                      ({g.section})
+                                    </span>
+                                  ) : null}
+                                  {g.fix ? (
+                                    <div style={{ marginTop: '0.25rem' }}>
+                                      <button type="button" className="btn btn-secondary" style={{ fontSize: '0.82rem', padding: '0.2rem 0.55rem' }} onClick={() => navigateToGapFix(g)}>
+                                        Go to fix
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </li>
+                              ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : null}
+              <div id="sa-gap-agreements-fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
                 <div className="form-group">
                   <label>Agreement date</label>
                   <input
@@ -2580,7 +2753,17 @@ export default function ParticipantProfile() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={saSaving || !saSelectedTemplate}
+                title={
+                  (saGaps?.blocking_count ?? 0) > 0
+                    ? 'Complete required fields listed above (or use Go to fix).'
+                    : undefined
+                }
+                disabled={
+                  saSaving ||
+                  !saSelectedTemplate ||
+                  saPreflightLoading ||
+                  (saGaps?.blocking_count ?? 0) > 0
+                }
                 onClick={async () => {
                   if (!saSelectedTemplate) {
                     setSaMessage('Choose a template. Clone one under Settings → Form templates if none appear.');
@@ -2589,26 +2772,24 @@ export default function ParticipantProfile() {
                   setSaSaving(true);
                   setSaMessage('');
                   try {
-                    const instance_overrides = {};
-                    const o = saOverrides;
-                    if (o.agreement_date) instance_overrides.agreement_date = o.agreement_date;
-                    if (o.scheduled_review_date) instance_overrides.scheduled_review_date = o.scheduled_review_date;
-                    if (o.monitoring_worker_frequency?.trim()) instance_overrides.monitoring_worker_frequency = o.monitoring_worker_frequency.trim();
-                    if (o.other_provider_consultation_frequency?.trim()) {
-                      instance_overrides.other_provider_consultation_frequency = o.other_provider_consultation_frequency.trim();
-                    }
-                    if (o.communication_preferences?.trim()) {
-                      instance_overrides.communication_preferences = o.communication_preferences.trim();
-                    }
                     const r = await participants.generateServiceAgreement(id, {
                       org_template_id: saSelectedTemplate,
-                      instance_overrides
+                      instance_overrides: saInstanceOverridesPayload
                     });
                     setSaMessage('Generated. Download opened in a new tab; the file is saved under Documents and to OneDrive when connected.');
                     window.open(formTemplates.generatedPdfUrl(r.id), '_blank', 'noopener,noreferrer');
                     const list = await participants.listServiceAgreements(id);
                     setSaAgreements(list.items || []);
                   } catch (e) {
+                    const payload = e.apiPayload;
+                    if (payload?.gaps) {
+                      setSaGaps({
+                        gaps: payload.gaps,
+                        blocking_count: payload.blocking_count ?? 0,
+                        warning_count: payload.warning_count ?? 0,
+                        can_generate: (payload.blocking_count ?? 0) === 0
+                      });
+                    }
                     setSaMessage(e.message || 'Generation failed');
                   } finally {
                     setSaSaving(false);
