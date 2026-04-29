@@ -1,8 +1,12 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, Fragment, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { billing, invoices } from '../lib/api';
 import { formatDate } from '../lib/dateUtils';
 
 export default function FinancialPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const participantFilterId = searchParams.get('participant') || '';
+  const participantFilterName = searchParams.get('participant_name') || '';
   const [fromDate, setFromDate] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -20,7 +24,12 @@ export default function FinancialPage() {
   const [billingInvoices, setBillingInvoices] = useState([]);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [expandedParticipantId, setExpandedParticipantId] = useState(null);
-  const [activeTab, setActiveTab] = useState('charges'); // 'charges' | 'batches' | 'invoices'
+  const [activeTab, setActiveTab] = useState(() => {
+    const t = searchParams.get('tab');
+    if (['charges', 'batches', 'invoices'].includes(t)) return t;
+    if (searchParams.get('participant')) return 'invoices';
+    return 'charges';
+  }); // 'charges' | 'batches' | 'invoices'
   const [shiftInvoices, setShiftInvoices] = useState([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [batches, setBatches] = useState([]);
@@ -100,6 +109,32 @@ export default function FinancialPage() {
       loadBillingInvoices();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (['charges', 'batches', 'invoices'].includes(t)) {
+      setActiveTab(t);
+    } else if (searchParams.get('participant')) {
+      setActiveTab('invoices');
+    }
+  }, [searchParams]);
+
+  const filteredBillingInvoices = useMemo(() => {
+    if (!participantFilterId) return billingInvoices;
+    return billingInvoices.filter((inv) => String(inv.participant_id) === String(participantFilterId));
+  }, [billingInvoices, participantFilterId]);
+
+  const filteredShiftInvoices = useMemo(() => {
+    if (!participantFilterId) return shiftInvoices;
+    return shiftInvoices.filter((inv) => String(inv.participant_id) === String(participantFilterId));
+  }, [shiftInvoices, participantFilterId]);
+
+  const clearParticipantFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('participant');
+    next.delete('participant_name');
+    setSearchParams(next, { replace: true });
+  };
 
   const toggleItem = (id) => {
     setSelectedIds((prev) => {
@@ -684,6 +719,33 @@ export default function FinancialPage() {
       {activeTab === 'invoices' && (
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Invoices</h3>
+          {participantFilterId && (
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '0.65rem',
+                marginBottom: '1rem',
+                padding: '0.6rem 0.75rem',
+                background: '#eff6ff',
+                border: '1px solid #bfdbfe',
+                borderRadius: 8,
+                fontSize: '0.9rem',
+                color: '#1e3a5f'
+              }}
+            >
+              <span>
+                Showing invoices for{' '}
+                <strong>{participantFilterName || 'this participant'}</strong>
+                {' — '}
+                paid and outstanding columns reflect recorded payments.
+              </span>
+              <button type="button" className="btn btn-secondary" style={{ fontSize: '0.82rem' }} onClick={clearParticipantFilter}>
+                Show all participants
+              </button>
+            </div>
+          )}
           <p style={{ color: '#64748b', marginBottom: '1rem' }}>
             Batch invoices show total (GST-inclusive), paid, and outstanding per invoice. Use Record payment to match remittances; when fully paid, status becomes paid.
             <strong> Void</strong> cancels an invoice (no payments recorded), unlinks its shifts and tasks so they appear again in a new batch for that period, and clears the Nexus copy of line items. Void or credit the invoice in Xero separately if it was synced.
@@ -692,6 +754,10 @@ export default function FinancialPage() {
             <p>Loading...</p>
           ) : billingInvoices.length === 0 && shiftInvoices.length === 0 ? (
             <p className="muted">No invoices yet. Use &quot;Batch invoices&quot; to create a batch.</p>
+          ) : participantFilterId && filteredBillingInvoices.length === 0 && filteredShiftInvoices.length === 0 ? (
+            <p className="muted">
+              No invoices found for {participantFilterName || 'this participant'}. They may only have charges not yet batched, or invoices under another organisation view.
+            </p>
           ) : (
             <div className="table-wrap">
               <table>
@@ -709,7 +775,7 @@ export default function FinancialPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {billingInvoices.map((inv) => {
+                  {filteredBillingInvoices.map((inv) => {
                     const total = Number(inv.total) || 0;
                     const paid = Number(inv.paid) || 0;
                     const outstanding = Number(inv.outstanding) || 0;
@@ -820,7 +886,7 @@ export default function FinancialPage() {
                       </td>
                     </tr>
                   );})}
-                  {shiftInvoices.map((inv) => (
+                  {filteredShiftInvoices.map((inv) => (
                     <tr key={`shift-${inv.id}`}>
                       <td>{inv.invoice_number}</td>
                       <td>{inv.participant_name}</td>

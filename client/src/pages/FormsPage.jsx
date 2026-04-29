@@ -14,8 +14,6 @@ const WORKFLOW_LABELS = {
   staff_onboarding: 'Staff onboarding'
 };
 
-const BUILTIN_FORM_TYPES = ['privacy_consent', 'service_agreement', 'support_plan'];
-
 export default function FormsPage() {
   const [tab, setTab] = useState('client'); // 'client' | 'staff' | 'development'
   const [context, setContext] = useState(null);
@@ -272,34 +270,12 @@ export default function FormsPage() {
             )}
           </div>
 
-          <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1rem' }}>Built-in forms (participant onboarding)</h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
-            {BUILTIN_FORM_TYPES.map((formType) => {
-              const fileInfo = templateFiles[formType];
-              const hasFile = fileInfo?.has_file;
-              const name = FORM_TYPE_LABELS[formType] || formType;
-              return (
-                <div key={formType} style={{ padding: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fafafa' }}>
-                  <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem' }}>{name}</h4>
-                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-                    {formType === 'privacy_consent' ? '.docx only. Use placeholders like {name}, {date}.' : '.pdf or .docx.'}
-                  </p>
-                  <p style={{ margin: '0.25rem 0 0.5rem 0', fontSize: '0.85rem' }}>
-                    Current: {hasFile ? <strong>{fileInfo.filename}</strong> : <span style={{ color: '#94a3b8' }}>No file</span>}
-                  </p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <input
-                      type="file"
-                      accept={formType === 'privacy_consent' ? '.docx' : '.pdf,.docx'}
-                      onChange={(e) => setUploadFile((prev) => ({ ...prev, [formType]: e.target.files?.[0] || null }))}
-                    />
-                    <button type="button" className="btn btn-primary" disabled={uploading === formType || !uploadFile[formType]} onClick={() => handleUpload(formType)}>
-                      {uploading === formType ? 'Uploading…' : 'Upload'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+          <div style={{ marginBottom: '1.5rem', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+            <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1rem' }}>Structured templates (Service Agreement)</h4>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: '#475569' }}>
+              Legacy PDF/DOCX uploads for built-in participant forms have been removed in favour of the Nexus Core template system.
+              Org admins configure branding and variables under <strong>Settings → Form templates</strong>; coordinators generate agreements from each participant profile (<strong>Agreements</strong> tab).
+            </p>
           </div>
 
           {customTemplates.length > 0 && (

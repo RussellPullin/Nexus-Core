@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { staff, learning, settings, ai, auth, microsoftDrive } from '../lib/api';
 import { probeLocalOllama, resolveLocalOllamaBaseUrl } from '../lib/localOllama.js';
 import SearchableSelect from '../components/SearchableSelect';
+import FormTemplatesSettings from '../components/FormTemplatesSettings';
 import { formatDate } from '../lib/dateUtils';
 
 const SIGNATURE_WIDTH = 300;
@@ -494,6 +495,20 @@ export default function SettingsPage() {
       </form>
         </div>
       </details>
+
+      {isAdmin && (
+        <details className="card settings-collapsible">
+          <summary className="settings-collapsible-summary">
+            <span className="settings-collapsible-summary-main">
+              <span className="settings-collapsible-title">Form templates</span>
+              <span className="settings-collapsible-hint">Service Agreement variables &amp; branding</span>
+            </span>
+          </summary>
+          <div className="settings-collapsible-body">
+            <FormTemplatesSettings />
+          </div>
+        </details>
+      )}
 
       <details className="card settings-collapsible">
         <summary className="settings-collapsible-summary">

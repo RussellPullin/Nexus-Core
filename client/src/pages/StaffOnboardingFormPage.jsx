@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import '../App.css';
+import { staffFieldLabels } from '@nexus-shared/onboardingFieldRegistry.js';
 
 const API = '/api';
+const STAFF_LABELS = staffFieldLabels();
 
 const STEPS = [
   { num: 1, title: 'Personal details' },
@@ -32,7 +34,16 @@ export default function StaffOnboardingFormPage() {
   const [saving, setSaving] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
-  const [step1, setStep1] = useState({ full_name: '', date_of_birth: '', address: '', phone: '', emergency_contact_name: '', emergency_contact_phone: '' });
+  const [step1, setStep1] = useState({
+    first_name: '',
+    last_name: '',
+    full_legal_name: '',
+    date_of_birth: '',
+    address: '',
+    phone: '',
+    emergency_contact_name: '',
+    emergency_contact_phone: ''
+  });
   const [step2, setStep2] = useState({ role: '', employment_type: 'employee', hourly_rate: '', abn: '', tfn: '', super_fund_name: '', super_member_number: '', bank_bsb: '', bank_account: '' });
   const [complianceDocs, setComplianceDocs] = useState({});
   const [policyAck, setPolicyAck] = useState(false);
@@ -52,13 +63,34 @@ export default function StaffOnboardingFormPage() {
       })
       .then((data) => {
         setContext(data);
+        const inf = data.intakeFields || {};
         if (data.staff) {
-          setStep1((s) => ({ ...s, full_name: data.staff.name || '', phone: data.staff.phone || '' }));
-          setStep2((s) => ({
-            ...s,
-            role: data.staff.role || '',
-            employment_type: data.staff.employment_type || 'employee',
-            hourly_rate: data.staff.hourly_rate != null ? String(data.staff.hourly_rate) : '',
+          setStep1({
+            first_name: inf.first_name || '',
+            last_name: inf.last_name || '',
+            full_legal_name: inf.full_legal_name || '',
+            date_of_birth: inf.date_of_birth || '',
+            address: inf.address || '',
+            phone: inf.phone || data.staff.phone || '',
+            emergency_contact_name: inf.emergency_contact_name || '',
+            emergency_contact_phone: inf.emergency_contact_phone || ''
+          });
+          setStep2((prev) => ({
+            ...prev,
+            role: inf.role || data.staff.role || '',
+            employment_type: inf.employment_type || data.staff.employment_type || 'employee',
+            hourly_rate:
+              inf.hourly_rate != null && inf.hourly_rate !== ''
+                ? String(inf.hourly_rate)
+                : data.staff.hourly_rate != null
+                  ? String(data.staff.hourly_rate)
+                  : '',
+            abn: inf.abn || prev.abn || '',
+            tfn: inf.tfn || prev.tfn || '',
+            super_fund_name: inf.super_fund_name || prev.super_fund_name || '',
+            super_member_number: inf.super_member_number || prev.super_member_number || '',
+            bank_bsb: inf.bank_bsb || prev.bank_bsb || '',
+            bank_account: inf.bank_account || prev.bank_account || ''
           }));
         }
         setStep(data.currentStep || 1);
@@ -206,8 +238,16 @@ export default function StaffOnboardingFormPage() {
           <>
             <h3 style={{ marginTop: 0 }}>Personal details</h3>
             <div className="form-group">
-              <label>Full name *</label>
-              <input className="form-input" value={step1.full_name} onChange={(e) => setStep1({ ...step1, full_name: e.target.value })} required />
+              <label>{STAFF_LABELS.first_name} *</label>
+              <input className="form-input" value={step1.first_name} onChange={(e) => setStep1({ ...step1, first_name: e.target.value })} required />
+            </div>
+            <div className="form-group">
+              <label>{STAFF_LABELS.last_name} *</label>
+              <input className="form-input" value={step1.last_name} onChange={(e) => setStep1({ ...step1, last_name: e.target.value })} required />
+            </div>
+            <div className="form-group">
+              <label>{STAFF_LABELS.full_legal_name}</label>
+              <input className="form-input" value={step1.full_legal_name} onChange={(e) => setStep1({ ...step1, full_legal_name: e.target.value })} placeholder="If different from first + last" />
             </div>
             <div className="form-group">
               <label>Date of birth *</label>
@@ -218,15 +258,15 @@ export default function StaffOnboardingFormPage() {
               <input className="form-input" value={step1.address} onChange={(e) => setStep1({ ...step1, address: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>Phone number *</label>
+              <label>{STAFF_LABELS.phone} *</label>
               <input type="tel" className="form-input" value={step1.phone} onChange={(e) => setStep1({ ...step1, phone: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>Emergency contact name *</label>
+              <label>{STAFF_LABELS.emergency_contact_name} *</label>
               <input className="form-input" value={step1.emergency_contact_name} onChange={(e) => setStep1({ ...step1, emergency_contact_name: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>Emergency contact phone *</label>
+              <label>{STAFF_LABELS.emergency_contact_phone} *</label>
               <input type="tel" className="form-input" value={step1.emergency_contact_phone} onChange={(e) => setStep1({ ...step1, emergency_contact_phone: e.target.value })} />
             </div>
           </>
@@ -236,44 +276,44 @@ export default function StaffOnboardingFormPage() {
           <>
             <h3 style={{ marginTop: 0 }}>Employment details</h3>
             <div className="form-group">
-              <label>Role / position *</label>
+              <label>{STAFF_LABELS.role} *</label>
               <input className="form-input" value={step2.role} onChange={(e) => setStep2({ ...step2, role: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>Employment type</label>
+              <label>{STAFF_LABELS.employment_type}</label>
               <select className="form-input" value={step2.employment_type} onChange={(e) => setStep2({ ...step2, employment_type: e.target.value })}>
                 <option value="employee">Employee</option>
                 <option value="subcontractor">Subcontractor</option>
               </select>
             </div>
             <div className="form-group">
-              <label>Hourly rate *</label>
+              <label>{STAFF_LABELS.hourly_rate} *</label>
               <input type="number" step="0.01" min="0" className="form-input" value={step2.hourly_rate} onChange={(e) => setStep2({ ...step2, hourly_rate: e.target.value })} />
             </div>
             {step2.employment_type === 'subcontractor' && (
               <div className="form-group">
-                <label>ABN</label>
+                <label>{STAFF_LABELS.abn}</label>
                 <input className="form-input" value={step2.abn} onChange={(e) => setStep2({ ...step2, abn: e.target.value })} placeholder="e.g. 12 345 678 901" />
               </div>
             )}
             <div className="form-group">
-              <label>Tax File Number</label>
+              <label>{STAFF_LABELS.tfn}</label>
               <input className="form-input" type="password" autoComplete="off" value={step2.tfn} onChange={(e) => setStep2({ ...step2, tfn: e.target.value })} placeholder="Stored securely" />
             </div>
             <div className="form-group">
-              <label>Superannuation fund name</label>
+              <label>{STAFF_LABELS.super_fund_name}</label>
               <input className="form-input" value={step2.super_fund_name} onChange={(e) => setStep2({ ...step2, super_fund_name: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>Superannuation member number</label>
+              <label>{STAFF_LABELS.super_member_number}</label>
               <input className="form-input" value={step2.super_member_number} onChange={(e) => setStep2({ ...step2, super_member_number: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>Bank BSB (for payroll)</label>
+              <label>{STAFF_LABELS.bank_bsb} (for payroll)</label>
               <input className="form-input" value={step2.bank_bsb} onChange={(e) => setStep2({ ...step2, bank_bsb: e.target.value })} placeholder="e.g. 000-000" />
             </div>
             <div className="form-group">
-              <label>Bank account number</label>
+              <label>{STAFF_LABELS.bank_account}</label>
               <input className="form-input" type="password" autoComplete="off" value={step2.bank_account} onChange={(e) => setStep2({ ...step2, bank_account: e.target.value })} placeholder="Stored securely" />
             </div>
           </>

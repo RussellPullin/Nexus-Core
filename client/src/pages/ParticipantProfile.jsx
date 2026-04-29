@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { backToPreviousListPath, participantProfileBackLabel } from '../lib/listViewUrl.js';
-import { participants, organisations, ndis, smartDefaults, onboarding } from '../lib/api';
+import { participants, organisations, ndis, smartDefaults, onboarding, formTemplates } from '../lib/api';
 import CopyableField from '../components/CopyableField';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate, toInputDate } from '../lib/dateUtils';
@@ -123,6 +123,28 @@ function resolveInvoiceRecipientsForDisplay(p) {
   return { kind: 'none', emails: [], note: null };
 }
 
+/** Link from budget utilisation “Invoiced” amounts to Financial → Invoices for this participant (paid / outstanding). */
+function ParticipantInvoicedFinancialLink({ participantId, participantName, amount, children }) {
+  const n = Number(amount) || 0;
+  if (n <= 0) return children;
+  const q = new URLSearchParams({ tab: 'invoices', participant: String(participantId) });
+  if (participantName) q.set('participant_name', participantName);
+  return (
+    <Link
+      to={`/financial?${q.toString()}`}
+      title="Open Financial → Invoices: batch totals, paid, and outstanding"
+      style={{
+        color: 'var(--primary, #2563eb)',
+        fontWeight: 600,
+        textDecoration: 'underline',
+        textUnderlineOffset: '2px'
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export default function ParticipantProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -165,6 +187,19 @@ export default function ParticipantProfile() {
   const [allNdisItems, setAllNdisItems] = useState([]);
   const [copiedGoalKey, setCopiedGoalKey] = useState(null);
   const [invoiceEmailInput, setInvoiceEmailInput] = useState('');
+  const [saTemplates, setSaTemplates] = useState([]);
+  const [saSelectedTemplate, setSaSelectedTemplate] = useState('');
+  const [saAgreements, setSaAgreements] = useState([]);
+  const [saLoading, setSaLoading] = useState(false);
+  const [saSaving, setSaSaving] = useState(false);
+  const [saMessage, setSaMessage] = useState('');
+  const [saOverrides, setSaOverrides] = useState({
+    agreement_date: '',
+    scheduled_review_date: '',
+    monitoring_worker_frequency: '',
+    other_provider_consultation_frequency: '',
+    communication_preferences: ''
+  });
 
   const copyGoalLine = async (key, text) => {
     if (!String(text || '').trim()) return;
@@ -241,6 +276,28 @@ export default function ParticipantProfile() {
   useEffect(() => {
     load();
   }, [id]);
+
+  useEffect(() => {
+    if (tab !== 'agreements' || !id) return;
+    let cancelled = false;
+    setSaLoading(true);
+    Promise.all([formTemplates.instances(), participants.listServiceAgreements(id)])
+      .then(([ti, list]) => {
+        if (cancelled) return;
+        const inst = ti.instances || [];
+        setSaTemplates(inst);
+        setSaAgreements(list.items || []);
+        const svc = inst.find((x) => x.template_key === 'service_agreement_spring2_v3');
+        setSaSelectedTemplate((prev) => prev || svc?.id || '');
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setSaLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, id]);
 
   useEffect(() => {
     organisations.allContacts().then(setAllContacts).catch(() => {});
@@ -1343,6 +1400,7 @@ export default function ParticipantProfile() {
         <button className={`tab ${tab === 'contacts' ? 'active' : ''}`} onClick={() => setTab('contacts')}>Contacts</button>
         <button className={`tab ${tab === 'goals' ? 'active' : ''}`} onClick={() => setTab('goals')}>Goals</button>
         <button className={`tab ${tab === 'documents' ? 'active' : ''}`} onClick={() => setTab('documents')}>Documents</button>
+        <button className={`tab ${tab === 'agreements' ? 'active' : ''}`} onClick={() => setTab('agreements')}>Agreements</button>
         <button className={`tab ${tab === 'casenotes' ? 'active' : ''}`} onClick={() => setTab('casenotes')}>Case Notes</button>
         <button className={`tab ${tab === 'shifts' ? 'active' : ''}`} onClick={() => setTab('shifts')}>Shifts</button>
       </div>
@@ -1382,7 +1440,13 @@ export default function ParticipantProfile() {
                       <tr style={{ background: '#f8fafc', borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0' }}>
                         <td><strong>Plan total</strong></td>
                         <td style={{ textAlign: 'right' }}><strong>${totals.amount.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</strong></td>
-                        <td style={{ textAlign: 'right' }}><strong>${totals.invoiced.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</strong></td>
+                        <td style={{ textAlign: 'right' }}>
+                          <strong>
+                            <ParticipantInvoicedFinancialLink participantId={id} participantName={data?.name} amount={totals.invoiced}>
+                              ${totals.invoiced.toLocaleString('en-AU', { minimumFractionDigits: 2 })}
+                            </ParticipantInvoicedFinancialLink>
+                          </strong>
+                        </td>
                         <td style={{ textAlign: 'right' }}><strong>${totals.pending_invoice.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</strong></td>
                         <td style={{ textAlign: 'right' }}><strong>${totals.remaining.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</strong></td>
                         <td style={{ textAlign: 'right' }}>
@@ -1401,7 +1465,11 @@ export default function ParticipantProfile() {
                               <strong>{b.category || '—'}</strong> {supportCategories.find(c => c.id === b.category)?.name || b.name}
                             </td>
                             <td style={{ textAlign: 'right' }}>${Number(b.amount).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
-                            <td style={{ textAlign: 'right' }}>${invoiced.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <ParticipantInvoicedFinancialLink participantId={id} participantName={data?.name} amount={invoiced}>
+                                ${invoiced.toLocaleString('en-AU', { minimumFractionDigits: 2 })}
+                              </ParticipantInvoicedFinancialLink>
+                            </td>
                             <td style={{ textAlign: 'right' }}>${pending.toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
                             <td style={{ textAlign: 'right' }}>${Number(b.remaining).toLocaleString('en-AU', { minimumFractionDigits: 2 })}</td>
                             <td style={{ textAlign: 'right' }}>
@@ -1418,6 +1486,8 @@ export default function ParticipantProfile() {
               })()}
               <p style={{ marginTop: '0.75rem', fontSize: '0.82rem', color: '#64748b', lineHeight: 1.45 }}>
                 <strong>Invoiced</strong> sums amounts on Financial batch invoices (non-void) in this plan period, matched to each budget&apos;s NDIS line items.
+                {' '}
+                When an invoiced total is above zero, click it to open <strong>Financial → Invoices</strong> for this participant and see paid vs outstanding on each batch (and shift) invoice.
                 {' '}
                 <strong>Pending</strong> is support recorded (shifts and billable coordinator tasks) that is not yet on a batch invoice.
               </p>
@@ -2419,6 +2489,177 @@ export default function ParticipantProfile() {
             <p>No documents. Use the upload form to add documents.</p>
           )}
           <DocumentUpload participantId={id} onUpload={load} />
+        </div>
+      )}
+
+      {tab === 'agreements' && (
+        <div className="card">
+          <h3>Service Agreement</h3>
+          <p style={{ color: '#64748b', fontSize: '0.92rem', marginBottom: '1rem' }}>
+            Generate a PDF from your organisation’s cloned template. Data is snapshotted at generation time. Ensure your org admin has set up the template under{' '}
+            <Link to="/settings">Settings → Form templates</Link>.
+          </p>
+          {saMessage && (
+            <div
+              style={{
+                marginBottom: '0.75rem',
+                padding: '0.5rem 0.75rem',
+                borderRadius: 6,
+                background: saMessage.includes('failed') || saMessage.includes('Choose') ? '#fef2f2' : '#f0fdf4',
+                color: saMessage.includes('failed') || saMessage.includes('Choose') ? '#991b1b' : '#166534'
+              }}
+            >
+              {saMessage}
+            </div>
+          )}
+          {saLoading ? (
+            <p>Loading templates…</p>
+          ) : (
+            <>
+              <div className="form-group">
+                <label>Organisation template</label>
+                <select
+                  className="form-input"
+                  style={{ maxWidth: 420 }}
+                  value={saSelectedTemplate}
+                  onChange={(e) => setSaSelectedTemplate(e.target.value)}
+                >
+                  <option value="">— Select —</option>
+                  {saTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label || t.master_title || t.template_key}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+                <div className="form-group">
+                  <label>Agreement date</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={saOverrides.agreement_date}
+                    onChange={(e) => setSaOverrides((o) => ({ ...o, agreement_date: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Scheduled review date</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={saOverrides.scheduled_review_date}
+                    onChange={(e) => setSaOverrides((o) => ({ ...o, scheduled_review_date: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Monitoring frequency (this participant)</label>
+                  <input
+                    className="form-input"
+                    value={saOverrides.monitoring_worker_frequency}
+                    onChange={(e) => setSaOverrides((o) => ({ ...o, monitoring_worker_frequency: e.target.value }))}
+                    placeholder="Defaults from template if blank"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Other provider consultation</label>
+                  <input
+                    className="form-input"
+                    value={saOverrides.other_provider_consultation_frequency}
+                    onChange={(e) => setSaOverrides((o) => ({ ...o, other_provider_consultation_frequency: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                  <label>Communication preferences</label>
+                  <input
+                    className="form-input"
+                    value={saOverrides.communication_preferences}
+                    onChange={(e) => setSaOverrides((o) => ({ ...o, communication_preferences: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={saSaving || !saSelectedTemplate}
+                onClick={async () => {
+                  if (!saSelectedTemplate) {
+                    setSaMessage('Choose a template. Clone one under Settings → Form templates if none appear.');
+                    return;
+                  }
+                  setSaSaving(true);
+                  setSaMessage('');
+                  try {
+                    const instance_overrides = {};
+                    const o = saOverrides;
+                    if (o.agreement_date) instance_overrides.agreement_date = o.agreement_date;
+                    if (o.scheduled_review_date) instance_overrides.scheduled_review_date = o.scheduled_review_date;
+                    if (o.monitoring_worker_frequency?.trim()) instance_overrides.monitoring_worker_frequency = o.monitoring_worker_frequency.trim();
+                    if (o.other_provider_consultation_frequency?.trim()) {
+                      instance_overrides.other_provider_consultation_frequency = o.other_provider_consultation_frequency.trim();
+                    }
+                    if (o.communication_preferences?.trim()) {
+                      instance_overrides.communication_preferences = o.communication_preferences.trim();
+                    }
+                    const r = await participants.generateServiceAgreement(id, {
+                      org_template_id: saSelectedTemplate,
+                      instance_overrides
+                    });
+                    setSaMessage('Generated. Download opened in a new tab; the file is saved under Documents and to OneDrive when connected.');
+                    window.open(formTemplates.generatedPdfUrl(r.id), '_blank', 'noopener,noreferrer');
+                    const list = await participants.listServiceAgreements(id);
+                    setSaAgreements(list.items || []);
+                  } catch (e) {
+                    setSaMessage(e.message || 'Generation failed');
+                  } finally {
+                    setSaSaving(false);
+                  }
+                }}
+              >
+                {saSaving ? 'Generating…' : 'Generate PDF'}
+              </button>
+
+              <h4 style={{ marginTop: '1.5rem' }}>Generated agreements</h4>
+              {saAgreements.length === 0 ? (
+                <p className="empty-state">None yet.</p>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>Template</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {saAgreements.map((g) => (
+                      <tr key={g.id}>
+                        <td>{g.generated_at ? formatDate(g.generated_at.slice(0, 10)) : '—'}</td>
+                        <td>{g.template_label || '—'}</td>
+                        <td>{g.status || '—'}</td>
+                        <td>
+                          <a className="btn btn-secondary" style={{ fontSize: '0.8rem' }} href={formTemplates.generatedPdfUrl(g.id)} target="_blank" rel="noopener noreferrer">
+                            Download PDF
+                          </a>
+                          {g.onedrive_web_url ? (
+                            <a
+                              href={g.onedrive_web_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.8rem', marginLeft: 6 }}
+                            >
+                              OneDrive
+                            </a>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
         </div>
       )}
 

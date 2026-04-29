@@ -356,7 +356,38 @@ export const participants = {
       throw new Error(err?.error || text || 'Import failed');
     }
     return text ? JSON.parse(text) : null;
-  }
+  },
+  listServiceAgreements: (participantId) => fetchApi(`/participants/${participantId}/service-agreements`),
+  generateServiceAgreement: (participantId, body) =>
+    fetchApi(`/participants/${participantId}/service-agreements/generate`, {
+      method: 'POST',
+      body: JSON.stringify(body || {})
+    })
+};
+
+export const formTemplates = {
+  masters: () => fetchApi('/form-templates/masters'),
+  master: (id) => fetchApi(`/form-templates/masters/${id}`),
+  instances: () => fetchApi('/form-templates/instances'),
+  cloneInstance: (data) => fetchApi('/form-templates/instances', { method: 'POST', body: JSON.stringify(data || {}) }),
+  updateInstance: (id, data) => fetchApi(`/form-templates/instances/${id}`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
+  previewModel: (id) => fetchApi(`/form-templates/instances/${id}/preview-model`),
+  uploadInstanceLogo: async (instanceId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API}/form-templates/instances/${instanceId}/logo`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Upload failed');
+    }
+    return text ? JSON.parse(text) : null;
+  },
+  generatedPdfUrl: (documentId) => `${API}/generated-forms/${documentId}/pdf`
 };
 
 export const organisations = {

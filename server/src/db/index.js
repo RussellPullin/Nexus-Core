@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
+import { seedNexusFormTemplateMastersIfNeeded } from '../services/nexusFormTemplateSeed.service.js';
 import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
@@ -1621,6 +1622,61 @@ try {
     `);
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('organization_onedrive_link migration:', e.message);
+  }
+
+  // Nexus structured form templates (masters + org clones + generated PDF snapshots)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS nexus_form_template_masters (
+        id TEXT PRIMARY KEY,
+        template_key TEXT NOT NULL UNIQUE,
+        template_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        version_label TEXT,
+        definition_json TEXT NOT NULL,
+        variable_schema_json TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS nexus_org_form_templates (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        master_id TEXT NOT NULL,
+        label TEXT,
+        variable_values_json TEXT,
+        branding_json TEXT,
+        metadata_json TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE,
+        FOREIGN KEY (master_id) REFERENCES nexus_form_template_masters(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_nexus_org_form_templates_org ON nexus_org_form_templates(org_id);
+      CREATE INDEX IF NOT EXISTS idx_nexus_org_form_templates_master ON nexus_org_form_templates(master_id);
+      CREATE TABLE IF NOT EXISTS nexus_generated_form_documents (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        participant_id TEXT NOT NULL,
+        org_template_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'generated',
+        snapshot_json TEXT NOT NULL,
+        pdf_relative_path TEXT,
+        onedrive_item_id TEXT,
+        onedrive_web_url TEXT,
+        generated_by_user_id TEXT,
+        generated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE,
+        FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
+        FOREIGN KEY (org_template_id) REFERENCES nexus_org_form_templates(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_nexus_generated_org_participant ON nexus_generated_form_documents(org_id, participant_id);
+      CREATE INDEX IF NOT EXISTS idx_nexus_generated_participant ON nexus_generated_form_documents(participant_id);
+    `);
+    const seedResult = seedNexusFormTemplateMastersIfNeeded(db);
+    if (seedResult?.seeded) {
+      console.log('[nexus] Seeded default Service Agreement master template:', seedResult.master_id);
+    }
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('nexus_form_template migration:', e.message);
   }
 } catch (err) {
   console.warn('Migration error:', err.message);

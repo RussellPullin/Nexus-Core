@@ -138,6 +138,9 @@ import usersRouter from './routes/users.js';
 import adminRouter from './routes/admin.js';
 import orgFeaturesRouter from './routes/orgFeatures.js';
 import orgMicrosoftDriveRouter from './routes/orgMicrosoftDrive.js';
+import nexusFormTemplatesRouter from './routes/nexusFormTemplates.js';
+import nexusGeneratedFormsRouter from './routes/nexusGeneratedForms.js';
+import participantServiceAgreementsRouter from './routes/participantServiceAgreements.js';
 import staffOnboardingPublicRouter from './routes/staffOnboarding.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireAdminOrDelegate, requireCoordinatorOrAdmin } from './middleware/roles.js';
@@ -200,7 +203,10 @@ app.use('/api/sync', syncFromExcelRouter);
 app.use('/api/receipts', receiptsRouter);
 
 // Protected API routes
+app.use('/api/participants', requireAuth, participantServiceAgreementsRouter);
 app.use('/api/participants', requireAuth, participantsRouter);
+app.use('/api/form-templates', requireAuth, nexusFormTemplatesRouter);
+app.use('/api/generated-forms', requireAuth, nexusGeneratedFormsRouter);
 app.use('/api/organisations', requireAuth, organisationsRouter);
 
 app.get('/api/ai/status', requireAuth, async (req, res) => {

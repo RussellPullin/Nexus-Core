@@ -106,7 +106,7 @@ router.get('/', (req, res) => {
     if (!user) return;
     const c = tenantParticipantAndStaffClause(user.id, 'p', 'st');
     let invoices = db.prepare(`
-      SELECT i.*, s.start_time, s.end_time, p.name as participant_name, p.ndis_number, st.name as staff_name
+      SELECT i.*, s.start_time, s.end_time, p.id as participant_id, p.name as participant_name, p.ndis_number, st.name as staff_name
       FROM invoices i
       JOIN shifts s ON i.shift_id = s.id
       JOIN participants p ON s.participant_id = p.id

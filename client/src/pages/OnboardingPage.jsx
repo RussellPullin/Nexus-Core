@@ -3,55 +3,14 @@ import { Link, useParams } from 'react-router-dom';
 import { onboarding, participants, organisations, ndis, smartDefaults } from '../lib/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate } from '../lib/dateUtils';
+import {
+  participantFieldLabels,
+  participantEmptyIntake,
+  composeParticipantLegalName,
+  splitParticipantNameFromFull
+} from '@nexus-shared/onboardingFieldRegistry.js';
 
-const LABEL_MAP = {
-  name: 'Name',
-  full_legal_name: 'Full legal name',
-  preferred_name: 'Preferred name',
-  date_of_birth: 'Date of birth',
-  ndis_number: 'NDIS number',
-  email: 'Email',
-  phone: 'Phone',
-  address: 'Address',
-  street_address: 'Street address',
-  suburb_city: 'Suburb / City',
-  state: 'State',
-  postcode: 'Postcode',
-  parent_guardian_phone: 'Parent/guardian phone',
-  parent_guardian_email: 'Parent/guardian email',
-  diagnosis: 'Diagnosis',
-  preferred_contact_method: 'Preferred contact method',
-  best_time_to_contact: 'Best time to contact',
-  primary_contact_name: 'Primary contact name',
-  primary_contact_relationship: 'Primary contact relationship',
-  primary_contact_phone: 'Primary contact phone',
-  primary_contact_email: 'Primary contact email',
-  emergency_contact_name: 'Emergency contact name',
-  emergency_contact_relationship: 'Emergency contact relationship',
-  emergency_contact_phone: 'Emergency contact phone',
-  preferred_start_date: 'Preferred start date',
-  consent_email_sms: 'Consent to email/SMS',
-  medical_conditions: 'Medical conditions',
-  medications: 'Medications',
-  allergies: 'Allergies',
-  mobility_supports: 'Mobility supports',
-  support_needs: 'Support needs',
-  goals_and_outcomes: 'Goals and outcomes',
-  additional_notes: 'Additional notes',
-  service_schedule: 'Service schedule',
-  funding_management_type: 'Funding management',
-  plan_manager_details: 'Plan manager details',
-  plan_start_date: 'Plan start date',
-  plan_end_date: 'Plan end date',
-  risks_at_home: 'Risks at home',
-  triggers_stressors: 'Triggers / stressors',
-  current_supports_strategies: 'Current supports',
-  functional_assistance_needs: 'Functional assistance needs',
-  living_arrangements: 'Living arrangements',
-  mental_health_summary: 'Mental health summary',
-  start_date: 'Plan start date',
-  end_date: 'Plan end date'
-};
+const PARTICIPANT_LABELS = participantFieldLabels();
 
 function FormPreviewReadable({ snapshot }) {
   if (!snapshot) return <p style={{ color: '#64748b' }}>No preview data available.</p>;
@@ -69,7 +28,7 @@ function FormPreviewReadable({ snapshot }) {
         <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.9rem' }}>
           {entries.map(([key, value]) => (
             <div key={key} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '0.5rem', alignItems: 'baseline' }}>
-              <span style={{ color: '#64748b', fontWeight: 500 }}>{LABEL_MAP[key] || key.replace(/_/g, ' ')}</span>
+              <span style={{ color: '#64748b', fontWeight: 500 }}>{PARTICIPANT_LABELS[key] || key.replace(/_/g, ' ')}</span>
               <span style={{ wordBreak: 'break-word' }}>{String(value)}</span>
             </div>
           ))}
@@ -148,63 +107,6 @@ const FALLBACK_SUPPORT_CATEGORIES = [
   { id: '15', name: 'Improved Daily Living Skills' }
 ];
 
-const emptyIntake = () => ({
-  // Client details
-  full_legal_name: '',
-  preferred_name: '',
-  date_of_birth: '',
-  ndis_number: '',
-  email: '',
-  phone: '',
-  preferred_contact_method: '',
-  best_time_to_contact: '',
-  address: '',
-  street_address: '',
-  suburb_city: '',
-  state: '',
-  postcode: '',
-  // Primary contact
-  primary_contact_name: '',
-  primary_contact_relationship: '',
-  primary_contact_phone: '',
-  primary_contact_email: '',
-  // Emergency contact
-  emergency_contact_name: '',
-  emergency_contact_relationship: '',
-  emergency_contact_phone: '',
-  // Service details
-  preferred_start_date: '',
-  consent_email_sms: '',
-  medical_conditions: '',
-  medications: '',
-  allergies: '',
-  mobility_supports: '',
-  support_needs: '',
-  goals_and_outcomes: '',
-  additional_notes: '',
-  service_schedule: '',
-  // Service schedule rows – match Service Agreement boxes (description, hours, rate, ratio, budget)
-  service_schedule_rows: [],
-  // Support categories & NDIS (multi-select from 15 categories, management per service)
-  services_required: [],
-  ndia_managed_services: [],
-  plan_managed_services: [],
-  plan_start_date: '',
-  plan_end_date: '',
-  plan_manager_id: '',
-  plan_manager_company_name: '',
-  plan_manager_invoice_email: '',
-  additional_invoice_emails: [],
-  plan_manager_details: '',
-  plan_budget_amount: '',
-  risks_at_home: '',
-  triggers_stressors: '',
-  current_supports_strategies: '',
-  functional_assistance_needs: '',
-  living_arrangements: '',
-  mental_health_summary: ''
-});
-
 function formatParticipantDob(value) {
   if (value == null || value === '') return '';
   return String(value).slice(0, 10);
@@ -218,7 +120,7 @@ export default function OnboardingPage() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
-  const [intake, setIntake] = useState(emptyIntake());
+  const [intake, setIntake] = useState(participantEmptyIntake());
   const [providerOrgId, setProviderOrgId] = useState('');
   const [previewFormId, setPreviewFormId] = useState(null);
   const [previewSnapshot, setPreviewSnapshot] = useState(null);
@@ -463,8 +365,9 @@ export default function OnboardingPage() {
           // Stored as JSON string in DB after save; must be an array or .map throws (blank page).
           additional_invoice_emails: parseArray(fields.additional_invoice_emails)
         };
+        const nameParts = participantData?.name ? splitParticipantNameFromFull(participantData.name) : { first_name: '', last_name: '', full_legal_name: '' };
         const fromParticipant = participantData ? {
-          full_legal_name: participantData.name,
+          ...nameParts,
           preferred_name: '',
           date_of_birth: formatParticipantDob(participantData.date_of_birth),
           ndis_number: participantData.ndis_number,
@@ -478,12 +381,13 @@ export default function OnboardingPage() {
           ndia_managed_services: parseArray(participantData.ndia_managed_services),
           plan_managed_services: parseArray(participantData.plan_managed_services)
         } : {};
-        setIntake((prev) => ({ ...emptyIntake(), ...fromParticipant, ...prev, ...normalizedFields }));
+        setIntake((prev) => ({ ...participantEmptyIntake(), ...fromParticipant, ...prev, ...normalizedFields }));
       } else {
         setState(null);
         if (participantData) {
+          const np = participantData.name ? splitParticipantNameFromFull(participantData.name) : { first_name: '', last_name: '', full_legal_name: '' };
           const fromParticipant = {
-            full_legal_name: participantData.name,
+            ...np,
             preferred_name: '',
             date_of_birth: formatParticipantDob(participantData.date_of_birth),
             ndis_number: participantData.ndis_number,
@@ -497,7 +401,7 @@ export default function OnboardingPage() {
             ndia_managed_services: parseArray(participantData.ndia_managed_services),
             plan_managed_services: parseArray(participantData.plan_managed_services)
           };
-          setIntake((prev) => ({ ...emptyIntake(), ...fromParticipant, ...prev }));
+          setIntake((prev) => ({ ...participantEmptyIntake(), ...fromParticipant, ...prev }));
         }
       }
     } catch (err) {
@@ -552,7 +456,7 @@ export default function OnboardingPage() {
     setWorking(true);
     try {
       const participantData = {
-        name: intake.full_legal_name || participant?.name,
+        name: composeParticipantLegalName(intake) || participant?.name,
         preferred_name: intake.preferred_name,
         date_of_birth: intake.date_of_birth || participant?.date_of_birth,
         ndis_number: intake.ndis_number || participant?.ndis_number,
@@ -687,7 +591,11 @@ export default function OnboardingPage() {
   };
 
   const signatureForms = state?.forms?.filter((f) => ['service_agreement', 'support_plan', 'privacy_consent'].includes(f.form_type)) || [];
-  const hasIntakeData = intake.full_legal_name || intake.email || intake.phone || Object.values(intake).some((v) => v && String(v).trim());
+  const hasIntakeData =
+    composeParticipantLegalName(intake) ||
+    intake.email ||
+    intake.phone ||
+    Object.values(intake).some((v) => v && String(v).trim());
 
   if (!id) {
     return (
@@ -730,11 +638,19 @@ export default function OnboardingPage() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <div className="form-group">
-                <label>Full legal name *</label>
-                <input value={intake.full_legal_name || participant?.name} onChange={(e) => setIntake({ ...intake, full_legal_name: e.target.value })} placeholder="Full legal name" />
+                <label>{PARTICIPANT_LABELS.first_name}</label>
+                <input value={intake.first_name} onChange={(e) => setIntake({ ...intake, first_name: e.target.value })} placeholder="Given name" />
               </div>
               <div className="form-group">
-                <label>Preferred name</label>
+                <label>{PARTICIPANT_LABELS.last_name}</label>
+                <input value={intake.last_name} onChange={(e) => setIntake({ ...intake, last_name: e.target.value })} placeholder="Family name" />
+              </div>
+              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                <label>{PARTICIPANT_LABELS.full_legal_name}</label>
+                <input value={intake.full_legal_name} onChange={(e) => setIntake({ ...intake, full_legal_name: e.target.value })} placeholder="Leave blank if same as first + last" />
+              </div>
+              <div className="form-group">
+                <label>{PARTICIPANT_LABELS.preferred_name}</label>
                 <input value={intake.preferred_name} onChange={(e) => setIntake({ ...intake, preferred_name: e.target.value })} />
               </div>
               <div className="form-group">

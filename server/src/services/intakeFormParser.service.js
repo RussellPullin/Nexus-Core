@@ -5,6 +5,7 @@
  */
 
 import * as llm from './llm.service.js';
+import { splitParticipantNameFromFull } from '../../../shared/onboardingFieldRegistry.js';
 
 /** Field labels from the Client Intake Form PDF (for deterministic fallback) */
 const INTAKE_FORM_LABELS = {
@@ -82,10 +83,16 @@ export async function parseIntakeFormText(pdfText) {
     };
   }
 
+  let out;
   if (await llm.isAvailable()) {
-    return parseWithLlm(text);
+    out = await parseWithLlm(text);
+  } else {
+    out = parseDeterministic(text);
   }
-  return parseDeterministic(text);
+  if (!out || out.error) return out;
+  // Align deterministic + LLM paths with canonical intake keys (first_name, last_name, etc.)
+  out.intake = { ...(out.intake || {}), ...buildIntakeFromParsed(out) };
+  return out;
 }
 
 /**
@@ -127,6 +134,9 @@ Return this exact JSON structure (use null for missing values, empty string "" f
     "phone": "phone"
   },
   "intake": {
+    "first_name": "given name(s)",
+    "last_name": "family name",
+    "full_legal_name": "only if different from first + last",
     "preferred_start_date": "YYYY-MM-DD or date string",
     "consent_email_sms": "yes/no or description",
     "medical_conditions": "text",
@@ -292,6 +302,7 @@ function buildIntakeFromParsed(parsed) {
   const i = parsed.intake || {};
   const obj = {};
   const keys = [
+    'first_name', 'last_name', 'full_legal_name',
     'preferred_start_date', 'consent_email_sms', 'medical_conditions', 'medications', 'allergies',
     'mobility_supports', 'support_needs', 'goals_and_outcomes', 'additional_notes', 'support_category',
     'plan_start_date', 'plan_end_date', 'funding_management_type', 'plan_manager_details',
@@ -302,6 +313,12 @@ function buildIntakeFromParsed(parsed) {
   for (const k of keys) {
     const v = i[k];
     if (v != null && String(v).trim()) obj[k] = String(v).trim();
+  }
+  const legalFromParticipant = String(parsed.participant?.name || parsed.participant?.full_legal_name || '').trim();
+  if (!obj.first_name && !obj.last_name && legalFromParticipant) {
+    const sp = splitParticipantNameFromFull(legalFromParticipant);
+    if (!obj.first_name) obj.first_name = sp.first_name;
+    if (!obj.last_name) obj.last_name = sp.last_name;
   }
   return obj;
 }

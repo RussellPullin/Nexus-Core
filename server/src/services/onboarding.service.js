@@ -6,6 +6,7 @@ import { db } from '../db/index.js';
 import { getConsentFormPath, fillConsentForm, convertDocxToPdf } from './consentForm.service.js';
 import { ensurePlanManagerOrg, buildOrgLookupMaps } from './organisations.service.js';
 import { fillServiceAgreement, fillSupportPlan, getServiceAgreementTemplatePath, getSupportPlanTemplatePath } from './formFill.service.js';
+import { composeParticipantLegalName, participantPrefillFieldPaths } from '../../../shared/onboardingFieldRegistry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -118,17 +119,7 @@ export function seedCoreTemplates(providerProfileId) {
       template.signer,
       template.legal_basis,
       JSON.stringify({
-        prefill_fields: [
-          'participant.name',
-          'participant.date_of_birth',
-          'participant.address',
-          'participant.phone',
-          'participant.email',
-          'plan.start_date',
-          'plan.end_date',
-          'intake.service_schedule',
-          'intake.service_schedule_rows'
-        ]
+        prefill_fields: participantPrefillFieldPaths()
       })
     );
     insertRequired.run(uuidv4(), providerProfileId, templateId);
@@ -321,7 +312,7 @@ function syncParticipantFromIntake(participantId, intake) {
       values.push(String(val).trim());
     }
   };
-  f('name', intake.full_legal_name || intake.name);
+  f('name', composeParticipantLegalName(intake) || intake.name);
   f('date_of_birth', intake.date_of_birth);
   f('ndis_number', intake.ndis_number);
   f('email', intake.email);

@@ -15,6 +15,7 @@ import { extractExpiryFromDocument } from '../services/ocrExpiry.service.js';
 import { uploadFileToStaffFolder } from '../services/oneDriveUpload.service.js';
 import { tryPushStaffDocument } from '../services/orgOnedriveSync.service.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser } from '../services/notification.service.js';
+import { composeStaffDisplayName } from '../../../shared/onboardingFieldRegistry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -44,6 +45,46 @@ function validateToken(token) {
 
 function getOnboarding(staffId) {
   return db.prepare('SELECT * FROM staff_onboarding WHERE staff_id = ?').get(staffId);
+}
+
+/** Flat map staff_intake_fields rows → key/value for hydrating the public form */
+function getStaffIntakeFieldMap(staffOnboardingId) {
+  const rows = db.prepare('SELECT field_key, field_value FROM staff_intake_fields WHERE staff_onboarding_id = ?').all(staffOnboardingId);
+  const m = {};
+  for (const r of rows) m[r.field_key] = r.field_value;
+  return m;
+}
+
+/**
+ * Normalize saved keys + legacy full_name into first_name / last_name / full_legal_name for the client.
+ */
+function normalizeStaffPersonalFields(intakeFields, staffNameFallback) {
+  let first = String(intakeFields.first_name || '').trim();
+  let last = String(intakeFields.last_name || '').trim();
+  let fullLegal = String(intakeFields.full_legal_name || '').trim();
+  const legacyFull = String(intakeFields.full_name || '').trim();
+  if (!first && !last && legacyFull) {
+    const p = legacyFull.split(/\s+/);
+    first = p[0] || '';
+    last = p.slice(1).join(' ') || '';
+  }
+  if (!fullLegal && legacyFull && !intakeFields.full_legal_name) fullLegal = legacyFull;
+  const fb = String(staffNameFallback || '').trim();
+  if (!first && !last && fb && !legacyFull) {
+    const p = fb.split(/\s+/);
+    first = p[0] || '';
+    last = p.slice(1).join(' ') || '';
+  }
+  return {
+    first_name: first,
+    last_name: last,
+    full_legal_name: fullLegal,
+    date_of_birth: intakeFields.date_of_birth || '',
+    address: intakeFields.address || '',
+    phone: intakeFields.phone || '',
+    emergency_contact_name: intakeFields.emergency_contact_name || '',
+    emergency_contact_phone: intakeFields.emergency_contact_phone || ''
+  };
 }
 
 /** Organisation that owns this staff record — same scoping as the rest of the API (never notify a different tenant). */
@@ -173,6 +214,9 @@ router.get('/:token', (req, res) => {
     if (onboarding.provider_profile_id) {
       policyFiles = db.prepare('SELECT id, display_name, file_path FROM company_policy_files WHERE provider_profile_id = ?').all(onboarding.provider_profile_id);
     }
+    const rawIntake = getStaffIntakeFieldMap(onboarding.id);
+    const normPersonal = normalizeStaffPersonalFields(rawIntake, staffRow?.name);
+    const intakeFields = { ...rawIntake, ...normPersonal };
     res.json({
       staff: {
         name: staffRow?.name,
@@ -181,6 +225,7 @@ router.get('/:token', (req, res) => {
         employment_type: staffRow?.employment_type,
         hourly_rate: staffRow?.hourly_rate,
       },
+      intakeFields,
       policyFiles: policyFiles.map((p) => ({ id: p.id, display_name: p.display_name })),
       currentStep: onboarding.current_step,
       status: onboarding.status,
@@ -215,6 +260,13 @@ router.post('/:token/step', (req, res) => {
         db.prepare('UPDATE staff_intake_fields SET field_value = ?, updated_at = datetime(\'now\') WHERE id = ?').run(val, existing.id);
       } else {
         db.prepare('INSERT INTO staff_intake_fields (id, staff_onboarding_id, field_key, field_value, source) VALUES (?, ?, ?, ?, \'user\')').run(uuidv4(), onboarding.id, key, val);
+      }
+    }
+
+    if (stepNum === 1 && data && typeof data === 'object') {
+      const displayName = composeStaffDisplayName(data);
+      if (displayName) {
+        db.prepare('UPDATE staff SET name = ?, updated_at = datetime(\'now\') WHERE id = ?').run(displayName, staff.id);
       }
     }
 

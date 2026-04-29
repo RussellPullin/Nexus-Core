@@ -13,6 +13,7 @@ import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
 import { getServiceAgreementTemplatePath, getSupportPlanTemplatePath } from './formTemplatePath.service.js';
 import { db } from '../db/index.js';
+import { composeParticipantLegalName } from '../../../shared/onboardingFieldRegistry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -247,8 +248,14 @@ function buildFillData(participant = {}, plan = null, intake = {}, context = {})
   const planEndRaw = (plan?.end_date || intake.plan_end_date || '').toString().slice(0, 10);
   const serviceStartRaw = (intake.preferred_start_date || todayIso).toString().slice(0, 10);
 
+  const legalName = composeParticipantLegalName(intake) || participant.name || '';
+  const firstName = String(intake.first_name || '').trim();
+  const lastName = String(intake.last_name || '').trim();
+
   return {
-    participant_name: participant.name || intake.full_legal_name || '',
+    participant_name: legalName,
+    first_name: firstName,
+    last_name: lastName,
     participant_email: participant.email || intake.email || '',
     participant_phone: participant.phone || intake.phone || '',
     participant_address: streetOnly,
@@ -304,6 +311,8 @@ export async function fillServiceAgreement(participant = {}, plan = null, intake
 
   const fieldMap = {
     client_full_name: data.participant_name,
+    client_first_name: data.first_name,
+    client_last_name: data.last_name,
     client_preferred_name: data.preferred_name,
     client_phone: data.participant_phone,
     client_email: data.participant_email,
@@ -439,6 +448,10 @@ function fillWordTemplate(templatePath, participant = {}, plan = null, intake = 
     participant_name: data.participant_name,
     client_name: data.participant_name,
     client_full_name: data.participant_name,
+    first_name: data.first_name,
+    last_name: data.last_name,
+    client_first_name: data.first_name,
+    client_last_name: data.last_name,
     preferred_name: data.preferred_name,
     email: data.participant_email,
     phone: data.participant_phone,
