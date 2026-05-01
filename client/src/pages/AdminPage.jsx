@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { useAuth } from '../context/AuthContext';
 import { users, admin, participants, staff, billing, auth } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
@@ -32,6 +34,8 @@ function csvHours2dp(val) {
 }
 
 export default function AdminPage() {
+  const pathPrefix = useProductPathPrefix();
+  const { productSurface } = useParams();
   const { canManageUsers } = useAuth();
   const [tab, setTab] = useState('users');
   const [usersList, setUsersList] = useState([]);
@@ -406,14 +410,22 @@ export default function AdminPage() {
     );
   }
 
-  const tabs = [
-    { id: 'users', label: 'Users & Roles' },
-    { id: 'case_notes_import', label: 'Case notes import' },
-    { id: 'activity', label: 'Coordinator Activity' },
-    { id: 'billable', label: 'Billing & Billable Hours' },
-    { id: 'financial', label: 'Financial Overview' },
-    { id: 'pay_summary', label: 'Pay summary (Xero)' }
-  ];
+  const tabs = useMemo(() => {
+    const base = [
+      { id: 'users', label: 'Users & Roles' },
+      { id: 'case_notes_import', label: 'Case notes import' }
+    ];
+    const coordinationFirst = [
+      { id: 'activity', label: 'Coordinator Activity' },
+      { id: 'billable', label: 'Billing & Billable Hours' },
+      { id: 'financial', label: 'Financial Overview' }
+    ];
+    const payroll = [{ id: 'pay_summary', label: 'Pay summary (Xero)' }];
+    if (productSurface === PRODUCT_AGENCY) {
+      return [...base, ...payroll, ...coordinationFirst];
+    }
+    return [...base, ...coordinationFirst, ...payroll];
+  }, [productSurface]);
 
   return (
     <div className="admin-page">
@@ -793,7 +805,7 @@ export default function AdminPage() {
                       <tr key={k}>
                         <td>
                           {r.staff_id ? (
-                            <Link to={`/staff/${r.staff_id}`} className="participant-name-link">{r.staffName}</Link>
+                            <Link to={`${pathPrefix}/staff/${r.staff_id}`} className="participant-name-link">{r.staffName}</Link>
                           ) : (
                             <span>{r.staffName}</span>
                           )}

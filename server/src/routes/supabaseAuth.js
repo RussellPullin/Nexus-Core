@@ -3,8 +3,6 @@ import { isSupabaseJwtConfigured } from '../lib/supabaseJwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { db } from '../db/index.js';
-import { isSuperAdminEmail } from '../lib/superAdmin.js';
-import { getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 import {
   findShifterOrganizationById,
   findShifterOrganizationByName,
@@ -20,6 +18,9 @@ import {
   fetchSupabaseProfile,
   fetchSupabaseProfileByEmail
 } from '../services/nexusSupabaseAuth.service.js';
+import { mergeProductIntoAuthMe, AUTH_USER_SELECT } from '../lib/sessionUserPayload.js';
+import { normalizeOrgProductSelectionFromBody } from '../services/tenantProduct.service.js';
+import { requireAgencyShell } from '../middleware/agencyShell.js';
 
 const router = Router();
 
@@ -127,22 +128,11 @@ router.post('/session', async (req, res) => {
     }
 
     req.session.user = result.sessionUser;
-    const u = db
-      .prepare(
-        `SELECT id, email, name, role, org_id, billing_interval_minutes, staff_id, signature_data,
-         ollama_local_base_url,
-         email_provider, email_connected_address, email_reconnect_required, auth_uid
-         FROM users WHERE id = ?`
-      )
-      .get(result.sessionUser.id);
+    const u = db.prepare(`SELECT ${AUTH_USER_SELECT}, auth_uid FROM users WHERE id = ?`).get(result.sessionUser.id);
 
     res.json({
       needs_org_setup: false,
-      user: {
-        ...u,
-        is_super_admin: isSuperAdminEmail(u?.email),
-        email_relay_configured: Boolean(getRelayConfigFromEnv()?.url)
-      }
+      user: mergeProductIntoAuthMe(req, u)
     });
   } catch (err) {
     const code = err.code || 'SESSION_ERROR';
@@ -160,9 +150,17 @@ router.post('/register-org', async (req, res) => {
     const { access_token, organization_name } = req.body || {};
     if (!access_token) return res.status(400).json({ error: 'access_token required' });
 
+    let productFlags;
+    try {
+      productFlags = normalizeOrgProductSelectionFromBody(req.body || {});
+    } catch (e) {
+      return res.status(400).json({ error: e.message, code: e.code || 'VALIDATION' });
+    }
+
     const out = await registerOrganizationForUser({
       accessToken: access_token,
-      organizationName: organization_name
+      organizationName: organization_name,
+      productFlags
     });
 
     const full = await completeSupabaseSignIn(access_token);
@@ -171,26 +169,13 @@ router.post('/register-org', async (req, res) => {
     }
 
     const u = full.sessionUser
-      ? db
-          .prepare(
-            `SELECT id, email, name, role, org_id, billing_interval_minutes, staff_id, signature_data,
-           ollama_local_base_url,
-           email_provider, email_connected_address, email_reconnect_required, auth_uid
-           FROM users WHERE id = ?`
-          )
-          .get(full.sessionUser.id)
+      ? db.prepare(`SELECT ${AUTH_USER_SELECT}, auth_uid FROM users WHERE id = ?`).get(full.sessionUser.id)
       : null;
 
     res.status(201).json({
       org_id: out.org_id,
       organization_name: out.organization_name,
-      user: u
-        ? {
-            ...u,
-            is_super_admin: isSuperAdminEmail(u?.email),
-            email_relay_configured: Boolean(getRelayConfigFromEnv()?.url)
-          }
-        : null
+      user: u ? mergeProductIntoAuthMe(req, u) : null
     });
   } catch (err) {
     const code = err.code || 'REGISTER_ORG_ERROR';
@@ -252,7 +237,7 @@ router.post('/invite-staff', requireAuth, requireAdminOrDelegate, async (req, re
   }
 });
 
-router.get('/shifter-org-link', requireAuth, requireAdminOrDelegate, async (req, res) => {
+router.get('/shifter-org-link', requireAuth, requireAdminOrDelegate, requireAgencyShell, async (req, res) => {
   try {
     const orgId = req.session.user?.org_id || null;
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account.', code: 'NO_ORG' });
@@ -288,7 +273,7 @@ router.get('/shifter-org-link', requireAuth, requireAdminOrDelegate, async (req,
   }
 });
 
-router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, async (req, res) => {
+router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, requireAgencyShell, async (req, res) => {
   try {
     const orgId = req.session.user?.org_id || null;
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account.', code: 'NO_ORG' });
@@ -387,7 +372,7 @@ router.post('/link-shifter-org', requireAuth, requireAdminOrDelegate, async (req
   }
 });
 
-router.post('/unlink-shifter-org', requireAuth, requireAdminOrDelegate, async (req, res) => {
+router.post('/unlink-shifter-org', requireAuth, requireAdminOrDelegate, requireAgencyShell, async (req, res) => {
   try {
     const orgId = req.session.user?.org_id || null;
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account.', code: 'NO_ORG' });

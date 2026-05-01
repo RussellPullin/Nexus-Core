@@ -8,6 +8,8 @@ export default function SetupOrgPage() {
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
   const [orgName, setOrgName] = useState('');
+  const [coordinationProduct, setCoordinationProduct] = useState(false);
+  const [agencyProduct, setAgencyProduct] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [noSession, setNoSession] = useState(false);
@@ -41,9 +43,16 @@ export default function SetupOrgPage() {
       setNoSession(true);
       return;
     }
+    if (!coordinationProduct && !agencyProduct) {
+      setError('Select at least one: Nexus Coordination or Nexus Agency.');
+      return;
+    }
     setBusy(true);
     try {
-      await authApi.supabaseRegisterOrg(session.access_token, name);
+      await authApi.supabaseRegisterOrg(session.access_token, name, {
+        coordination_enabled: coordinationProduct,
+        agency_enabled: agencyProduct
+      });
       await refreshUser();
       navigate('/', { replace: true });
     } catch (err) {
@@ -78,6 +87,17 @@ export default function SetupOrgPage() {
         </p>
         <form onSubmit={handleSubmit}>
           {error && <div className="login-error">{error}</div>}
+          <div style={{ marginBottom: '1rem', fontSize: '0.9rem', color: '#334155' }}>
+            <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>Products for this organisation</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.25rem' }}>
+              <input type="checkbox" checked={coordinationProduct} onChange={(e) => setCoordinationProduct(e.target.checked)} />
+              Nexus Coordination — NDIS planning, allocations, plan manager workflows
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <input type="checkbox" checked={agencyProduct} onChange={(e) => setAgencyProduct(e.target.checked)} />
+              Nexus Agency — staff, Shifter, shifts & payroll-oriented admin
+            </label>
+          </div>
           <input
             type="text"
             placeholder="Organisation name"

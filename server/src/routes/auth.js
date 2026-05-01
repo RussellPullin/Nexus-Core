@@ -7,10 +7,16 @@ import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
+import { mergeProductIntoAuthMe, AUTH_USER_SELECT } from '../lib/sessionUserPayload.js';
+import {
+  normalizeOrgProductSelectionFromBody,
+  getTenantAnchorFlags,
+  getUserProductAccess,
+  computeEffectiveProducts
+} from '../services/tenantProduct.service.js';
+import { PRODUCT_AGENCY, PRODUCT_COORDINATION } from '../../../shared/tenantProduct.js';
 
-const USER_SELECT = `id, email, name, role, org_id, auth_uid, billing_interval_minutes, staff_id, signature_data,
-  ollama_local_base_url,
-  email_provider, email_connected_address, email_reconnect_required`;
+const USER_SELECT = AUTH_USER_SELECT;
 const SUPABASE_PLACEHOLDER_PW = '\x00NEXUS_SUPABASE_AUTH\x00';
 
 /** @param {unknown} raw */
@@ -117,7 +123,7 @@ router.post('/login', (req, res) => {
       org_id: user.org_id || null
     };
     const u = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(user.id);
-    res.json({ user: withEmailRelayFlag(shapeUser(u)) });
+    res.json({ user: mergeProductIntoAuthMe(req, u) });
   } catch (err) {
     console.error('[auth] login error:', err);
     res.status(500).json({ error: err.message });
@@ -155,7 +161,7 @@ router.post('/emergency-login', (req, res) => {
       org_id: user.org_id || null
     };
     return res.json({
-      user: withEmailRelayFlag(shapeUser(user)),
+      user: mergeProductIntoAuthMe(req, user),
       emergency_login: true
     });
   } catch (err) {
@@ -191,12 +197,18 @@ router.post('/register', (req, res) => {
     const hash = bcrypt.hashSync(passwordNorm, 10);
 
     let orgIdForUser = null;
+    let productPick = null;
     if (!anyUser) {
+      try {
+        productPick = normalizeOrgProductSelectionFromBody(req.body);
+      } catch (e) {
+        return res.status(400).json({ error: e.message, code: e.code || 'VALIDATION' });
+      }
       const orgId = uuid();
       db.prepare(`
-        INSERT INTO organisations (id, owner_org_id, name, type, created_at, updated_at)
-        VALUES (?, ?, ?, 'provider', datetime('now'), datetime('now'))
-      `).run(orgId, orgId, orgLabel);
+        INSERT INTO organisations (id, owner_org_id, name, type, coordination_enabled, agency_enabled, created_at, updated_at)
+        VALUES (?, ?, ?, 'provider', ?, ?, datetime('now'), datetime('now'))
+      `).run(orgId, orgId, orgLabel, productPick.coordination_enabled, productPick.agency_enabled);
       orgIdForUser = orgId;
     } else {
       const anchor = db
@@ -219,15 +231,38 @@ router.post('/register', (req, res) => {
       orgIdForUser = anchor.id;
     }
 
-    db.prepare(`
-      INSERT INTO users (id, email, password_hash, name, role, org_id)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, emailNorm, hash, name || null, role, orgIdForUser);
+    if (!anyUser && productPick) {
+      db.prepare(`
+        INSERT INTO users (id, email, password_hash, name, role, org_id, coordination_access, agency_access)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        emailNorm,
+        hash,
+        name || null,
+        role,
+        orgIdForUser,
+        productPick.coordination_enabled,
+        productPick.agency_enabled
+      );
+    } else {
+      const flags = db
+        .prepare(
+          `SELECT coordination_enabled, agency_enabled FROM organisations WHERE id = ? AND owner_org_id IS NOT NULL AND id = owner_org_id`
+        )
+        .get(orgIdForUser);
+      const ca = flags?.coordination_enabled == null ? 0 : Number(flags.coordination_enabled) ? 1 : 0;
+      const aa = flags?.agency_enabled == null ? 1 : Number(flags.agency_enabled) ? 1 : 0;
+      db.prepare(`
+        INSERT INTO users (id, email, password_hash, name, role, org_id, coordination_access, agency_access)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, emailNorm, hash, name || null, role, orgIdForUser, ca, aa);
+    }
 
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     req.session.user = { id: user.id, email: user.email, name: user.name, role: normalizeAppRole(user.role), org_id: user.org_id || null };
     const u = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(id);
-    res.status(201).json({ user: withEmailRelayFlag(shapeUser(u)) });
+    res.status(201).json({ user: mergeProductIntoAuthMe(req, u) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -254,13 +289,36 @@ router.get('/me', (req, res) => {
       `).get(req.session.user.id)
     : null;
   res.json({
-    user: withEmailRelayFlag({
-      ...shapeUser(user),
-      org_id: user.org_id || null,
+    user: mergeProductIntoAuthMe(req, user, {
       assigned_participant_count: assignedCount,
       delegate_grant_active: !!delegateGrant
     })
   });
+});
+
+router.post('/active-product', requireAuth, (req, res) => {
+  try {
+    const ap = req.body?.active_product;
+    if (ap !== PRODUCT_COORDINATION && ap !== PRODUCT_AGENCY) {
+      return res.status(400).json({ error: 'active_product must be coordination or agency' });
+    }
+    const user = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(req.session.user.id);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    const orgFlags = getTenantAnchorFlags(user.org_id || null);
+    const userAccess = getUserProductAccess(user);
+    const effective = computeEffectiveProducts(orgFlags, userAccess);
+    if (ap === PRODUCT_COORDINATION && !effective.can_coordination) {
+      return res.status(403).json({ error: 'Nexus Coordination is not available for your account.', code: 'COORDINATION_DENIED' });
+    }
+    if (ap === PRODUCT_AGENCY && !effective.can_agency) {
+      return res.status(403).json({ error: 'Nexus Agency is not available for your account.', code: 'AGENCY_DENIED' });
+    }
+    req.session.active_product = ap;
+    const u2 = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(req.session.user.id);
+    res.json({ user: mergeProductIntoAuthMe(req, u2, {}) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/logout', (req, res) => {
@@ -371,7 +429,7 @@ router.put('/settings', requireAuth, (req, res) => {
     }
     if (updates.length === 0) {
       const user = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(userId);
-      return res.json({ user: withEmailRelayFlag(shapeUser(user)) });
+      return res.json({ user: mergeProductIntoAuthMe(req, user) });
     }
     values.push(userId);
     db.prepare(`
@@ -379,7 +437,7 @@ router.put('/settings', requireAuth, (req, res) => {
       WHERE id = ?
     `).run(...values);
     const user = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(userId);
-    res.json({ user: withEmailRelayFlag(shapeUser(user)) });
+    res.json({ user: mergeProductIntoAuthMe(req, user) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

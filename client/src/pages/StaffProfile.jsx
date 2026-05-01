@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { backToStaffListPath } from '../lib/listViewUrl.js';
 import { staff, participants, shifts, forms } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
@@ -36,9 +37,10 @@ function staffEditFormFromRow(staffRow) {
 }
 
 export default function StaffProfile() {
+  const pathPrefix = useProductPathPrefix();
   const { id } = useParams();
   const [searchParams] = useSearchParams();
-  const staffListPath = backToStaffListPath(searchParams);
+  const staffListPath = backToStaffListPath(searchParams, pathPrefix);
   const [data, setData] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [participantsList, setParticipantsList] = useState([]);
@@ -587,7 +589,7 @@ export default function StaffProfile() {
               {assignments.map((a) => (
                 <tr key={a.id}>
                   <td>
-                    <Link to={`/participants/${a.participant_id}`} className="participant-name-link">{a.participant_name}</Link>
+                    <Link to={`${pathPrefix}/participants/${a.participant_id}`} className="participant-name-link">{a.participant_name}</Link>
                     {a.ndis_number && <span style={{ marginLeft: '0.35rem', color: '#64748b' }}>({a.ndis_number})</span>}
                   </td>
                   <td>
@@ -769,14 +771,14 @@ export default function StaffProfile() {
         <h3>Completed shifts</h3>
         <p style={{ marginBottom: '0.5rem', fontSize: '0.9rem', color: '#64748b' }}>
           Same shifts as the hours summary above (completed or completed by admin).{' '}
-          <Link to={`/shifts?staff_id=${id}`}>All shifts for this staff</Link>
+          <Link to={`${pathPrefix}/shifts?staff_id=${id}`}>All shifts for this staff</Link>
           {' · '}
-          <Link to={`/shifts?duplicates=1&staff_id=${id}`}>Check duplicates</Link>
+          <Link to={`${pathPrefix}/shifts?duplicates=1&staff_id=${id}`}>Check duplicates</Link>
         </p>
         {staffShifts.length === 0 ? (
           <p>No shifts yet.</p>
         ) : completedStaffShifts.length === 0 ? (
-          <p>No completed shifts yet. Scheduled shifts are listed under <Link to={`/shifts?staff_id=${id}`}>Shifts</Link>.</p>
+          <p>No completed shifts yet. Scheduled shifts are listed under <Link to={`${pathPrefix}/shifts?staff_id=${id}`}>Shifts</Link>.</p>
         ) : (
           <>
             {(hoursSummary.length > 0 ? groupShiftsByExcelPeriods(completedStaffShifts, hoursSummary, groupShiftsByPayPeriod) : groupShiftsByPayPeriod(completedStaffShifts)).map((period) => (
@@ -794,11 +796,11 @@ export default function StaffProfile() {
                         <tr key={s.id}>
                           <td>{s.start_time ? formatDate(s.start_time) : ''}</td>
                           <td>
-                            <Link to={`/participants/${s.participant_id}`} className="participant-name-link">{s.participant_name}</Link>
+                            <Link to={`${pathPrefix}/participants/${s.participant_id}`} className="participant-name-link">{s.participant_name}</Link>
                           </td>
                           <td>{s.start_time?.slice(11, 16)} – {s.end_time?.slice(11, 16)}</td>
                           <td>
-                            <Link to={`/shifts/${s.id}`} className="btn btn-secondary btn-sm">View</Link>
+                            <Link to={`${pathPrefix}/shifts/${s.id}`} className="btn btn-secondary btn-sm">View</Link>
                           </td>
                         </tr>
                       ))}

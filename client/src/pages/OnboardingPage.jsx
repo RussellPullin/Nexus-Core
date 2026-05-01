@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { onboarding, participants, organisations, ndis, smartDefaults } from '../lib/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate } from '../lib/dateUtils';
@@ -113,6 +114,7 @@ function formatParticipantDob(value) {
 }
 
 export default function OnboardingPage() {
+  const pathPrefix = useProductPathPrefix();
   const { id } = useParams();
   const idRef = useRef(id);
   idRef.current = id;
@@ -613,7 +615,7 @@ export default function OnboardingPage() {
       <div className="page-header">
         <h2>Participant Onboarding</h2>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <Link to={`/participants/${id}`} className="btn btn-secondary">Back to profile</Link>
+          <Link to={`${pathPrefix}/participants/${id}`} className="btn btn-secondary">Back to profile</Link>
           <button className="btn btn-secondary" onClick={refresh} disabled={working}>Refresh</button>
         </div>
       </div>

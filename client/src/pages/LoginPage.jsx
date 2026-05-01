@@ -24,6 +24,9 @@ export default function LoginPage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [organizationName, setOrganizationName] = useState('');
+  const [firstAccountOnServer, setFirstAccountOnServer] = useState(null);
+  const [coordinationProduct, setCoordinationProduct] = useState(false);
+  const [agencyProduct, setAgencyProduct] = useState(true);
   const attemptedTokenRef = useRef('');
 
   const hasSupabaseCallbackParams = useCallback(() => {
@@ -71,6 +74,25 @@ export default function LoginPage() {
       .then((c) => setUseCloudAuth(Boolean(c?.supabase_auth_enabled)))
       .catch(() => setUseCloudAuth(false));
   }, [hasSupabaseCallbackParams]);
+
+  useEffect(() => {
+    if (!isRegister || useCloudAuth) {
+      setFirstAccountOnServer(null);
+      return;
+    }
+    let cancelled = false;
+    authApi
+      .registrationInfo()
+      .then((r) => {
+        if (!cancelled) setFirstAccountOnServer(Boolean(r?.first_account));
+      })
+      .catch(() => {
+        if (!cancelled) setFirstAccountOnServer(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isRegister, useCloudAuth]);
 
   const completeSupabaseSession = useCallback(
     async (accessToken) => {
@@ -352,7 +374,15 @@ export default function LoginPage() {
           setError('Enter your organisation name.');
           return;
         }
-        await register(email, password, name, useCloudAuth ? undefined : orgTrim);
+        if (firstAccountOnServer && !coordinationProduct && !agencyProduct) {
+          setError('Select at least one: Nexus Coordination or Nexus Agency.');
+          return;
+        }
+        const products =
+          firstAccountOnServer
+            ? { coordination_enabled: coordinationProduct, agency_enabled: agencyProduct }
+            : undefined;
+        await register(email, password, name, useCloudAuth ? undefined : orgTrim, products);
       } else {
         await login(email, password);
       }
@@ -449,6 +479,19 @@ export default function LoginPage() {
                 Required: if you are the first user on this server, this creates your organisation. Otherwise enter the
                 exact name your administrator uses.
               </p>
+              {firstAccountOnServer && (
+                <div style={{ marginBottom: '0.75rem', fontSize: '0.85rem', color: '#334155' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>Products for your organisation</div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.25rem' }}>
+                    <input type="checkbox" checked={coordinationProduct} onChange={(e) => setCoordinationProduct(e.target.checked)} />
+                    Nexus Coordination
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <input type="checkbox" checked={agencyProduct} onChange={(e) => setAgencyProduct(e.target.checked)} />
+                    Nexus Agency
+                  </label>
+                </div>
+              )}
             </>
           )}
           {!isRecoveryMode ? (
@@ -535,6 +578,8 @@ export default function LoginPage() {
               setError('');
               setInfo('');
               setOrganizationName('');
+              setCoordinationProduct(false);
+              setAgencyProduct(true);
             }}
           >
             {isRegister ? 'Already have an account? Sign in' : 'Need an account? Register'}

@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
   email_oauth_refresh_encrypted TEXT,
   email_token_expires_at INTEGER,
   email_reconnect_required INTEGER DEFAULT 0,
+  coordination_access INTEGER DEFAULT 1,
+  agency_access INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -36,6 +38,8 @@ CREATE TABLE IF NOT EXISTS organisations (
   phone TEXT,
   address TEXT,
   website TEXT,
+  coordination_enabled INTEGER DEFAULT 0,
+  agency_enabled INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );

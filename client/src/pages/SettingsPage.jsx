@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useParams } from 'react-router-dom';
+import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { useAuth } from '../context/AuthContext';
 import { staff, learning, settings, ai, auth, microsoftDrive } from '../lib/api';
 import { probeLocalOllama, resolveLocalOllamaBaseUrl } from '../lib/localOllama.js';
@@ -37,6 +38,7 @@ function SettingsSection({ title, summary, defaultOpen = false, children, classN
 
 export default function SettingsPage() {
   const { user, updateSettings, refreshUser, canManageUsers, isAdmin } = useAuth();
+  const { productSurface } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [emailWizardView, setEmailWizardView] = useState('choose');
   const [disconnecting, setDisconnecting] = useState(false);
@@ -831,7 +833,7 @@ export default function SettingsPage() {
         </details>
       )}
 
-      {canManageUsers && <ShifterIntegrationCard />}
+      {canManageUsers && productSurface === PRODUCT_AGENCY && Boolean(user?.agency_enabled) && <ShifterIntegrationCard />}
       {canManageUsers && <BusinessSetup />}
       <LearningSettings />
       </div>

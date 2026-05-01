@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { organisations } from '../lib/api';
 import { DIRECTORY_LIST_STORAGE_KEY, participantsProfileQueryFromDirectory } from '../lib/listViewUrl.js';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 
 export default function DirectoryPage() {
+  const pathPrefix = useProductPathPrefix();
   const [searchParams, setSearchParams] = useSearchParams();
   const listHydratedRef = useRef(false);
   const [orgs, setOrgs] = useState([]);
@@ -299,7 +301,7 @@ export default function DirectoryPage() {
                     <td>{p.ndis_number || '-'}</td>
                     <td>
                       <Link
-                        to={`/participants/${p.id}?${participantsProfileQueryFromDirectory({ q, orgId: orgFromUrl || selectedOrg?.id })}`}
+                        to={`${pathPrefix}/participants/${p.id}?${participantsProfileQueryFromDirectory({ q, orgId: orgFromUrl || selectedOrg?.id })}`}
                         className="btn btn-secondary"
                         style={{ fontSize: '0.8rem' }}
                       >

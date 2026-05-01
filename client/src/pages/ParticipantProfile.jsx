@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { backToPreviousListPath, participantProfileBackLabel } from '../lib/listViewUrl.js';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
+import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { participants, organisations, ndis, smartDefaults, onboarding, formTemplates } from '../lib/api';
 import CopyableField from '../components/CopyableField';
 import AddressAutocomplete from '../components/AddressAutocomplete';
@@ -125,13 +127,14 @@ function resolveInvoiceRecipientsForDisplay(p) {
 
 /** Link from budget utilisation “Invoiced” amounts to Financial → Invoices for this participant (paid / outstanding). */
 function ParticipantInvoicedFinancialLink({ participantId, participantName, amount, children }) {
+  const pathPrefix = useProductPathPrefix();
   const n = Number(amount) || 0;
   if (n <= 0) return children;
   const q = new URLSearchParams({ tab: 'invoices', participant: String(participantId) });
   if (participantName) q.set('participant_name', participantName);
   return (
     <Link
-      to={`/financial?${q.toString()}`}
+      to={`${pathPrefix}/financial?${q.toString()}`}
       title="Open Financial → Invoices: batch totals, paid, and outstanding"
       style={{
         color: 'var(--primary, #2563eb)',
@@ -146,7 +149,9 @@ function ParticipantInvoicedFinancialLink({ participantId, participantName, amou
 }
 
 export default function ParticipantProfile() {
-  const { id } = useParams();
+  const { id, productSurface } = useParams();
+  const pathPrefix = useProductPathPrefix();
+  const isAgencyShell = productSurface === PRODUCT_AGENCY;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [data, setData] = useState(null);
@@ -234,7 +239,7 @@ export default function ParticipantProfile() {
         const sec = fix.section === 'company' ? 'company' : 'form-templates';
         const q = new URLSearchParams({ expand: sec });
         if (fix.template_instance_id) q.set('templateInstance', fix.template_instance_id);
-        navigate(`/settings?${q.toString()}`);
+        navigate(`${pathPrefix}/settings?${q.toString()}`);
         return;
       }
       if (fix.kind === 'agreements_tab') {
@@ -242,7 +247,7 @@ export default function ParticipantProfile() {
         if (fix.anchor_id) setSaScrollTarget(fix.anchor_id);
       }
     },
-    [data, navigate]
+    [data, navigate, pathPrefix]
   );
 
   useEffect(() => {
@@ -343,7 +348,7 @@ export default function ParticipantProfile() {
     if (!confirm(`Archive ${data?.name}? They will be hidden from the list but can be restored.`)) return;
     try {
       await participants.archive(id);
-      navigate(backToPreviousListPath(searchParams));
+      navigate(backToPreviousListPath(searchParams, pathPrefix));
     } catch (err) {
       alert(err.message || 'Could not archive participant.');
     }
@@ -362,7 +367,7 @@ export default function ParticipantProfile() {
     if (!confirm(`Permanently delete ${data?.name}? This cannot be undone. All plans, goals, documents, shifts and related data will be removed.`)) return;
     try {
       await participants.delete(id);
-      navigate(backToPreviousListPath(searchParams));
+      navigate(backToPreviousListPath(searchParams, pathPrefix));
     } catch (err) {
       alert(err.message || 'Could not delete participant.');
     }
@@ -1056,7 +1061,7 @@ export default function ParticipantProfile() {
           {data.archived_at && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', fontWeight: 'normal', color: '#64748b' }}>(archived)</span>}
         </h2>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <Link to={backToPreviousListPath(searchParams)} className="btn btn-secondary">{participantProfileBackLabel(searchParams)}</Link>
+          <Link to={backToPreviousListPath(searchParams, pathPrefix)} className="btn btn-secondary">{participantProfileBackLabel(searchParams)}</Link>
           {data.archived_at ? (
             <button type="button" className="btn btn-secondary" onClick={handleUnarchive}>Restore</button>
           ) : (
@@ -1457,7 +1462,7 @@ export default function ParticipantProfile() {
             <div className="profile-card profile-card-full">
               <div className="profile-card-header">
                 <h3 className="profile-card-title">Onboarding</h3>
-                <Link to={`/onboarding/${id}`} className="btn btn-secondary">Open onboarding</Link>
+                <Link to={`${pathPrefix}/onboarding/${id}`} className="btn btn-secondary">Open onboarding</Link>
               </div>
               {onboardingState ? (
                 <div style={{ display: 'grid', gap: '0.35rem' }}>
@@ -2188,7 +2193,9 @@ export default function ParticipantProfile() {
                     </div>
                   )}
                   <div style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '0.75rem' }}>
-                    Support categories & budgets (used when linking shifts to line items)
+                    {isAgencyShell
+                      ? 'Support category budgets — funds your organisation bills from (participant-wide coordination lives in Nexus Coordination).'
+                      : 'Support categories & budgets (used when linking shifts to line items)'}
                   </div>
                   {p.budgets?.length ? (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.65rem', marginBottom: '0.5rem' }}>
@@ -2230,11 +2237,13 @@ export default function ParticipantProfile() {
                                   </button>
                                 </div>
                               </div>
-                              <div style={{ marginTop: '0.3rem', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.3rem' }}>
+                              <div style={{ marginTop: '0.3rem', display: 'grid', gridTemplateColumns: isAgencyShell ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: '0.3rem' }}>
                                 <div style={{ border: `1px solid ${colorway.border}`, borderRadius: 6, padding: '0.22rem', background: '#f8faf9' }}>
-                                  <div style={{ fontSize: '0.65rem', color: colorway.muted }}>Budget</div>
+                                  <div style={{ fontSize: '0.65rem', color: colorway.muted }}>{isAgencyShell ? 'Category budget' : 'Budget'}</div>
                                   <div style={{ fontSize: '0.74rem', fontWeight: 700 }}>${budgetAmount.toLocaleString('en-AU', { maximumFractionDigits: 0 })}</div>
                                 </div>
+                                {!isAgencyShell && (
+                                  <>
                                 <div style={{ border: `1px solid ${colorway.border}`, borderRadius: 6, padding: '0.22rem', background: '#f8faf9' }}>
                                   <div style={{ fontSize: '0.65rem', color: colorway.muted }}>Allocated</div>
                                   <div style={{ fontSize: '0.74rem', fontWeight: 700 }}>${allocatedTotal.toLocaleString('en-AU', { maximumFractionDigits: 0 })}</div>
@@ -2243,6 +2252,8 @@ export default function ParticipantProfile() {
                                   <div style={{ fontSize: '0.65rem', color: colorway.muted }}>Left</div>
                                   <div style={{ fontSize: '0.74rem', fontWeight: 700, color: unallocatedTotal < 0 ? '#b91c1c' : colorway.text }}>${unallocatedTotal.toLocaleString('en-AU', { maximumFractionDigits: 0 })}</div>
                                 </div>
+                                  </>
+                                )}
                               </div>
                               {planScheduleNorm.releases.length > 0 && (
                                 <div style={{ marginTop: '0.28rem', fontSize: '0.65rem', color: colorway.muted, display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
@@ -2254,6 +2265,7 @@ export default function ParticipantProfile() {
                                 </div>
                               )}
                             </div>
+                            {!isAgencyShell && (
                             <div style={{ padding: '0.45rem 0.55rem' }}>
                               <div style={{ border: `1px solid ${colorway.border}`, borderRadius: 8, padding: '0.35rem', background: '#f8faf9' }}>
                                 <div style={{ fontSize: '0.68rem', color: colorway.muted, marginBottom: '0.22rem' }}>Allocations ({allocations.length})</div>
@@ -2282,7 +2294,8 @@ export default function ParticipantProfile() {
                                 )}
                               </div>
                             </div>
-                            {isExpanded && (
+                            )}
+                            {isExpanded && !isAgencyShell && (
                               <div style={{ padding: '0.5rem 0.55rem', borderTop: `1px solid ${colorway.border}`, background: '#fff' }}>
                                 <div style={{ display: 'flex', gap: '0.28rem', flexWrap: 'wrap', marginBottom: '0.45rem' }}>
                                   <button type="button" className="btn btn-secondary" style={{ fontSize: '0.72rem', padding: '0.08rem 0.3rem' }} onClick={() => openBudgetConfig('applied', b, b.id, p.id)}>Configure</button>
@@ -2345,6 +2358,18 @@ export default function ParticipantProfile() {
                               ) : (
                                 <div style={{ fontSize: '0.74rem', color: '#64748b' }}>No providers allocated yet.</div>
                               )}
+                              </div>
+                            )}
+                            {isExpanded && isAgencyShell && (
+                              <div style={{ padding: '0.5rem 0.55rem', borderTop: `1px solid ${colorway.border}`, background: '#fff' }}>
+                                <div style={{ display: 'flex', gap: '0.28rem', flexWrap: 'wrap', marginBottom: '0.45rem' }}>
+                                  <button type="button" className="btn btn-secondary" style={{ fontSize: '0.72rem', padding: '0.08rem 0.3rem' }} onClick={() => openBudgetConfig('applied', b, b.id, p.id)}>Configure</button>
+                                  <button type="button" className="btn btn-secondary" style={{ fontSize: '0.72rem', padding: '0.08rem 0.3rem' }} onClick={() => { setEditingPlanId(p.id); setEditingBudget(b); setBudgetForm({ support_category: b.category || '', amount: String(b.amount), line_item_ids: (b.line_items || []).map(li => li.ndis_line_item_id), shift_length_hours: 1 }); setShowBudgetModal(true); }}>Edit budget</button>
+                                  <button type="button" className="btn btn-secondary" style={{ fontSize: '0.72rem', padding: '0.08rem 0.3rem' }} onClick={() => handleDeleteBudget(p.id, b.id)}>Remove</button>
+                                </div>
+                                <p style={{ margin: 0, fontSize: '0.78rem', color: '#64748b' }}>
+                                  Provider allocations and detailed splits are managed in <strong>Nexus Coordination</strong>. Here you use this category total as your billing envelope.
+                                </p>
                               </div>
                             )}
                           </div>
@@ -2886,7 +2911,7 @@ export default function ParticipantProfile() {
                     <td>{new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(s.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
                     <td>{s.staff_name}</td>
                     <td><span className={`badge badge-${s.status}`}>{s.status}</span></td>
-                    <td><Link to={`/shifts?shift=${s.id}`} className="btn btn-secondary" style={{ fontSize: '0.8rem' }}>View</Link></td>
+                    <td><Link to={`${pathPrefix}/shifts?shift=${s.id}`} className="btn btn-secondary" style={{ fontSize: '0.8rem' }}>View</Link></td>
                   </tr>
                 ))}
               </tbody>

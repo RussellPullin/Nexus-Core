@@ -731,6 +731,65 @@ export function getSupabaseServiceRoleClient() {
   return getAdminClient();
 }
 
+/**
+ * Generate a Supabase invite link for the Shifter mobile app.
+ * We email this link ourselves (via Nexus relay) so we can include store links + instructions.
+ *
+ * @param {string} emailRaw
+ * @param {{ redirectTo?: string | null, nexusOrgId?: string | null, profileRole?: string | null }} [opts]
+ * @returns {Promise<{ action_link: string, email: string }>}
+ */
+export async function generateShifterInviteLinkForEmail(emailRaw, opts = {}) {
+  const admin = getAdminClient();
+  if (!admin) {
+    const err = new Error('This feature is not available until your administrator finishes server setup.');
+    err.code = 'SUPABASE_NOT_CONFIGURED';
+    throw err;
+  }
+
+  const email = normalizeEmail(emailRaw);
+  if (!email) {
+    const err = new Error('Staff member has no email address');
+    err.code = 'NO_EMAIL';
+    throw err;
+  }
+
+  const redirectTo = String(opts.redirectTo || '').trim() || 'shifter://';
+  const nexusOrgId = typeof opts.nexusOrgId === 'string' && opts.nexusOrgId.trim() ? opts.nexusOrgId.trim() : null;
+  const profileRole = typeof opts.profileRole === 'string' && opts.profileRole.trim() ? opts.profileRole.trim() : null;
+
+  const data =
+    nexusOrgId && isUuidString(nexusOrgId)
+      ? {
+          org_id: nexusOrgId,
+          ...(profileRole ? { role: profileRole } : {}),
+        }
+      : profileRole
+        ? { role: profileRole }
+        : undefined;
+
+  const { data: linkData, error } = await admin.auth.admin.generateLink({
+    type: 'invite',
+    email,
+    options: {
+      redirectTo,
+      ...(data ? { data } : {}),
+    },
+  });
+  if (error) {
+    const err = new Error(error.message || 'Failed to generate invite link');
+    err.code = 'INVITE_LINK_FAILED';
+    throw err;
+  }
+  const action_link = String(linkData?.properties?.action_link || '').trim();
+  if (!action_link) {
+    const err = new Error('Invite link was generated but no action_link was returned');
+    err.code = 'INVITE_LINK_MISSING';
+    throw err;
+  }
+  return { action_link, email };
+}
+
 async function fetchAuthUsersByIds(admin, userIds) {
   const authByUserId = new Map();
   const ids = [...new Set((userIds || []).filter(Boolean))];

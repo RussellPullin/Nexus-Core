@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { payRateFormFieldsFromRow, payRateOverridesFromFormFields } from '../lib/payrollRates.js';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { staff } from '../lib/api';
 import { STAFF_LIST_STORAGE_KEY, staffProfileQueryFromList } from '../lib/listViewUrl.js';
 
@@ -57,6 +58,7 @@ function ShifterStatusBadge({ status }) {
 }
 
 export default function StaffPage() {
+  const pathPrefix = useProductPathPrefix();
   const [searchParams, setSearchParams] = useSearchParams();
   const listHydratedRef = useRef(false);
   const [list, setList] = useState([]);
@@ -66,6 +68,10 @@ export default function StaffPage() {
   const roleFilter = searchParams.get('role') ?? '';
   const search = q;
   const [showModal, setShowModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importWorking, setImportWorking] = useState(false);
+  const [importResult, setImportResult] = useState(null);
   const [form, setForm] = useState(() => ({
     name: '',
     email: '',
@@ -255,6 +261,25 @@ export default function StaffPage() {
     }
   };
 
+  const handleImportCsv = async (e) => {
+    e.preventDefault();
+    if (!importFile) {
+      alert('Choose a CSV file first.');
+      return;
+    }
+    setImportWorking(true);
+    setImportResult(null);
+    try {
+      const result = await staff.importCsv(importFile);
+      setImportResult(result);
+      await load();
+    } catch (err) {
+      alert(err.message || 'Import failed');
+    } finally {
+      setImportWorking(false);
+    }
+  };
+
   const handleArchive = async (s) => {
     if (!confirm(`Archive ${s.name}? They will be hidden from staff lists but can be restored.`)) return;
     try {
@@ -291,6 +316,9 @@ export default function StaffPage() {
       <div className="page-header">
         <h2>Staff</h2>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button className="btn btn-secondary" onClick={() => { setShowImportModal(true); setImportResult(null); setImportFile(null); }}>
+            Import CSV
+          </button>
           <button className="btn btn-primary" onClick={() => setShowModal(true)}>Add Staff</button>
         </div>
       </div>
@@ -365,7 +393,12 @@ export default function StaffPage() {
           <div className="empty-state">
             <p>No staff yet. Add staff to schedule shifts and assign participants.</p>
             <p style={{ marginTop: '0.5rem', color: '#64748b', fontSize: '0.9rem' }}>Click &quot;Add Staff&quot; below to create support workers. Then click a name to open their profile and assign participants.</p>
-            <button className="btn btn-primary" onClick={() => setShowModal(true)}>Add Staff</button>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" onClick={() => { setShowImportModal(true); setImportResult(null); setImportFile(null); }}>
+                Import CSV
+              </button>
+              <button className="btn btn-primary" onClick={() => setShowModal(true)}>Add Staff</button>
+            </div>
           </div>
         ) : displayList.length === 0 ? (
           <div className="empty-state">
@@ -458,7 +491,7 @@ export default function StaffPage() {
                         </td>
                       )}
                       <td>
-                        <Link to={`/staff/${s.id}?${staffProfileQuery}`} className="participant-name-link">{s.name}</Link>
+                        <Link to={`${pathPrefix}/staff/${s.id}?${staffProfileQuery}`} className="participant-name-link">{s.name}</Link>
                         {s.archived_at && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#64748b' }}>(archived)</span>}
                       </td>
                       <td>{s.role || '-'}</td>
@@ -496,7 +529,7 @@ export default function StaffPage() {
                         </div>
                       </td>
                       <td style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                        <Link to={`/staff/${s.id}?${staffProfileQuery}`} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', textDecoration: 'none' }}>View</Link>
+                        <Link to={`${pathPrefix}/staff/${s.id}?${staffProfileQuery}`} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', textDecoration: 'none' }}>View</Link>
                         {s.archived_at ? (
                           <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }} onClick={() => handleUnarchive(s)}>Restore</button>
                         ) : (
@@ -576,6 +609,50 @@ export default function StaffPage() {
               </div>
               <button type="submit" className="btn btn-primary">Create</button>
               <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showImportModal && (
+        <div className="modal-overlay" onClick={() => setShowImportModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Import Staff from CSV</h3>
+            <p style={{ color: '#64748b', marginTop: 0 }}>
+              Your CSV must include an <strong>email</strong> column. Optional columns: <strong>name</strong>, <strong>phone</strong>, <strong>role</strong>.
+            </p>
+            <form onSubmit={handleImportCsv}>
+              <div className="form-group">
+                <label>CSV file *</label>
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                  required
+                />
+              </div>
+              {importResult && (
+                <div className="card" style={{ marginTop: '0.75rem', padding: '0.75rem', background: '#f8fafc' }}>
+                  <div style={{ display: 'grid', gap: '0.25rem', fontSize: '0.9rem' }}>
+                    <div><strong>Imported</strong>: {importResult.imported ?? 0}</div>
+                    <div><strong>Created</strong>: {importResult.created_count ?? 0}</div>
+                    <div><strong>Updated</strong>: {importResult.updated_count ?? 0}</div>
+                    {(importResult.errors && importResult.errors.length > 0) ? (
+                      <div style={{ marginTop: '0.5rem', color: '#b45309' }}>
+                        <strong>Row issues</strong>: {importResult.errors.length} (invalid/missing emails were skipped)
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                <button type="submit" className="btn btn-primary" disabled={importWorking}>
+                  {importWorking ? 'Importing…' : 'Import'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowImportModal(false)} disabled={importWorking}>
+                  Close
+                </button>
+              </div>
             </form>
           </div>
         </div>

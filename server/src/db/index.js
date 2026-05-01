@@ -1559,6 +1559,50 @@ try {
     if (!e.message?.includes('duplicate column')) console.warn('organisations owner_org_id migration:', e.message);
   }
   try {
+    let oColsProd = db.prepare('PRAGMA table_info(organisations)').all();
+    if (!oColsProd.some((c) => c.name === 'coordination_enabled')) {
+      db.exec('ALTER TABLE organisations ADD COLUMN coordination_enabled INTEGER DEFAULT 0');
+    }
+    oColsProd = db.prepare('PRAGMA table_info(organisations)').all();
+    if (!oColsProd.some((c) => c.name === 'agency_enabled')) {
+      db.exec('ALTER TABLE organisations ADD COLUMN agency_enabled INTEGER DEFAULT 1');
+    }
+    db.exec(`
+      UPDATE organisations
+      SET coordination_enabled = COALESCE(coordination_enabled, 0),
+          agency_enabled = CASE WHEN agency_enabled IS NULL THEN 1 ELSE agency_enabled END
+      WHERE id = owner_org_id
+    `);
+  } catch (e) {
+    if (!e.message?.includes('duplicate column')) console.warn('organisations product flags migration:', e.message);
+  }
+  try {
+    let uColsProd = db.prepare('PRAGMA table_info(users)').all();
+    if (!uColsProd.some((c) => c.name === 'coordination_access')) {
+      db.exec('ALTER TABLE users ADD COLUMN coordination_access INTEGER DEFAULT 1');
+    }
+    uColsProd = db.prepare('PRAGMA table_info(users)').all();
+    if (!uColsProd.some((c) => c.name === 'agency_access')) {
+      db.exec('ALTER TABLE users ADD COLUMN agency_access INTEGER DEFAULT 1');
+    }
+    db.exec(`
+      UPDATE users SET
+        coordination_access = COALESCE(
+          (SELECT o.coordination_enabled FROM organisations o WHERE o.id = users.org_id AND o.owner_org_id = o.id),
+          coordination_access,
+          0
+        ),
+        agency_access = COALESCE(
+          (SELECT o.agency_enabled FROM organisations o WHERE o.id = users.org_id AND o.owner_org_id = o.id),
+          agency_access,
+          1
+        )
+      WHERE org_id IS NOT NULL
+    `);
+  } catch (e) {
+    if (!e.message?.includes('duplicate column')) console.warn('users product access migration:', e.message);
+  }
+  try {
     const pCols2 = db.prepare('PRAGMA table_info(participants)').all();
     if (!pCols2.some((c) => c.name === 'provider_org_id')) {
       db.exec('ALTER TABLE participants ADD COLUMN provider_org_id TEXT REFERENCES organisations(id)');

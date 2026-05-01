@@ -250,7 +250,7 @@ export async function completeSupabaseSignIn(accessToken) {
 /**
  * First admin: create public.organizations, attach profile + SQLite org row.
  */
-export async function registerOrganizationForUser({ accessToken, organizationName }) {
+export async function registerOrganizationForUser({ accessToken, organizationName, productFlags }) {
   const payload = await verifySupabaseAccessToken(accessToken);
   const sub = normalizeSupabaseUserId(payload.sub);
   const admin = getSupabaseServiceRoleClient();
@@ -323,19 +323,25 @@ export async function registerOrganizationForUser({ accessToken, organizationNam
     throw err;
   }
 
+  const prod = productFlags || { coordination_enabled: 0, agency_enabled: 1 };
   const sqliteOrg = db.prepare('SELECT id FROM organisations WHERE id = ?').get(orgId);
   if (!sqliteOrg) {
     db.prepare(`
-      INSERT INTO organisations (id, owner_org_id, name, created_at, updated_at)
-      VALUES (?, ?, ?, datetime('now'), datetime('now'))
-    `).run(orgId, orgId, name);
+      INSERT INTO organisations (id, owner_org_id, name, coordination_enabled, agency_enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `).run(orgId, orgId, name, prod.coordination_enabled, prod.agency_enabled);
   } else {
-    db.prepare(`UPDATE organisations SET name = ?, owner_org_id = COALESCE(owner_org_id, ?), updated_at = datetime('now') WHERE id = ?`).run(name, orgId, orgId);
+    db.prepare(
+      `UPDATE organisations SET name = ?, owner_org_id = COALESCE(owner_org_id, ?), coordination_enabled = ?, agency_enabled = ?, updated_at = datetime('now') WHERE id = ?`
+    ).run(name, orgId, prod.coordination_enabled, prod.agency_enabled, orgId);
   }
 
   const email = String(payload.email || existing?.email || '').trim().toLowerCase();
   const profile = { ...existing, org_id: orgId, role: 'Admin', email: email || existing?.email };
   upsertSqliteUserFromSupabase({ sub: actorUserId, email, profile });
+  db.prepare(
+    `UPDATE users SET coordination_access = ?, agency_access = ? WHERE id = ?`
+  ).run(prod.coordination_enabled, prod.agency_enabled, actorUserId);
 
   return { org_id: orgId, organization_name: name };
 }

@@ -39,7 +39,7 @@ export function staffProfileQueryFromList({ q, archived, role }) {
  * Where "Back to list" / browser back should go from participant profile.
  * Accepts URLSearchParams from the profile page.
  */
-export function backToPreviousListPath(searchParams) {
+export function backToPreviousListPath(searchParams, basePrefix = '') {
   const from = searchParams.get('from');
   if (from === 'directory') {
     const p = new URLSearchParams();
@@ -48,14 +48,14 @@ export function backToPreviousListPath(searchParams) {
     const org = searchParams.get('dirOrg');
     if (org) p.set('org', org);
     const s = p.toString();
-    return s ? `/directory?${s}` : '/directory';
+    return s ? `${basePrefix}/directory?${s}` : `${basePrefix}/directory`;
   }
   const p = new URLSearchParams();
   const lq = searchParams.get('listQ');
   if (lq) p.set('q', lq);
   if (searchParams.get('listA') === '1') p.set('archived', '1');
   const s = p.toString();
-  return s ? `/participants?${s}` : '/participants';
+  return s ? `${basePrefix}/participants?${s}` : `${basePrefix}/participants`;
 }
 
 export function participantProfileBackLabel(searchParams) {
@@ -63,8 +63,8 @@ export function participantProfileBackLabel(searchParams) {
 }
 
 /** Staff profile → staff list */
-export function backToStaffListPath(searchParams) {
-  if (searchParams.get('from') !== 'staff') return '/staff';
+export function backToStaffListPath(searchParams, basePrefix = '') {
+  if (searchParams.get('from') !== 'staff') return `${basePrefix}/staff`;
   const p = new URLSearchParams();
   const lq = searchParams.get('listQ');
   if (lq) p.set('q', lq);
@@ -72,5 +72,5 @@ export function backToStaffListPath(searchParams) {
   const lr = searchParams.get('listR');
   if (lr) p.set('role', lr);
   const s = p.toString();
-  return s ? `/staff?${s}` : '/staff';
+  return s ? `${basePrefix}/staff?${s}` : `${basePrefix}/staff`;
 }

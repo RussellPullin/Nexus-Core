@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { formatDate, formatDateInTimeZone, formatDateLocal, formatTimeInTimeZone } from '../lib/dateUtils';
 import { useSearchParams } from 'react-router-dom';
 import { shifts, participants, staff, appShifts, settings, syncFromExcel, syncFromShifter, learning } from '../lib/api';
@@ -40,6 +41,7 @@ function parseWeekParam(w) {
 }
 
 export default function ShiftsPage() {
+  const pathPrefix = useProductPathPrefix();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [shiftList, setShiftList] = useState([]);
@@ -654,7 +656,7 @@ export default function ShiftsPage() {
             ))}
           </div>
           <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(`/shifts/${shiftSaveWarnings.shiftId}?${shiftDetailPeriodQuery()}`)}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(`${pathPrefix}/shifts/${shiftSaveWarnings.shiftId}?${shiftDetailPeriodQuery()}`)}>
               Open shift
             </button>
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShiftSaveWarnings(null)}>
@@ -731,7 +733,7 @@ export default function ShiftsPage() {
                 No shifts yet. Use Pull from OneDrive Excel or Pull from Shifter DB, or ensure the Progress app can reach your Nexus webhook (see
                 Settings → Shifter).
                 <div style={{ marginTop: '0.6rem' }}>
-                  <button type="button" className="btn btn-secondary" onClick={() => navigate('/settings')}>
+                  <button type="button" className="btn btn-secondary" onClick={() => navigate(`${pathPrefix}/settings`)}>
                     Open Settings
                   </button>
                 </div>
@@ -828,7 +830,7 @@ export default function ShiftsPage() {
                             {(Array.isArray(grp) ? grp : []).map((s) => (
                               <li key={s.id} style={{ marginBottom: '0.25rem' }}>
                                 {s.start_time?.slice(0, 16)} – {s.end_time?.slice(11, 16)} —{' '}
-                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDuplicatesOpen(false); navigate(`/shifts/${s.id}?${shiftDetailPeriodQuery()}`); }}>View</button>
+                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDuplicatesOpen(false); navigate(`${pathPrefix}/shifts/${s.id}?${shiftDetailPeriodQuery()}`); }}>View</button>
                                 <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '0.25rem' }} onClick={() => { setDuplicatesOpen(false); handleEditShift(s); }}>Edit</button>
                                 <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '0.25rem', color: '#b91c1c' }} onClick={() => handleDeleteDuplicateShift(s)} title="Delete this duplicate">Delete</button>
                               </li>
@@ -851,7 +853,7 @@ export default function ShiftsPage() {
                             {(grp.shifts ?? []).map((s) => (
                               <li key={s.id} style={{ marginBottom: '0.25rem' }}>
                                 {s.participant_name} · {s.staff_name} · {s.start_time?.slice(0, 16)} —{' '}
-                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDuplicatesOpen(false); navigate(`/shifts/${s.id}?${shiftDetailPeriodQuery()}`); }}>View</button>
+                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDuplicatesOpen(false); navigate(`${pathPrefix}/shifts/${s.id}?${shiftDetailPeriodQuery()}`); }}>View</button>
                                 <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '0.25rem' }} onClick={() => { setDuplicatesOpen(false); handleEditShift(s); }}>Edit</button>
                                 <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '0.25rem', color: '#b91c1c' }} onClick={() => handleDeleteDuplicateShift(s)} title="Delete this duplicate">Delete</button>
                               </li>
@@ -978,7 +980,7 @@ export default function ShiftsPage() {
                       </td>
                       <td>
                         {s.roster_sent_at && <span className="badge badge-completed" style={{ marginRight: '0.25rem' }} title="Roster sent">Sent</span>}
-                        <button className="btn btn-primary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} onClick={() => navigate(`/shifts/${s.id}?${shiftDetailPeriodQuery()}`)}>View / Charges</button>
+                        <button className="btn btn-primary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} onClick={() => navigate(`${pathPrefix}/shifts/${s.id}?${shiftDetailPeriodQuery()}`)}>View / Charges</button>
                         <a href={shifts.icsUrl(s.id)} download className="btn btn-secondary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} title="Download ICS">ICS</a>
                         <button className="btn btn-secondary" style={{ fontSize: '0.75rem' }} onClick={() => handleEditShift(s)}>Edit</button>
                       </td>
@@ -1114,7 +1116,7 @@ export default function ShiftsPage() {
                   {editingShift ? 'Save & send to staff' : 'Create & send to staff'}
                 </button>
                 {editingShift && (
-                  <button type="button" className="btn btn-primary" onClick={() => { setShowModal(false); setEditingShift(null); navigate(`/shifts/${editingShift.id}?${shiftDetailPeriodQuery()}`); }}>
+                  <button type="button" className="btn btn-primary" onClick={() => { setShowModal(false); setEditingShift(null); navigate(`${pathPrefix}/shifts/${editingShift.id}?${shiftDetailPeriodQuery()}`); }}>
                     View / Charges
                   </button>
                 )}

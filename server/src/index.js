@@ -143,6 +143,7 @@ import nexusGeneratedFormsRouter from './routes/nexusGeneratedForms.js';
 import participantServiceAgreementsRouter from './routes/participantServiceAgreements.js';
 import staffOnboardingPublicRouter from './routes/staffOnboarding.js';
 import { requireAuth } from './middleware/auth.js';
+import { requireAgencyShell } from './middleware/agencyShell.js';
 import { requireAdminOrDelegate, requireCoordinatorOrAdmin } from './middleware/roles.js';
 import { startLearningJobs } from './jobs/learningJobs.js';
 import { mirrorAllShiftsToNexusSupabase } from './services/nexusPublicShiftsSync.service.js';
@@ -252,10 +253,10 @@ app.get('/api/ai/status', requireAuth, async (req, res) => {
   }
 });
 // Also on the root app (in addition to staffRouter) so POST matches even if nested router fails to update.
-app.post('/api/staff/shifter-enabled', requireAuth, requireAdminOrDelegate, handleSetStaffShifterEnabled);
-app.post('/api/staff/set-shifter-enabled', requireAuth, requireAdminOrDelegate, handleSetStaffShifterEnabled);
+app.post('/api/staff/shifter-enabled', requireAuth, requireAdminOrDelegate, requireAgencyShell, handleSetStaffShifterEnabled);
+app.post('/api/staff/set-shifter-enabled', requireAuth, requireAdminOrDelegate, requireAgencyShell, handleSetStaffShifterEnabled);
 app.use('/api/staff', requireAuth, staffRouter);
-app.use('/api/shifts', requireAuth, shiftsRouter);
+app.use('/api/shifts', requireAuth, requireAgencyShell, shiftsRouter);
 app.use('/api/ndis', requireAuth, ndisRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api/progress-notes', requireAuth, progressNotesRouter);
@@ -264,7 +265,7 @@ app.use('/api/onboarding', requireAuth, onboardingRouter);
 app.use('/api/forms', requireAuth, formsRouter);
 app.use('/api/coordinator-tasks', requireAuth, coordinatorTasksRouter);
 app.use('/api/coordinator-cases', requireAuth, requireCoordinatorOrAdmin, coordinatorCasesRouter);
-app.use('/api/app-shifts', requireAuth, appShiftsRouter);
+app.use('/api/app-shifts', requireAuth, requireAgencyShell, appShiftsRouter);
 app.use('/api/billing', requireAuth, requireAdminOrDelegate, billingRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
 app.use('/api/users', usersRouter);

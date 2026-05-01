@@ -1,8 +1,10 @@
+
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, NavLink, Navigate, Link } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, Outlet, useParams, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FeatureFlagProvider } from './context/FeatureFlagContext';
-import { ai } from './lib/api';
+import { PRODUCT_AGENCY, PRODUCT_COORDINATION } from '@nexus-shared/tenantProduct.js';
+import { ai, auth as authApi } from './lib/api';
 import { probeLocalOllama, resolveLocalOllamaBaseUrl } from './lib/localOllama.js';
 import ParticipantsPage from './pages/ParticipantsPage';
 import ParticipantProfile from './pages/ParticipantProfile';
@@ -26,18 +28,42 @@ import StaffOnboardingFormPage from './pages/StaffOnboardingFormPage';
 import StaffRenewalPage from './pages/StaffRenewalPage';
 import './App.css';
 
-/**
- * Feature flags: add keys in server/src/config/featureFlags.js, then wrap UI with
- * FeatureGate / FeatureProtectedRoute from ./components/FeatureGate (see that file).
- */
 const EMAIL_BANNER_KEY = 'nexus_email_banner_dismissed';
 
-function Layout({ children }) {
+function useSyncActiveProduct(productSurface) {
+  const { user, refreshUser } = useAuth();
+  useEffect(() => {
+    if (!user?.id || !productSurface) return;
+    if (productSurface === PRODUCT_COORDINATION && !user.can_use_coordination) return;
+    if (productSurface === PRODUCT_AGENCY && !user.can_use_agency) return;
+    if (user.active_product === productSurface) return;
+    let cancelled = false;
+    authApi.setActiveProduct(productSurface).then(() => {
+      if (!cancelled) refreshUser();
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.id, user?.active_product, productSurface, user?.can_use_coordination, user?.can_use_agency, refreshUser]);
+}
+
+function ProductLayout() {
+  const { productSurface } = useParams();
+  useSyncActiveProduct(productSurface);
+  return (
+    <Layout productSurface={productSurface}>
+      <Outlet />
+    </Layout>
+  );
+}
+
+function Layout({ productSurface, children }) {
   const { user, logout, canManageUsers, canAccessCaseTasks } = useAuth();
   const [ollamaOk, setOllamaOk] = useState(null);
   const [emailBannerDismissed, setEmailBannerDismissed] = useState(() =>
     typeof sessionStorage !== 'undefined' && sessionStorage.getItem(EMAIL_BANNER_KEY) === '1'
   );
+  const prefix = productSurface ? `/${productSurface}` : '';
+  const isAgency = productSurface === PRODUCT_AGENCY;
+
   useEffect(() => {
     if (!user) {
       setOllamaOk(null);
@@ -60,9 +86,7 @@ function Layout({ children }) {
         if (!cancel) setOllamaOk(false);
       }
     })();
-    return () => {
-      cancel = true;
-    };
+    return () => { cancel = true; };
   }, [user?.id, user?.ollama_local_base_url]);
 
   const needsEmailOauth =
@@ -74,53 +98,83 @@ function Layout({ children }) {
     user.email_relay_configured === false;
   const showEmailBanner = Boolean(user) && !emailBannerDismissed && (needsEmailOauth || needsEmailRelay);
 
+  const brandTitle = productSurface === PRODUCT_COORDINATION ? 'Nexus Coordination' : 'Nexus Agency';
+  const brandTagline =
+    productSurface === PRODUCT_COORDINATION
+      ? 'NDIS planning, budgets & coordination.'
+      : 'Shifts, staff & service delivery.';
+
+  const showProductSwitcher = Boolean(user?.can_use_coordination && user?.can_use_agency);
+
   return (
     <div className="app">
       <nav className="sidebar">
         <div className="logo-block">
-          <img src="/logo.png" alt="NexusCore" className="logo-img" />
-          <p className="logo-tagline">Where paperwork disappears.</p>
+          <img src="/logo.png" alt={brandTitle} className="logo-img" />
+          <p className="logo-tagline" style={{ fontWeight: 600 }}>{brandTitle}</p>
+          <p className="logo-tagline" style={{ marginTop: 4, fontSize: '0.8rem' }}>{brandTagline}</p>
         </div>
+        {showProductSwitcher && (
+          <div style={{ padding: '0 0.75rem 0.75rem', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase' }}>Switch product</span>
+            <NavLink
+              to={`/${PRODUCT_COORDINATION}/participants`}
+              className={productSurface === PRODUCT_COORDINATION ? 'nav-link active' : 'nav-link'}
+            >
+              Nexus Coordination
+            </NavLink>
+            <NavLink
+              to={`/${PRODUCT_AGENCY}/participants`}
+              className={productSurface === PRODUCT_AGENCY ? 'nav-link active' : 'nav-link'}
+            >
+              Nexus Agency
+            </NavLink>
+          </div>
+        )}
         <div className="nav-links">
-          <NavLink to="/participants" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+          <NavLink to={`${prefix}/participants`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Participants
           </NavLink>
-          <NavLink to="/directory" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+          <NavLink to={`${prefix}/directory`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Directory
           </NavLink>
-          <NavLink to="/staff" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            Staff
-          </NavLink>
-          <NavLink to="/shifts" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            Shifts
-          </NavLink>
-          <NavLink to="/ndis" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+          {isAgency && (
+            <>
+              <NavLink to={`${prefix}/staff`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                Staff
+              </NavLink>
+              <NavLink to={`${prefix}/shifts`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+                Shifts
+              </NavLink>
+            </>
+          )}
+          <NavLink to={`${prefix}/ndis`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             NDIS Pricing
           </NavLink>
-          <NavLink to="/financial" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+          <NavLink to={`${prefix}/financial`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Financial
           </NavLink>
           {canAccessCaseTasks && (
-            <NavLink to="/case-tasks" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={`${prefix}/case-tasks`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               Client Cases
             </NavLink>
           )}
-          <NavLink to="/forms" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+          <NavLink to={`${prefix}/forms`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Forms
           </NavLink>
           {canManageUsers && (
-            <NavLink to="/admin" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={`${prefix}/admin`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               Admin
             </NavLink>
           )}
           {user?.is_super_admin && (
-            <NavLink to="/admin/feature-flags" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <NavLink to={`${prefix}/admin/feature-flags`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               Feature flags
             </NavLink>
           )}
         </div>
         <div className="nav-footer">
-          <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+          <NavLink to={`${prefix}/settings`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Settings
           </NavLink>
           <span
@@ -157,9 +211,11 @@ function Layout({ children }) {
                 ? 'Your email connection needs to be renewed. Reconnect in Settings to keep sending rosters and messages.'
                 : needsEmailRelay
                   ? 'Your inbox is connected, but this server is not set up to send outgoing mail yet. Ask your administrator to finish email setup.'
-                  : 'Connect your email so you can send rosters and staff messages from your own address.'}
+                  : isAgency
+                    ? 'Connect your email so you can send rosters and staff messages from your own address.'
+                    : 'Connect your email so you can send participant-related mail from your own address.'}
             </span>
-            <Link to="/settings" className="btn btn-primary" style={{ textDecoration: 'none' }}>
+            <Link to={`${prefix}/settings`} className="btn btn-primary" style={{ textDecoration: 'none' }}>
               {user.email_reconnect_required
                 ? 'Reconnect email'
                 : needsEmailRelay
@@ -180,7 +236,7 @@ function Layout({ children }) {
             )}
           </div>
         )}
-        {children}
+        {children ?? <Outlet />}
       </main>
     </div>
   );
@@ -193,6 +249,43 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+function DefaultProductRedirect() {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.can_use_agency) return <Navigate to={`/${PRODUCT_AGENCY}/participants`} replace />;
+  if (user.can_use_coordination) return <Navigate to={`/${PRODUCT_COORDINATION}/participants`} replace />;
+  return <Navigate to="/login" replace />;
+}
+
+function LegacyPathRedirect() {
+  const { user } = useAuth();
+  const location = useLocation();
+  if (!user) return <Navigate to="/login" replace />;
+  const product =
+    user.active_product === PRODUCT_COORDINATION && user.can_use_coordination
+      ? PRODUCT_COORDINATION
+      : user.can_use_agency
+        ? PRODUCT_AGENCY
+        : user.can_use_coordination
+          ? PRODUCT_COORDINATION
+          : PRODUCT_AGENCY;
+  const pathAfterRoot = location.pathname.replace(/^\/+/, '') || '';
+  return <Navigate to={`/${product}/${pathAfterRoot}${location.search || ''}`} replace />;
+}
+
+function ProductAccessGate() {
+  const { productSurface } = useParams();
+  const { user } = useAuth();
+  if (!user) return null;
+  if (productSurface === PRODUCT_COORDINATION && !user.can_use_coordination) {
+    return <Navigate to={user.can_use_agency ? `/${PRODUCT_AGENCY}/participants` : '/login'} replace />;
+  }
+  if (productSurface === PRODUCT_AGENCY && !user.can_use_agency) {
+    return <Navigate to={user.can_use_coordination ? `/${PRODUCT_COORDINATION}/participants` : '/login'} replace />;
+  }
+  return <Outlet />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -203,24 +296,43 @@ export default function App() {
           <Route path="/setup-org" element={<SetupOrgPage />} />
           <Route path="/staff-onboarding/:token" element={<StaffOnboardingFormPage />} />
           <Route path="/staff-onboarding/renew/:token" element={<StaffRenewalPage />} />
-          <Route path="/" element={<ProtectedRoute><Layout><ParticipantsPage /></Layout></ProtectedRoute>} />
-          <Route path="/participants" element={<ProtectedRoute><Layout><ParticipantsPage /></Layout></ProtectedRoute>} />
-          <Route path="/participants/:id" element={<ProtectedRoute><Layout><ParticipantProfile /></Layout></ProtectedRoute>} />
-          <Route path="/directory" element={<ProtectedRoute><Layout><DirectoryPage /></Layout></ProtectedRoute>} />
-          <Route path="/staff" element={<ProtectedRoute><Layout><StaffPage /></Layout></ProtectedRoute>} />
-          <Route path="/staff/:id" element={<ProtectedRoute><Layout><StaffProfile /></Layout></ProtectedRoute>} />
-          <Route path="/shifts/availability" element={<ProtectedRoute><Layout><StaffAvailabilityReportPage /></Layout></ProtectedRoute>} />
-          <Route path="/shifts/:id" element={<ProtectedRoute><Layout><ShiftDetailPage /></Layout></ProtectedRoute>} />
-          <Route path="/shifts" element={<ProtectedRoute><Layout><ShiftsPage /></Layout></ProtectedRoute>} />
-          <Route path="/ndis" element={<ProtectedRoute><Layout><NDISPage /></Layout></ProtectedRoute>} />
-          <Route path="/financial" element={<ProtectedRoute><Layout><FinancialPage /></Layout></ProtectedRoute>} />
-          <Route path="/case-tasks" element={<ProtectedRoute><Layout><CaseTasksPage /></Layout></ProtectedRoute>} />
-          <Route path="/onboarding" element={<ProtectedRoute><Layout><ParticipantsPage /></Layout></ProtectedRoute>} />
-          <Route path="/onboarding/:id" element={<ProtectedRoute><Layout><OnboardingPage /></Layout></ProtectedRoute>} />
-          <Route path="/forms" element={<ProtectedRoute><Layout><FormsPage /></Layout></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><Layout><SettingsPage /></Layout></ProtectedRoute>} />
-          <Route path="/admin" element={<ProtectedRoute><Layout><AdminPage /></Layout></ProtectedRoute>} />
-          <Route path="/admin/feature-flags" element={<ProtectedRoute><Layout><FeatureFlagsAdminPage /></Layout></ProtectedRoute>} />
+
+          <Route path="/participants/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/directory" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/staff/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/shifts/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/ndis" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/financial" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/case-tasks" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/onboarding/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/forms" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/admin/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+
+          <Route path="/" element={<ProtectedRoute><DefaultProductRedirect /></ProtectedRoute>} />
+
+          <Route path="/:productSurface(coordination|agency)" element={<ProtectedRoute><ProductAccessGate /></ProtectedRoute>}>
+            <Route element={<ProductLayout />}>
+              <Route index element={<Navigate to="participants" replace />} />
+              <Route path="participants" element={<ParticipantsPage />} />
+              <Route path="participants/:id" element={<ParticipantProfile />} />
+              <Route path="directory" element={<DirectoryPage />} />
+              <Route path="staff" element={<StaffPage />} />
+              <Route path="staff/:id" element={<StaffProfile />} />
+              <Route path="shifts/availability" element={<StaffAvailabilityReportPage />} />
+              <Route path="shifts/:id" element={<ShiftDetailPage />} />
+              <Route path="shifts" element={<ShiftsPage />} />
+              <Route path="ndis" element={<NDISPage />} />
+              <Route path="financial" element={<FinancialPage />} />
+              <Route path="case-tasks" element={<CaseTasksPage />} />
+              <Route path="onboarding" element={<ParticipantsPage />} />
+              <Route path="onboarding/:id" element={<OnboardingPage />} />
+              <Route path="forms" element={<FormsPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="admin" element={<AdminPage />} />
+              <Route path="admin/feature-flags" element={<FeatureFlagsAdminPage />} />
+            </Route>
+          </Route>
         </Routes>
         </FeatureFlagProvider>
       </AuthProvider>

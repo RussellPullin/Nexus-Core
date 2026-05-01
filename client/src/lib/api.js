@@ -88,13 +88,26 @@ export const microsoftDrive = {
 
 export const auth = {
   me: () => fetchApi('/auth/me'),
+  setActiveProduct: (active_product) =>
+    fetchApi('/auth/active-product', { method: 'POST', body: JSON.stringify({ active_product }) }),
   login: (email, password) => fetchApi('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   registrationInfo: () => fetchApi('/auth/registration-info'),
   /** Local sign-up: `organization_name` is required (creates org for first user, or joins existing tenant by name). */
-  register: (email, password, name, organization_name) =>
+  register: (email, password, name, organization_name, products) =>
     fetchApi('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name, organization_name: organization_name || undefined })
+      body: JSON.stringify({
+        email,
+        password,
+        name,
+        organization_name: organization_name || undefined,
+        ...(products && typeof products === 'object'
+          ? {
+              coordination_enabled: products.coordination_enabled,
+              agency_enabled: products.agency_enabled
+            }
+          : {})
+      })
     }),
   logout: () => fetchApi('/auth/logout', { method: 'POST' }),
   updateSettings: (data) => fetchApi('/auth/settings', { method: 'PUT', body: JSON.stringify(data) }),
@@ -105,8 +118,20 @@ export const auth = {
     fetch(`${API}/auth/supabase/public-config`, { credentials: 'include' }).then((r) => r.json()),
   supabaseSession: (access_token) =>
     fetchApi('/auth/supabase/session', { method: 'POST', body: JSON.stringify({ access_token }) }),
-  supabaseRegisterOrg: (access_token, organization_name) =>
-    fetchApi('/auth/supabase/register-org', { method: 'POST', body: JSON.stringify({ access_token, organization_name }) }),
+  supabaseRegisterOrg: (access_token, organization_name, products) =>
+    fetchApi('/auth/supabase/register-org', {
+      method: 'POST',
+      body: JSON.stringify({
+        access_token,
+        organization_name,
+        ...(products && typeof products === 'object'
+          ? {
+              coordination_enabled: products.coordination_enabled,
+              agency_enabled: products.agency_enabled
+            }
+          : {})
+      })
+    }),
   supabaseInviteStaff: (email, full_name) =>
     fetchApi('/auth/supabase/invite-staff', { method: 'POST', body: JSON.stringify({ email, full_name: full_name || undefined }) }),
   getShifterOrgLink: () => fetchApi('/auth/supabase/shifter-org-link'),
@@ -455,6 +480,21 @@ export const staff = {
   /** Syncs public.profiles.shifter_enabled in Supabase (matched by staff email). */
   setShifterEnabled: (id, shifter_enabled) =>
     fetchApi('/staff/set-shifter-enabled', { method: 'POST', body: JSON.stringify({ staff_id: id, shifter_enabled }) }),
+  importCsv: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API}/staff/import-csv`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Import failed');
+    }
+    return text ? JSON.parse(text) : null;
+  },
   sendShifterInvites: (staff_ids) =>
     fetchApi('/staff/shifter-invites', { method: 'POST', body: JSON.stringify({ staff_ids }) })
 };

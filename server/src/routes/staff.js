@@ -7,6 +7,7 @@ import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
+import { requireAgencyShell } from '../middleware/agencyShell.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from '../services/notification.service.js';
 import { pullSummaryFromExcel } from '../services/excelPull.service.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
@@ -17,6 +18,7 @@ import {
   sendShifterInvitesForStaffIds,
   isSupabaseShifterConfigured,
   provisionNexusSupabaseProfileForStaff,
+  generateShifterInviteLinkForEmail,
 } from '../services/supabaseStaffShifter.service.js';
 import {
   scheduleRemoveShiftFromNexusSupabase,
@@ -86,6 +88,92 @@ const complianceUpload = multer({
 });
 
 const router = Router();
+
+function decodeCsvBuffer(buffer) {
+  let text = buffer.toString('utf-8').replace(/^\uFEFF/, '');
+  if (text.includes('\uFFFD')) {
+    text = buffer.toString('latin1');
+  }
+  return text;
+}
+
+function detectCsvDelimiter(firstLine) {
+  if (!firstLine) return ',';
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semicolonCount = (firstLine.match(/;/g) || []).length;
+  return semicolonCount > commaCount ? ';' : ',';
+}
+
+function parseCSVLine(line, delimiter = ',') {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (c === delimiter && !inQuotes) {
+      result.push(current.trim().replace(/^"|"$/g, ''));
+      current = '';
+    } else {
+      current += c;
+    }
+  }
+  result.push(current.trim().replace(/^"|"$/g, ''));
+  return result;
+}
+
+function fileToCsvRows(buffer) {
+  const text = decodeCsvBuffer(buffer);
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length === 0) return [];
+  const delimiter = detectCsvDelimiter(lines[0]);
+  return lines.map((line) => parseCSVLine(line, delimiter));
+}
+
+function normHeader(h) {
+  return String(h || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+}
+
+function normalizeEmailForImport(e) {
+  return String(e || '').trim().toLowerCase();
+}
+
+function isValidEmailBasic(email) {
+  const s = String(email || '').trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+function nameFromEmail(email) {
+  const s = String(email || '').trim();
+  const local = s.includes('@') ? s.split('@')[0] : s;
+  const cleaned = local.replace(/[._-]+/g, ' ').trim();
+  return cleaned
+    ? cleaned.replace(/\s+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    : 'Staff member';
+}
+
+function findColumnIndex(headersNorm, aliases) {
+  for (let i = 0; i < headersNorm.length; i++) {
+    if (aliases.has(headersNorm[i])) return i;
+  }
+  for (let i = 0; i < headersNorm.length; i++) {
+    const h = headersNorm[i];
+    for (const a of aliases) {
+      if (h === a) return i;
+      if (a.length >= 4 && h.includes(a)) return i;
+    }
+  }
+  return -1;
+}
 
 function requesterOrgId(userId) {
   if (!userId) return null;
@@ -193,17 +281,87 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.post('/shifter-invites', requireAdminOrDelegate, async (req, res) => {
+router.post('/shifter-invites', requireAdminOrDelegate, requireAgencyShell, async (req, res) => {
   try {
     const { staff_ids: staffIds } = req.body || {};
     if (!Array.isArray(staffIds) || staffIds.length === 0) {
       return res.status(400).json({ error: 'staff_ids array required' });
     }
+    const userId = req.session?.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    if (!isEmailConfiguredForUser(userId)) {
+      return res.status(400).json({
+        error: 'Connect your email in Settings to send Shifter invites.',
+        code: 'EMAIL_NOT_CONNECTED',
+      });
+    }
     const orgId = requesterOrgId(req.session?.user?.id);
     const getStaffById = (id) => visibleStaffById(id, orgId);
     const nexusOrgId = nexusOrgIdForSessionUser(req.session?.user?.id);
+
+    const redirectTo =
+      (process.env.SHIFTER_INVITE_REDIRECT_URL || process.env.INVITE_REDIRECT_URL || '').trim() ||
+      'shifter://';
+    const playStoreUrl = String(process.env.SHIFTER_PLAY_STORE_URL || '').trim();
+    const appStoreUrl = String(process.env.SHIFTER_APP_STORE_URL || '').trim();
+    const orgName =
+      (orgId ? db.prepare('SELECT name FROM organisations WHERE id = ?').get(orgId)?.name : null) ||
+      process.env.COMPANY_NAME ||
+      'Shifter';
+
+    // Enable in profiles + resolve Shifter linkage (existing behavior)
     const results = await sendShifterInvitesForStaffIds(staffIds, getStaffById, { nexusOrgId, db });
-    res.json({ results });
+
+    // Send actual invite emails with store links + Supabase action_link
+    const enriched = [];
+    for (const r of results) {
+      if (!r?.ok) {
+        enriched.push(r);
+        continue;
+      }
+      const s = getStaffById(r.staff_id);
+      if (!s?.email?.trim()) {
+        enriched.push({ ...r, ok: false, error: 'Staff member has no email address', code: 'NO_EMAIL' });
+        continue;
+      }
+      try {
+        const { action_link } = await generateShifterInviteLinkForEmail(s.email, {
+          redirectTo,
+          nexusOrgId,
+          profileRole: 'Support Worker',
+        });
+
+        const subject = `You're invited to Shifter – ${orgName}`;
+        const lines = [
+          `Hi ${s.name || 'there'},`,
+          '',
+          `${orgName} has invited you to use Shifter to record shifts and progress notes.`,
+          '',
+          '1) Download Shifter:',
+          playStoreUrl ? `- Android: ${playStoreUrl}` : '- Android: (ask your manager for the download link)',
+          appStoreUrl ? `- iPhone: ${appStoreUrl}` : '- iPhone: (ask your manager for the download link)',
+          '',
+          '2) Create your account / accept the invite:',
+          action_link,
+          '',
+          'Tip: Open the invite link on the same phone you installed Shifter on. It will open the app and let you set a password.',
+          '',
+          'If you have issues, contact your manager.',
+        ];
+        await sendEmailViaRelay(userId, s.email, subject, lines.join('\n'), null, null);
+
+        enriched.push({ ...r, invite_email_sent: true });
+      } catch (e) {
+        enriched.push({
+          ...r,
+          invite_email_sent: false,
+          email_error: e?.message || String(e),
+          code: e?.code,
+        });
+      }
+    }
+
+    res.json({ results: enriched });
   } catch (err) {
     if (err.code === 'SUPABASE_NOT_CONFIGURED') {
       return res.status(503).json({ error: err.message, code: err.code });
@@ -254,8 +412,130 @@ export async function handleSetStaffShifterEnabled(req, res) {
 }
 
 // Static paths (must stay before any `/:id` route so they are not captured as an id).
-router.post('/shifter-enabled', requireAdminOrDelegate, handleSetStaffShifterEnabled);
-router.post('/set-shifter-enabled', requireAdminOrDelegate, handleSetStaffShifterEnabled);
+// Import staff from CSV (email required). Creates/updates staff under the requester's org.
+const staffCsvUpload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
+router.post('/import-csv', requireAdminOrDelegate, staffCsvUpload.single('file'), async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const orgId = requesterOrgId(userId);
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
+    if (!req.file?.buffer) return res.status(400).json({ error: 'CSV file required (multipart field "file")' });
+
+    const rows = fileToCsvRows(req.file.buffer);
+    if (rows.length < 2) {
+      return res.status(400).json({ error: 'CSV must include a header row and at least one data row.' });
+    }
+
+    const headers = rows[0].map((c) => String(c || '').trim());
+    const headersNorm = headers.map(normHeader);
+    const idxEmail = findColumnIndex(headersNorm, new Set(['email', 'email_address', 'e_mail', 'mail']));
+    const idxName = findColumnIndex(headersNorm, new Set(['name', 'full_name', 'staff_name', 'employee_name']));
+    const idxPhone = findColumnIndex(headersNorm, new Set(['phone', 'mobile', 'phone_number', 'contact_number']));
+    const idxRole = findColumnIndex(headersNorm, new Set(['role', 'position', 'job_title', 'title']));
+
+    if (idxEmail < 0) {
+      return res.status(400).json({
+        error: 'Could not find an email column. Name a column email (or email_address).',
+        headers,
+      });
+    }
+
+    const dataRows = rows.slice(1);
+    const items = [];
+    const errors = [];
+    for (let i = 0; i < dataRows.length; i++) {
+      const line = i + 2;
+      const row = dataRows[i];
+      if (!row || row.every((c) => String(c || '').trim() === '')) continue;
+      const email = normalizeEmailForImport(row[idxEmail] || '');
+      if (!email) {
+        errors.push({ line, message: 'Missing email' });
+        continue;
+      }
+      if (!isValidEmailBasic(email)) {
+        errors.push({ line, message: `Invalid email: "${email}"` });
+        continue;
+      }
+      const name = idxName >= 0 ? String(row[idxName] || '').trim() : '';
+      const phone = idxPhone >= 0 ? String(row[idxPhone] || '').trim() : '';
+      const role = idxRole >= 0 ? String(row[idxRole] || '').trim() : '';
+      items.push({ email, name, phone, role });
+    }
+
+    if (items.length === 0) {
+      return res.status(400).json({ error: 'No valid rows found (email required).', errors });
+    }
+
+    const uniqueByEmail = new Map();
+    for (const it of items) {
+      if (!uniqueByEmail.has(it.email)) uniqueByEmail.set(it.email, it);
+    }
+    const unique = [...uniqueByEmail.values()];
+
+    const insert = db.prepare(`
+      INSERT INTO staff (id, org_id, name, email, phone, notify_email, notify_sms, role, employment_type, onboarding_status)
+      VALUES (?, ?, ?, ?, ?, 1, 0, ?, 'employee', 'not_started')
+    `);
+    const update = db.prepare(`
+      UPDATE staff
+      SET name = COALESCE(NULLIF(?, ''), name),
+          phone = COALESCE(NULLIF(?, ''), phone),
+          role = COALESCE(NULLIF(?, ''), role),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `);
+
+    const created = [];
+    const updated = [];
+    const tx = db.transaction(() => {
+      for (const it of unique) {
+        const existing = db
+          .prepare('SELECT id FROM staff WHERE org_id = ? AND lower(email) = lower(?) LIMIT 1')
+          .get(orgId, it.email);
+        if (existing?.id) {
+          update.run(it.name, it.phone, it.role, existing.id);
+          updated.push(existing.id);
+          continue;
+        }
+        const id = uuidv4();
+        const finalName = it.name || nameFromEmail(it.email);
+        insert.run(id, orgId, finalName, it.email, it.phone || null, it.role || null);
+        created.push(id);
+      }
+    });
+    tx();
+
+    // Provision Supabase profile rows for these emails (best-effort)
+    const nexusOrgId = nexusOrgIdForSessionUser(userId);
+    const provisioned = [];
+    const provisionErrors = [];
+    for (const it of unique) {
+      try {
+        const out = await provisionNexusSupabaseProfileForStaff(it.email, nexusOrgId, { staffRole: it.role });
+        provisioned.push({ email: it.email, ...out });
+      } catch (e) {
+        provisionErrors.push({ email: it.email, error: e?.message || String(e) });
+      }
+    }
+
+    res.json({
+      ok: true,
+      imported: unique.length,
+      created_count: created.length,
+      updated_count: updated.length,
+      errors,
+      provisioned,
+      provision_errors: provisionErrors,
+    });
+  } catch (err) {
+    console.error('[staff import-csv]', err);
+    res.status(500).json({ error: err.message || 'Import failed' });
+  }
+});
+
+router.post('/shifter-enabled', requireAdminOrDelegate, requireAgencyShell, handleSetStaffShifterEnabled);
+router.post('/set-shifter-enabled', requireAdminOrDelegate, requireAgencyShell, handleSetStaffShifterEnabled);
 
 router.post('/send-test-email', async (req, res) => {
   try {
@@ -297,8 +577,8 @@ router.post('/send-test-email', async (req, res) => {
   }
 });
 
-router.patch('/:id/shifter-enabled', requireAdminOrDelegate, handleSetStaffShifterEnabled);
-router.put('/:id/shifter-enabled', requireAdminOrDelegate, handleSetStaffShifterEnabled);
+router.patch('/:id/shifter-enabled', requireAdminOrDelegate, requireAgencyShell, handleSetStaffShifterEnabled);
+router.put('/:id/shifter-enabled', requireAdminOrDelegate, requireAgencyShell, handleSetStaffShifterEnabled);
 
 router.get('/:id', async (req, res) => {
   const orgId = requesterOrgId(req.session?.user?.id);

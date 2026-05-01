@@ -44,6 +44,7 @@ function downloadCsv(data) {
 }
 
 export default function StaffAvailabilityReportPage() {
+  const pathPrefix = useProductPathPrefix();
   const def = getDefaultRange();
   const [start, setStart] = useState(def.start);
   const [end, setEnd] = useState(def.end);
@@ -134,7 +135,7 @@ export default function StaffAvailabilityReportPage() {
                       <td>{c.end_time?.slice(11, 16)}</td>
                       <td style={{ fontSize: '0.85rem' }}>{c.message}</td>
                       <td>
-                        <Link to={`/shifts/${c.shift_id}`} className="btn btn-secondary btn-sm">View</Link>
+                        <Link to={`${pathPrefix}/shifts/${c.shift_id}`} className="btn btn-secondary btn-sm">View</Link>
                       </td>
                     </tr>
                   ))}

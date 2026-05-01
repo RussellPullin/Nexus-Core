@@ -55,8 +55,8 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  const register = async (email, password, name, organization_name) => {
-    const data = await authApi.register(email, password, name, organization_name);
+  const register = async (email, password, name, organization_name, products) => {
+    const data = await authApi.register(email, password, name, organization_name, products);
     setUser(data?.user ?? null);
     return data;
   };

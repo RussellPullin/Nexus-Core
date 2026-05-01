@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { shifts, ndis, invoices, learning } from '../lib/api';
 import { formatDate, formatDateLocal } from '../lib/dateUtils';
 import { getEffectiveNdisRate } from '../lib/ndisRates';
@@ -36,7 +37,7 @@ function toDatetimeLocal(dt) {
 }
 
 /** Restore Shifts list week + view (planner vs table) from URL or fallbacks. */
-function buildShiftsListPath(searchParams, shift) {
+function buildShiftsListPath(searchParams, shift, basePrefix = '') {
   const listV = searchParams.get('listView') === 'table' ? 'table' : 'planner';
   let week = searchParams.get('listWeek');
   if (!week || !/^\d{4}-\d{2}-\d{2}$/.test(week)) {
@@ -48,11 +49,12 @@ function buildShiftsListPath(searchParams, shift) {
     }
   }
   if (!week) week = formatDateLocal(mondayOfWeekContaining(new Date()));
-  return `/shifts?week=${encodeURIComponent(week)}&view=${encodeURIComponent(listV)}`;
+  return `${basePrefix}/shifts?week=${encodeURIComponent(week)}&view=${encodeURIComponent(listV)}`;
 }
 
 export default function ShiftDetailPage() {
   const { id } = useParams();
+  const pathPrefix = useProductPathPrefix();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const periodStartQ = searchParams.get('periodStart');
@@ -102,7 +104,7 @@ export default function ShiftDetailPage() {
     try {
       await shifts.hardDelete(shift.id);
       alert('Shift deleted.');
-      navigate(buildShiftsListPath(searchParams, null));
+      navigate(buildShiftsListPath(searchParams, null, pathPrefix));
     } catch (err) {
       alert(err?.message || 'Failed to delete shift');
     }
@@ -430,7 +432,7 @@ export default function ShiftDetailPage() {
               Retry
             </button>
           )}
-          <button type="button" className="btn btn-secondary" onClick={() => navigate(buildShiftsListPath(searchParams, null))}>
+          <button type="button" className="btn btn-secondary" onClick={() => navigate(buildShiftsListPath(searchParams, null, pathPrefix))}>
             Back to Shifts
           </button>
         </div>
@@ -447,7 +449,7 @@ export default function ShiftDetailPage() {
               type="button"
               className="btn btn-secondary"
               style={{ marginRight: '0.5rem', marginBottom: '0.5rem' }}
-              onClick={() => navigate(buildShiftsListPath(searchParams, shift))}
+              onClick={() => navigate(buildShiftsListPath(searchParams, shift, pathPrefix))}
             >
               ← Back
             </button>
@@ -566,7 +568,7 @@ export default function ShiftDetailPage() {
                       className="btn btn-secondary"
                       style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
                       disabled={!prevShift}
-                      onClick={() => prevShift && navigate(`/shifts/${prevShift.id}?${periodQueryStr}`)}
+                      onClick={() => prevShift && navigate(`${pathPrefix}/shifts/${prevShift.id}?${periodQueryStr}`)}
                       title="Previous shift in this week (same order as Shifts table)"
                     >
                       ← Previous
@@ -576,7 +578,7 @@ export default function ShiftDetailPage() {
                       className="btn btn-secondary"
                       style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
                       disabled={!nextShift}
-                      onClick={() => nextShift && navigate(`/shifts/${nextShift.id}?${periodQueryStr}`)}
+                      onClick={() => nextShift && navigate(`${pathPrefix}/shifts/${nextShift.id}?${periodQueryStr}`)}
                       title="Next shift in this week (same order as Shifts table)"
                     >
                       Next →
@@ -711,7 +713,7 @@ export default function ShiftDetailPage() {
 
       <div className="card" style={{ width: 280, flexShrink: 0 }}>
         <h3 style={{ marginTop: 0 }}>Session Details</h3>
-        <p><strong>Participant:</strong><br /><Link to={`/participants/${shift.participant_id}`}>{shift.participant_name}</Link></p>
+        <p><strong>Participant:</strong><br /><Link to={`${pathPrefix}/participants/${shift.participant_id}`}>{shift.participant_name}</Link></p>
         <p><strong>Staff:</strong><br />{shift.staff_name}</p>
         <p><strong>Date:</strong><br />{formatDate(shift.start_time)}</p>
         <p><strong>Time:</strong><br />

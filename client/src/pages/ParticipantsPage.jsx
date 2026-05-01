@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { PARTICIPANTS_LIST_STORAGE_KEY, participantsProfileQueryFromList } from '../lib/listViewUrl.js';
 import { useAuth } from '../context/AuthContext';
 import { useFeatureFlag } from '../context/FeatureFlagContext';
@@ -39,6 +40,7 @@ const defaultForm = () => ({
 });
 
 export default function ParticipantsPage() {
+  const pathPrefix = useProductPathPrefix();
   const { canManageUsers, isAdmin, user } = useAuth();
   const { enabled: aiStaffLocalOllama } = useFeatureFlag('ai_staff_local_ollama');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -207,7 +209,7 @@ export default function ParticipantsPage() {
         setIntakePreview(null);
         load().catch((e) => console.error(e));
         if (result?.participant?.id) {
-          window.location.href = `/participants/${result.participant.id}`;
+          window.location.href = `${pathPrefix}/participants/${result.participant.id}`;
         }
       } catch (err) {
         alert(err.message || 'Could not create participant.');
@@ -229,7 +231,7 @@ export default function ParticipantsPage() {
       setIntakePreview(null);
       load().catch((e) => console.error(e));
       if (result?.participant?.id) {
-        window.location.href = `/participants/${result.participant.id}`;
+        window.location.href = `${pathPrefix}/participants/${result.participant.id}`;
       }
     } catch (err) {
       alert(err.message || 'Could not create participant.');
@@ -425,15 +427,15 @@ export default function ParticipantsPage() {
                 {list.map((p) => (
                   <tr key={p.id} style={p.archived_at ? { opacity: 0.7 } : undefined}>
                     <td>
-                      <Link to={`/participants/${p.id}?${profileListQuery}`} className="participant-name-link">{p.name}</Link>
+                      <Link to={`${pathPrefix}/participants/${p.id}?${profileListQuery}`} className="participant-name-link">{p.name}</Link>
                       {p.archived_at && <span className="archived-badge">(archived)</span>}
                     </td>
                     <td>{p.ndis_number || '-'}</td>
                     <td>{p.management_type === 'plan' ? 'Plan' : p.management_type === 'ndia' ? 'NDIA' : 'Self'}</td>
                     <td>{p.phone || p.email || '-'}</td>
                     <td className="participant-actions">
-                      <Link to={`/participants/${p.id}?${profileListQuery}`} className="btn btn-secondary btn-sm">View</Link>
-                      <Link to={`/onboarding/${p.id}`} className="btn btn-secondary btn-sm">Onboarding</Link>
+                      <Link to={`${pathPrefix}/participants/${p.id}?${profileListQuery}`} className="btn btn-secondary btn-sm">View</Link>
+                      <Link to={`${pathPrefix}/onboarding/${p.id}`} className="btn btn-secondary btn-sm">Onboarding</Link>
                       {p.archived_at ? (
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleUnarchive(p)}>Restore</button>
                       ) : (
