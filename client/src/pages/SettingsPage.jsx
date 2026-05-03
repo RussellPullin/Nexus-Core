@@ -833,7 +833,10 @@ export default function SettingsPage() {
         </details>
       )}
 
-      {canManageUsers && productSurface === PRODUCT_AGENCY && Boolean(user?.agency_enabled) && <ShifterIntegrationCard />}
+      {canManageUsers &&
+        productSurface === PRODUCT_AGENCY &&
+        Boolean(user?.can_use_agency) &&
+        Boolean(user?.agency_enabled) && <ShifterIntegrationCard />}
       {canManageUsers && <BusinessSetup />}
       <LearningSettings />
       </div>

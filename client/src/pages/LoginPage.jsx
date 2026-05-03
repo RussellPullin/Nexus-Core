@@ -482,13 +482,13 @@ export default function LoginPage() {
               {firstAccountOnServer && (
                 <div style={{ marginBottom: '0.75rem', fontSize: '0.85rem', color: '#334155' }}>
                   <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>Products for your organisation</div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.25rem' }}>
-                    <input type="checkbox" checked={coordinationProduct} onChange={(e) => setCoordinationProduct(e.target.checked)} />
-                    Nexus Coordination
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.35rem', marginBottom: '0.35rem' }}>
+                    <input type="checkbox" checked={coordinationProduct} onChange={(e) => setCoordinationProduct(e.target.checked)} style={{ marginTop: '0.15rem' }} />
+                    <span>Nexus Coordination — NDIS planning, allocations, plan manager workflows</span>
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <input type="checkbox" checked={agencyProduct} onChange={(e) => setAgencyProduct(e.target.checked)} />
-                    Nexus Agency
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.35rem' }}>
+                    <input type="checkbox" checked={agencyProduct} onChange={(e) => setAgencyProduct(e.target.checked)} style={{ marginTop: '0.15rem' }} />
+                    <span>Nexus Agency — staff, Shifter, shifts and payroll-oriented admin</span>
                   </label>
                 </div>
               )}

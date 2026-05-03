@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { formatDate } from '../lib/dateUtils';
 import { reports } from '../lib/api';
 

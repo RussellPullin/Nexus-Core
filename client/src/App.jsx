@@ -6,6 +6,7 @@ import { FeatureFlagProvider } from './context/FeatureFlagContext';
 import { PRODUCT_AGENCY, PRODUCT_COORDINATION } from '@nexus-shared/tenantProduct.js';
 import { ai, auth as authApi } from './lib/api';
 import { probeLocalOllama, resolveLocalOllamaBaseUrl } from './lib/localOllama.js';
+import { writePreferredProductSurface } from './lib/nexusPreferredProduct.js';
 import ParticipantsPage from './pages/ParticipantsPage';
 import ParticipantProfile from './pages/ParticipantProfile';
 import DirectoryPage from './pages/DirectoryPage';
@@ -39,7 +40,10 @@ function useSyncActiveProduct(productSurface) {
     if (user.active_product === productSurface) return;
     let cancelled = false;
     authApi.setActiveProduct(productSurface).then(() => {
-      if (!cancelled) refreshUser();
+      if (!cancelled) {
+        writePreferredProductSurface(productSurface);
+        refreshUser();
+      }
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [user?.id, user?.active_product, productSurface, user?.can_use_coordination, user?.can_use_agency, refreshUser]);
@@ -252,8 +256,21 @@ function ProtectedRoute({ children }) {
 function DefaultProductRedirect() {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.can_use_agency) return <Navigate to={`/${PRODUCT_AGENCY}/participants`} replace />;
-  if (user.can_use_coordination) return <Navigate to={`/${PRODUCT_COORDINATION}/participants`} replace />;
+  const c = Boolean(user.can_use_coordination);
+  const a = Boolean(user.can_use_agency);
+  if (c && a) {
+    const ap = user.active_product;
+    if (ap === PRODUCT_COORDINATION) {
+      return <Navigate to={`/${PRODUCT_COORDINATION}/participants`} replace />;
+    }
+    if (ap === PRODUCT_AGENCY) {
+      return <Navigate to={`/${PRODUCT_AGENCY}/participants`} replace />;
+    }
+    // Session has not resolved yet; match server default (agency when both)
+    return <Navigate to={`/${PRODUCT_AGENCY}/participants`} replace />;
+  }
+  if (a) return <Navigate to={`/${PRODUCT_AGENCY}/participants`} replace />;
+  if (c) return <Navigate to={`/${PRODUCT_COORDINATION}/participants`} replace />;
   return <Navigate to="/login" replace />;
 }
 

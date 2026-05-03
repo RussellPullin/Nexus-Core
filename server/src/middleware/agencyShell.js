@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { assertAgencyShellAccess } from '../services/tenantProduct.service.js';
+import { assertAgencyShellAccess, ensureSessionActiveProduct } from '../services/tenantProduct.service.js';
 
 /**
  * Shift / Shifter features require Nexus Agency shell + org/user agency entitlement.
@@ -10,6 +10,7 @@ export function requireAgencyShell(req, res, next) {
     if (!uid) return res.status(401).json({ error: 'Not authenticated' });
     const userRow = db.prepare('SELECT org_id, coordination_access, agency_access FROM users WHERE id = ?').get(uid);
     if (!userRow) return res.status(401).json({ error: 'User not found' });
+    ensureSessionActiveProduct(req, userRow);
     assertAgencyShellAccess(req, userRow);
     next();
   } catch (e) {

@@ -8,6 +8,7 @@ import { tenantParticipantAndStaffClause } from '../lib/orgScopeSql.js';
 import { getEffectiveOrgTzSpecForUser } from '../lib/orgShiftTimezone.js';
 import { checkShiftAgainstStaffAvailability } from '../lib/staffShiftAvailabilityCheck.js';
 import { parseStaffAvailability, STAFF_AVAILABILITY_DAY_KEYS } from '../lib/staffAvailability.js';
+import { requireAgencyShell } from '../middleware/agencyShell.js';
 
 const router = Router();
 
@@ -20,7 +21,7 @@ function availabilityIsConfigured(availabilityJson) {
  * GET /api/reports/staff-availability?start=YYYY-MM-DD&end=YYYY-MM-DD
  * Shifts in range with availability vs staff weekly hours (org schedule timezone).
  */
-router.get('/staff-availability', async (req, res) => {
+router.get('/staff-availability', requireAgencyShell, async (req, res) => {
   try {
     const userId = req.session?.user?.id;
     if (!userId) {

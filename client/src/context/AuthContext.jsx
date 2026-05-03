@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { normalizeAppRole } from '@nexus-shared/appRoles.js';
 import { auth as authApi, tryRestoreExpressSessionFromSupabase } from '../lib/api';
+import { clearPreferredProductSurface, readPreferredProductSurface } from '../lib/nexusPreferredProduct.js';
 import { getSupabaseBrowserClient } from '../lib/supabaseClient';
 
 const AuthContext = createContext(null);
@@ -47,6 +48,27 @@ export function AuthProvider({ children }) {
       cancelled = true;
     };
   }, []);
+
+  /** Dual-product users: align session with last-used shell from localStorage (session + optional localStorage). */
+  useEffect(() => {
+    if (loading || !user?.id) return;
+    if (!user.can_use_coordination || !user.can_use_agency) return;
+    const pref = readPreferredProductSurface();
+    if (!pref || pref === user.active_product) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await authApi.setActiveProduct(pref);
+        const data = await authApi.me();
+        if (!cancelled && data?.user) setUser(data.user);
+      } catch {
+        /* keep server default */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user?.id, user?.active_product, user?.can_use_coordination, user?.can_use_agency]);
 
   const login = async (email, password) => {
     const data = await authApi.login(email, password);
@@ -110,6 +132,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     await authApi.logout();
+    clearPreferredProductSurface();
     const sb = getSupabaseBrowserClient();
     if (sb) await sb.auth.signOut();
     setUser(null);
