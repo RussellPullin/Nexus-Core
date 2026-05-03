@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, Outlet, useParams, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FeatureFlagProvider } from './context/FeatureFlagContext';
-import { PRODUCT_AGENCY, PRODUCT_COORDINATION } from '@nexus-shared/tenantProduct.js';
+import { PRODUCT_AGENCY, PRODUCT_COORDINATION, isValidActiveProduct } from '@nexus-shared/tenantProduct.js';
 import { ai, auth as authApi } from './lib/api';
 import { probeLocalOllama, resolveLocalOllamaBaseUrl } from './lib/localOllama.js';
 import { writePreferredProductSurface } from './lib/nexusPreferredProduct.js';
@@ -293,6 +293,9 @@ function LegacyPathRedirect() {
 function ProductAccessGate() {
   const { productSurface } = useParams();
   const { user } = useAuth();
+  if (!isValidActiveProduct(productSurface)) {
+    return <Navigate to="/" replace />;
+  }
   if (!user) return null;
   if (productSurface === PRODUCT_COORDINATION && !user.can_use_coordination) {
     return <Navigate to={user.can_use_agency ? `/${PRODUCT_AGENCY}/participants` : '/login'} replace />;
@@ -328,7 +331,8 @@ export default function App() {
 
           <Route path="/" element={<ProtectedRoute><DefaultProductRedirect /></ProtectedRoute>} />
 
-          <Route path="/:productSurface(coordination|agency)" element={<ProtectedRoute><ProductAccessGate /></ProtectedRoute>}>
+          {/* RR v7 does not match `/:x(a|b)` like v6; use plain param + gate above. */}
+          <Route path="/:productSurface" element={<ProtectedRoute><ProductAccessGate /></ProtectedRoute>}>
             <Route element={<ProductLayout />}>
               <Route index element={<Navigate to="participants" replace />} />
               <Route path="participants" element={<ParticipantsPage />} />
