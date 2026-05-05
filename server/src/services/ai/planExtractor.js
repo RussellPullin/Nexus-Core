@@ -70,6 +70,8 @@ async function extractFundReleaseSchedule(text, planDatesHint) {
 
   const prompt = `From this NDIS plan text, extract SCHEDULED FUND RELEASES / payment instalments ONLY if explicitly stated (e.g. tables, "funds released on", "payment schedule", dollar amounts per instalment, or percentages per release).
 
+When the plan lists instalment dates in a table, copy each date into scheduled_date as ISO YYYY-MM-DD only when you can map it unambiguously from the document; otherwise use null—do not guess.
+
 RULES:
 - If the plan does not clearly describe instalment amounts, dates, or percentages, return pattern "unknown" and releases [].
 - Do NOT guess dates. If the plan says "quarterly" or "every three months" but gives NO amounts, dates, or percentages, use pattern "unknown", period_months: 3, releases [].
@@ -201,21 +203,60 @@ function apply10and13Filter(budgets, total_plan_budget) {
   return budgets;
 }
 
+function normalizePhase1Total(raw) {
+  if (typeof raw === 'number' && raw > 0 && Number.isFinite(raw)) return Math.round(raw * 100) / 100;
+  const n = parseFloat(String(raw ?? '').replace(/[$,]/g, ''));
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+
+function mergePhase1WithHints(phase1Total, phase1Dates, hints) {
+  const hintTotal = hints?.totalPlanBudgetHint != null ? normalizePhase1Total(hints.totalPlanBudgetHint) : null;
+  let total_plan_budget = normalizePhase1Total(phase1Total);
+  const hintDates = hints?.planDatesHint || null;
+
+  if (hintTotal != null && hintTotal > 0) {
+    if (total_plan_budget == null || total_plan_budget <= 0) {
+      total_plan_budget = hintTotal;
+    } else {
+      const rel = Math.abs(total_plan_budget - hintTotal) / Math.max(total_plan_budget, hintTotal);
+      if (rel > 0.005) {
+        total_plan_budget = hintTotal;
+      }
+    }
+  }
+
+  let plan_dates = phase1Dates && typeof phase1Dates === 'object' ? { ...phase1Dates } : { start_date: null, end_date: null };
+  if (!plan_dates.start_date && hintDates?.start_date) plan_dates.start_date = hintDates.start_date;
+  if (!plan_dates.end_date && hintDates?.end_date) plan_dates.end_date = hintDates.end_date;
+  if ((!plan_dates.start_date || !plan_dates.end_date) && hintDates) {
+    plan_dates = {
+      start_date: plan_dates.start_date || hintDates.start_date || null,
+      end_date: plan_dates.end_date || hintDates.end_date || null
+    };
+  }
+
+  return { total_plan_budget, plan_dates };
+}
+
 /**
  * Extract budgets and plan dates from plan text using the LLM.
  * Two-phase: first get total and dates, then extract budgets constrained to sum to total.
  * If the sum does not match, retries once with correction feedback.
+ * @param {string} text
+ * @param {{ totalPlanBudgetHint?: number|null, planDatesHint?: { start_date?: string|null, end_date?: string|null }|null }} [options]
  */
-export async function extractPlanFromText(text) {
+export async function extractPlanFromText(text, options = {}) {
   if (!text || text.trim().length < 50) {
     return { budgets: [], plan_dates: null, total_plan_budget: null, fund_release_schedule: null };
   }
 
   const phase1 = await extractTotalAndDates(text);
-  const total_plan_budget = typeof phase1?.total_plan_budget === 'number' && phase1.total_plan_budget > 0
-    ? phase1.total_plan_budget
-    : parseFloat(String(phase1?.total_plan_budget || '0').replace(/[$,]/g, '')) || null;
-  const plan_dates = phase1?.plan_dates || null;
+  const phase1TotalRaw = phase1?.total_plan_budget;
+  const { total_plan_budget, plan_dates } = mergePhase1WithHints(
+    phase1TotalRaw,
+    phase1?.plan_dates,
+    options
+  );
 
   const [phase2, fundReleaseRaw] = await Promise.all([
     extractBudgetsWithTotal(text, total_plan_budget),

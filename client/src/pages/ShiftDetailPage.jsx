@@ -270,6 +270,10 @@ export default function ShiftDetailPage() {
     }
   };
 
+  const setShiftLineItemsLockedInState = (locked) => {
+    setShift((prev) => (prev ? { ...prev, line_items_locked: locked ? 1 : 0 } : prev));
+  };
+
   const openAddCharge = async () => {
     const supportCategory = lineItems.length > 0 ? getSupportCategoryFromItem(lineItems[0]) : null;
     const defaultItemId = lineItems.length === 0 && shift?.participant_default_ndis_line_item_id
@@ -310,6 +314,7 @@ export default function ShiftDetailPage() {
     try {
       const added = await shifts.lineItems.add(id, payload);
       setLineItems((prev) => [...prev, added]);
+      setShiftLineItemsLockedInState(true);
       setShowAddCharge(false);
       setAddChargeForm({ ndis_line_item_id: '', quantity: '1', unit_price: '', claim_type: 'standard' });
     } catch (err) {
@@ -325,6 +330,7 @@ export default function ShiftDetailPage() {
     try {
       const updated = await shifts.lineItems.update(id, lineItem.id, { quantity: qty });
       setLineItems((prev) => prev.map((li) => (li.id === lineItem.id ? updated : li)));
+      setShiftLineItemsLockedInState(true);
       setEditingQty(null);
       setQtyValue('');
     } catch (err) {
@@ -334,9 +340,11 @@ export default function ShiftDetailPage() {
 
   const handleDeleteCharge = async (lineItem) => {
     if (!confirm('Remove this charge?')) return;
+    const remainingCount = lineItems.filter((li) => li.id !== lineItem.id).length;
     try {
       await shifts.lineItems.delete(id, lineItem.id);
       setLineItems((prev) => prev.filter((li) => li.id !== lineItem.id));
+      setShiftLineItemsLockedInState(remainingCount > 0);
     } catch (err) {
       alert(err.message);
     }
@@ -373,6 +381,7 @@ export default function ShiftDetailPage() {
         claim_type: 'participant_travel'
       });
       setLineItems((prev) => [...prev, added]);
+      setShiftLineItemsLockedInState(true);
       setShowAddTravel(false);
       setAddTravelQty('');
     } catch (err) {
@@ -407,6 +416,7 @@ export default function ShiftDetailPage() {
         claim_type: 'provider_travel'
       });
       setLineItems((prev) => [...prev, added]);
+      setShiftLineItemsLockedInState(true);
       setShowAddTravel(false);
       setAddTravelQty('');
     } catch (err) {
@@ -602,6 +612,23 @@ export default function ShiftDetailPage() {
                 )}
               </div>
             </div>
+
+            {Number(shift?.line_items_locked) === 1 && (
+              <p
+                style={{
+                  fontSize: '0.85rem',
+                  color: '#475569',
+                  margin: '0 0 1rem',
+                  padding: '0.5rem 0.65rem',
+                  background: '#f8fafc',
+                  borderRadius: 6,
+                  border: '1px solid #e2e8f0'
+                }}
+              >
+                Charges were edited in Nexus and are <strong>protected</strong> from Excel/Shifter pull overwriting them.
+                Remove every charge on this shift if you want the next sync to rebuild charges from the import.
+              </p>
+            )}
 
             {lineItems.length === 0 ? (
               <div className="empty-state" style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>

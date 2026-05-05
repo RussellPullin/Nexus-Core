@@ -193,6 +193,14 @@ try {
       if (!e.message?.includes('duplicate column')) console.warn('shifts.shifter_shift_id migration:', e.message);
     }
   }
+  const shiftColsLock = db.prepare('PRAGMA table_info(shifts)').all();
+  if (!shiftColsLock.some((c) => c.name === 'line_items_locked')) {
+    try {
+      db.exec('ALTER TABLE shifts ADD COLUMN line_items_locked INTEGER NOT NULL DEFAULT 0');
+    } catch (e) {
+      if (!e.message?.includes('duplicate column')) console.warn('shifts.line_items_locked migration:', e.message);
+    }
+  }
   // Prevent re-importing the same external shift after hard-delete (Excel / Shifter pull)
   try {
     db.exec(`

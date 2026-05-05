@@ -7,6 +7,27 @@ import { db } from '../db/index.js';
 import { getDefaultLineItemForParticipant } from './progressNoteMatcher.js';
 import { hoursBetweenIsoDateTimes } from '../lib/shiftDuration.js';
 
+/** When set, Excel/Shifter pull and auto line-item builders skip replacing shift_line_items (coordinator edits preserved). */
+function isShiftLineItemsLocked(shiftId) {
+  if (!shiftId) return false;
+  const row = db.prepare('SELECT line_items_locked FROM shifts WHERE id = ?').get(shiftId);
+  return row != null && Number(row.line_items_locked) === 1;
+}
+
+/** Call after coordinator add/update/delete on shift charges via API. */
+export function markShiftLineItemsManuallyEdited(shiftId) {
+  if (!shiftId) return;
+  db.prepare(`UPDATE shifts SET line_items_locked = 1, updated_at = datetime('now') WHERE id = ?`).run(shiftId);
+}
+
+/** When the last charge is removed, allow imports to populate charges again. */
+export function syncShiftLineItemsLockedAfterDelete(shiftId) {
+  if (!shiftId) return;
+  const c = db.prepare('SELECT COUNT(*) as n FROM shift_line_items WHERE shift_id = ?').get(shiftId);
+  const n = c && Number(c.n) === 0 ? 0 : 1;
+  db.prepare(`UPDATE shifts SET line_items_locked = ?, updated_at = datetime('now') WHERE id = ?`).run(n, shiftId);
+}
+
 /**
  * Parse travel time from various formats: 60, "60", "60mins", "60 min", "1 hour", etc.
  * Returns minutes or 0 if unparseable.
@@ -180,6 +201,7 @@ export function populateShiftLineItems(
   travelKm,
   travelTimeMin
 ) {
+  if (isShiftLineItemsLocked(shiftId)) return;
   db.prepare('DELETE FROM shift_line_items WHERE shift_id = ?').run(shiftId);
   const lineItems = [];
 
@@ -219,6 +241,7 @@ export function populateShiftLineItems(
  * has travel km/time, append missing provider_travel / participant_travel lines without duplicating.
  */
 export function supplementShiftTravelLineItemsFromProgressNote(shiftId) {
+  if (isShiftLineItemsLocked(shiftId)) return;
   const progressNote = db.prepare(`
     SELECT participant_id, support_date, travel_km, travel_time_min
     FROM progress_notes
@@ -296,6 +319,7 @@ export function supplementShiftTravelLineItemsFromProgressNote(shiftId) {
  * or append missing travel lines when legacy data only had support hours.
  */
 export function syncShiftLineItemsWithProgressNote(shiftId) {
+  if (isShiftLineItemsLocked(shiftId)) return;
   const lineCount = db.prepare('SELECT COUNT(*) as c FROM shift_line_items WHERE shift_id = ?').get(shiftId);
 
   const progressNote = db.prepare(`
@@ -344,7 +368,7 @@ export function recalculateShiftLineItemsFromShift(shiftId) {
   if (!shiftId) return { ok: false, skipped: 'no_id' };
   const shift = db
     .prepare(
-      `SELECT s.id, s.participant_id, s.start_time, s.end_time, s.billing_invoice_id, s.status,
+      `SELECT s.id, s.participant_id, s.start_time, s.end_time, s.billing_invoice_id, s.status, s.line_items_locked,
          (SELECT 1 FROM invoices i WHERE i.shift_id = s.id LIMIT 1) AS has_legacy_invoice
        FROM shifts s WHERE s.id = ?`
     )
@@ -359,7 +383,12 @@ export function recalculateShiftLineItemsFromShift(shiftId) {
   const st = String(shift.status || '').toLowerCase();
   if (st === 'cancelled' || st === 'canceled') {
     db.prepare('DELETE FROM shift_line_items WHERE shift_id = ?').run(shiftId);
+    db.prepare(`UPDATE shifts SET line_items_locked = 0, updated_at = datetime('now') WHERE id = ?`).run(shiftId);
     return { ok: true, cleared: true };
+  }
+
+  if (Number(shift.line_items_locked) === 1) {
+    return { ok: false, skipped: 'line_items_locked' };
   }
 
   const fromShift = hoursBetweenIsoDateTimes(shift.start_time, shift.end_time);

@@ -20,6 +20,12 @@ import { fetchFlagsForOrg } from '../services/orgFeatures.service.js';
 import { buildParticipantsCsvColumnMapPrompt } from '../../../shared/participantsCsvColumnMapPrompt.js';
 import { extractPlanFromText } from '../services/ai/planExtractor.js';
 import { reconcilePlanExtraction } from '../services/ai/planReconciler.js';
+import { mergeParsePlanMetadata, pickFundReleaseSchedule } from '../services/ai/planMerge.js';
+import { extractFundReleaseScheduleFromPdfText } from '../utils/planFundReleaseExtract.js';
+import {
+  extractBudgetsFromSupportCategoryBlocks,
+  mapKeyProximityLimit
+} from '../utils/planPdfCategoryBlocks.js';
 import { extractNdisPlanPdfText } from '../services/pdfOcrText.service.js';
 import {
   parsePlanManagerStatementDocument,
@@ -922,6 +928,14 @@ function parsePlanFromPdfText(text) {
     });
   }
 
+  // Pass 1b: sequential Support Category N blocks (portal/PACE) — amounts + instalments scoped per category.
+  const blockBudgets = extractBudgetsFromSupportCategoryBlocks(text, catNames, total_plan_budget);
+  for (const bb of blockBudgets) {
+    if (seen.has(bb.category)) continue;
+    seen.add(bb.category);
+    budgets.push(bb);
+  }
+
   // Pass 2: $-scan for categories not already taken from labelled lines.
   const amountRe = /\$([\d,]+(?:\.\d{2})?)(?=[\s\u00A0\u202F]|[\n\r]|$|\)|\.\s|,|;)/g;
   let m;
@@ -964,25 +978,19 @@ function parsePlanFromPdfText(text) {
       CAPACITY_CATS.forEach(c => allowedCats.add(c));
     }
 
-    // Cat 07 is only ever Capacity; narrative "assistive technology" etc. can misclassify section as capital.
-    const tail = precedingLower.slice(-300);
-    if (
-      /\bsupport coordination\b/.test(tail) ||
-      /\bcoordination of supports\b/.test(tail) ||
-      /\bspecialist support coordination\b/.test(tail) ||
-      /\bpsychosocial recovery coach/.test(tail) ||
-      /\bcoordination budget\b/.test(tail)
-    ) {
-      allowedCats.add('07');
-    }
-
-    // Match category: prefer the key that appears CLOSEST to the amount (last in preceding)
+    // Match category: prefer the key CLOSEST to the $ (largest start index in preceding), but coordination
+    // / cat 07 phrases must be within a tight window — long Capacity narratives mention "support coordination"
+    // and must not steal every dollar amount in the section.
     let bestCat = null;
     let bestPos = -1;
     for (const [key, c] of Object.entries(PDF_CATEGORY_MAP)) {
       if (seen.has(c) || !allowedCats.has(c)) continue;
       const pos = precedingLower.lastIndexOf(key);
-      if (pos >= 0 && pos > bestPos) {
+      if (pos < 0) continue;
+      const distanceChars = precedingLower.length - pos;
+      const limit = mapKeyProximityLimit(key, c);
+      if (distanceChars > limit) continue;
+      if (pos > bestPos) {
         bestPos = pos;
         bestCat = c;
       }
@@ -2532,7 +2540,7 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
     const useAi = req.body?.useAi === 'true' || req.body?.useAi === true;
     const ext = (req.file.originalname || '').toLowerCase();
     let parsed;
-    let aiFundReleaseSchedule = null;
+    let fundReleaseScheduleResponse = null;
     let planPdfOcrUsed = false;
     if (ext.endsWith('.pdf')) {
       try {
@@ -2540,6 +2548,7 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
         const { text: rawPlanText, ocrUsed } = await extractNdisPlanPdfText(req.file.buffer, { forceOcr });
         planPdfOcrUsed = ocrUsed;
         const pdfText = normalizeNdisPlanPdfText(rawPlanText);
+        const deterministicFundSchedule = extractFundReleaseScheduleFromPdfText(pdfText);
         // Deterministic baseline (strict amounts) + optional local LLM semantic read.
         const deterministic = parsePlanFromPdfText(pdfText);
         deterministic.budgets = (deterministic.budgets || []).map((b) => ({
@@ -2554,35 +2563,53 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
 
         let llmBudgets = [];
         let goals;
+        let aiResultForMerge = null;
         if (useAi && await llm.isAvailable() && pdfText.trim().length > 50) {
           const [aiResult, goalsResult] = await Promise.all([
-            extractPlanFromText(pdfText),
+            extractPlanFromText(pdfText, {
+              totalPlanBudgetHint: deterministic.total_plan_budget ?? null,
+              planDatesHint: deterministic.plan_dates ?? null
+            }),
             extractPlanGoals(pdfText, true)
           ]);
+          aiResultForMerge = aiResult;
           llmBudgets = Array.isArray(aiResult?.budgets) ? aiResult.budgets : [];
-          aiFundReleaseSchedule = aiResult?.fund_release_schedule ?? null;
           goals = goalsResult;
         } else {
           goals = await extractPlanGoals(pdfText, useAi);
         }
+
+        const { total_plan_budget: mergedTotal, plan_dates: mergedPlanDates, merge_warnings } = mergeParsePlanMetadata(
+          deterministic,
+          aiResultForMerge
+        );
 
         const allowLlmOnly = (deterministic.budgets || []).length === 0;
         const reconciled = reconcilePlanExtraction({
           text: pdfText,
           deterministicBudgets: deterministic.budgets,
           llmBudgets,
-          allowLlmOnly
+          allowLlmOnly,
+          mergedTotalPlanBudget: mergedTotal
         });
+
+        fundReleaseScheduleResponse = pickFundReleaseSchedule(
+          aiResultForMerge?.fund_release_schedule ?? null,
+          deterministicFundSchedule
+        );
 
         const droppedCount = reconciled.dropped.length;
         const mismatchList = reconciled.budgets.filter((b) => b.validation_status === 'needs_review');
         parsed = {
           ...deterministic,
+          total_plan_budget: mergedTotal ?? deterministic.total_plan_budget ?? null,
+          plan_dates: mergedPlanDates || deterministic.plan_dates || null,
           goals,
           budgets: reconciled.budgets,
           validation_warning: [
             ocrUsed ? 'Full-page OCR was used (scanned PDF or thin text layer). Verify dollar amounts against the original document.' : null,
             deterministic.validation_warning || null,
+            ...(merge_warnings || []),
             droppedCount > 0 ? `${droppedCount} AI entries were rejected by validation rules.` : null,
             mismatchList.length > 0 ? `${mismatchList.length} categories need review due to AI/deterministic differences.` : null
           ].filter(Boolean).join(' ')
@@ -2717,7 +2744,8 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
         evidence_quote: b.evidence_quote || null,
         validation_status: b.validation_status || (b.needs_review ? 'needs_review' : 'verified'),
         validation_reason: b.validation_reason || null,
-        ...(b.table_amount != null && b.ai_amount != null && { table_amount: b.table_amount, ai_amount: b.ai_amount })
+        ...(b.table_amount != null && b.ai_amount != null && { table_amount: b.table_amount, ai_amount: b.ai_amount }),
+        ...(Array.isArray(b.fund_releases) && b.fund_releases.length > 0 ? { fund_releases: b.fund_releases } : {})
       };
     }).filter(Boolean);
     const budgets_sum = result.reduce((s, b) => s + (b.amount || 0), 0);
@@ -2746,7 +2774,7 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
       ocr_used: !!planPdfOcrUsed,
       goals: Array.isArray(parsed.goals) ? parsed.goals : [],
       budgets: result,
-      fund_release_schedule: aiFundReleaseSchedule
+      fund_release_schedule: fundReleaseScheduleResponse
     });
   } catch (err) {
     console.error('Parse plan error:', err);

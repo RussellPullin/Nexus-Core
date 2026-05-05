@@ -12,7 +12,11 @@ import {
   scheduleRemoveShiftFromNexusSupabase,
 } from '../services/nexusPublicShiftsSync.service.js';
 import { syncCaseNoteFromShift } from '../services/shiftCaseNoteSync.service.js';
-import { recalculateShiftLineItemsFromShift } from '../services/shiftLineItems.service.js';
+import {
+  recalculateShiftLineItemsFromShift,
+  markShiftLineItemsManuallyEdited,
+  syncShiftLineItemsLockedAfterDelete,
+} from '../services/shiftLineItems.service.js';
 import { getProviderOrgIdForUser, requireAdminOrDelegate } from '../middleware/roles.js';
 import {
   isParticipantInRequesterTenant,
@@ -655,6 +659,7 @@ router.post('/:id/line-items', (req, res) => {
       INSERT INTO shift_line_items (id, shift_id, ndis_line_item_id, quantity, unit_price, claim_type)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(id, req.params.id, ndis_line_item_id, qty, price, claim_type || 'standard');
+    markShiftLineItemsManuallyEdited(req.params.id);
     const item = db.prepare(`
       SELECT sli.*, nli.support_item_number, nli.description, nli.unit
       FROM shift_line_items sli
@@ -703,6 +708,7 @@ router.put('/:id/line-items/:lineItemId', (req, res) => {
       UPDATE shift_line_items SET quantity = ?, unit_price = ?, claim_type = ?
       WHERE id = ?
     `).run(qty, price, claim_type ?? existing.claim_type, req.params.lineItemId);
+    markShiftLineItemsManuallyEdited(req.params.id);
     const item = db.prepare(`
       SELECT sli.*, nli.support_item_number, nli.description, nli.unit
       FROM shift_line_items sli
@@ -723,6 +729,7 @@ router.delete('/:id/line-items/:lineItemId', (req, res) => {
     DELETE FROM shift_line_items WHERE id = ? AND shift_id = ?
   `).run(req.params.lineItemId, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Line item not found' });
+  syncShiftLineItemsLockedAfterDelete(req.params.id);
   res.status(204).send();
 });
 
