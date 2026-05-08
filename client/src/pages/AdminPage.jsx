@@ -464,7 +464,8 @@ export default function AdminPage() {
               <div>
                 <strong>OneDrive Register Sync</strong>
                 <div style={{ fontSize: '0.9rem', color: '#64748b' }}>
-                  Rebuilds `Document Register.xlsx` and all separate register files in `Nexus Core/Register`.
+                  Rebuilds `Document Register.xlsx` and all separate register files in `Nexus Core/Register`.{' '}
+                  <Link to={`${pathPrefix}/registers`}>View registers in Nexus</Link> (same data as Excel export).
                 </div>
               </div>
               <button type="button" className="btn btn-primary" onClick={handleRefreshRegisters} disabled={registerSyncLoading}>

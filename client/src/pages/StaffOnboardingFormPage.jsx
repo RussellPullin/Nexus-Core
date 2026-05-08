@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import '../App.css';
 import { staffFieldLabels } from '@nexus-shared/onboardingFieldRegistry.js';
+import { NEXUS_CORE_SIGN_COMING_SOON_TITLE } from '../lib/featureFlags.js';
 
 const API = '/api';
 const STAFF_LABELS = staffFieldLabels();
@@ -215,6 +216,22 @@ export default function StaffOnboardingFormPage() {
     <div className="staff-onboarding-wrap" style={{ minHeight: '100vh', background: '#f5f6f8', padding: '1.5rem' }}>
       <header style={{ marginBottom: '1.5rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem' }}>
         <h1 style={{ margin: 0, fontSize: '1.25rem', color: '#1e293b' }}>Nexus Core – Staff Onboarding</h1>
+        {context.employmentContractAvailable && (
+          <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <a
+              href={`${API}/public/staff-onboarding/${token}/employment-contract`}
+              className="btn btn-secondary"
+              style={{ fontSize: '0.85rem', textDecoration: 'none', display: 'inline-block' }}
+              download
+            >
+              Download to sign
+            </a>
+            <button type="button" className="btn btn-primary" style={{ fontSize: '0.85rem' }} disabled title={NEXUS_CORE_SIGN_COMING_SOON_TITLE}>
+              Sign with Nexus Core
+            </button>
+            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>(PDF when available, otherwise Word)</span>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
           {STEPS.map((s) => (
             <span
@@ -322,7 +339,9 @@ export default function StaffOnboardingFormPage() {
         {step === 3 && (
           <>
             <h3 style={{ marginTop: 0 }}>Compliance documents</h3>
-            <p style={{ color: '#64748b', marginBottom: '1rem' }}>Upload image or PDF for each. Add expiry date if known (or it will be requested later).</p>
+            <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+              Upload image or PDF for each. Expiry dates are detected automatically when possible; you can still enter them manually.
+            </p>
             {DOCUMENT_TYPES.map(({ key, label }) => (
               <div key={key} className="card" style={{ marginBottom: '1rem', padding: '1rem' }}>
                 <div className="form-group">

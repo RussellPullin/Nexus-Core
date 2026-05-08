@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
-import { onboarding, participants, organisations, ndis, smartDefaults } from '../lib/api';
+import { onboarding, participants, organisations, ndis, smartDefaults, forms } from '../lib/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate } from '../lib/dateUtils';
 import {
@@ -10,6 +10,7 @@ import {
   composeParticipantLegalName,
   splitParticipantNameFromFull
 } from '@nexus-shared/onboardingFieldRegistry.js';
+import { NEXUS_CORE_ADOBE_SIGN_ENABLED, NEXUS_CORE_SIGN_COMING_SOON_TITLE } from '../lib/featureFlags.js';
 
 const PARTICIPANT_LABELS = participantFieldLabels();
 
@@ -138,6 +139,21 @@ export default function OnboardingPage() {
     km: [],
     time: []
   });
+  const [docPackMeta, setDocPackMeta] = useState(null);
+  const [participantPackChoice, setParticipantPackChoice] = useState('');
+
+  const participantPackOptions = useMemo(
+    () => (docPackMeta?.packs || []).filter((p) => p.workflow === 'participant_onboarding' || p.workflow === 'both'),
+    [docPackMeta]
+  );
+
+  useEffect(() => {
+    forms.onboardingDocumentPacks().then(setDocPackMeta).catch(() => setDocPackMeta(null));
+  }, []);
+
+  useEffect(() => {
+    setParticipantPackChoice(state?.document_pack_id || '');
+  }, [state?.document_pack_id]);
 
   useEffect(() => {
     organisations.list('', 'plan_manager').then(setOrgs).catch(() => []);
@@ -505,6 +521,25 @@ export default function OnboardingPage() {
     }
   };
 
+  const handleSendParticipantPolicyPack = async () => {
+    if (!participant?.email?.trim()) {
+      alert('Add a participant email address before sending the policy pack.');
+      return;
+    }
+    if (!confirm(`Email policy PDFs to ${participant.email.trim()}? Uses your connected email (Settings).`)) return;
+    setWorking(true);
+    try {
+      const body = participantPackChoice ? { pack_id: participantPackChoice } : {};
+      await onboarding.sendOnboardingPack(id, body);
+      await refresh();
+      alert('Policy documents emailed to the participant.');
+    } catch (err) {
+      alert(err.message || 'Could not send policy pack');
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const handleGenerateForms = async () => {
     setWorking(true);
     try {
@@ -523,7 +558,7 @@ export default function OnboardingPage() {
     try {
       await onboarding.sendFormForSignature(id, formInstanceId);
       await refresh();
-      alert('Form sent for signature.');
+      alert('Form sent via Nexus Core (Adobe Sign).');
     } catch (err) {
       alert(err.message);
     } finally {
@@ -544,6 +579,30 @@ export default function OnboardingPage() {
       }
     } catch (err) {
       alert(err.message || 'Could not load document. Generate the form first, or add a template to data/forms/participant-packet/.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const handleDownloadFormDocument = async (formInstanceId, displayName, formType) => {
+    setWorking(true);
+    try {
+      const blob = await onboarding.getFormDocumentBlob(id, formInstanceId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const base = (displayName || formType || 'form').replace(/[^a-zA-Z0-9._-]+/g, '_');
+      const ext =
+        blob.type.includes('wordprocessingml') || blob.type.includes('officedocument.wordprocessingml')
+          ? 'docx'
+          : 'pdf';
+      a.download = `${base}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err.message || 'Could not download document.');
     } finally {
       setWorking(false);
     }
@@ -571,7 +630,11 @@ export default function OnboardingPage() {
     try {
       await onboarding.uploadFormDocument(id, formInstanceId, file);
       await refresh();
-      alert('Document updated. You can now send for signature.');
+      alert(
+        NEXUS_CORE_ADOBE_SIGN_ENABLED
+          ? 'Document updated. Download to sign or use Sign with Nexus Core when ready.'
+          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once Adobe is enabled (see client/.env).'
+      );
     } catch (err) {
       alert(err.message);
     } finally {
@@ -1268,15 +1331,48 @@ export default function OnboardingPage() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <button className="btn btn-primary" onClick={handleSaveIntake} disabled={working || !hasIntakeData}>
                 Save intake form
               </button>
             </div>
 
+            <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
+              <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '1rem' }}>Company policy PDFs</h4>
+              <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: '#78350f' }}>
+                Send your organisation&apos;s policy documents from your email (same library as staff onboarding). Configure packs under{' '}
+                <strong>Forms → Form development</strong>. Participant must have an email; connect yours in Settings.
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Pack for this send</label>
+                  <select
+                    value={participantPackChoice}
+                    onChange={(e) => setParticipantPackChoice(e.target.value)}
+                    style={{ minWidth: 220, padding: '0.35rem' }}
+                    disabled={working}
+                  >
+                    <option value="">Organisation default</option>
+                    {participantPackOptions.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name}
+                        {p.item_count != null ? ` (${p.item_count} PDF${p.item_count === 1 ? '' : 's'})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button type="button" className="btn btn-secondary" onClick={handleSendParticipantPolicyPack} disabled={working}>
+                  Email policy pack to participant
+                </button>
+              </div>
+            </div>
+
             {/* Step 2: Service Agreement & Support Plan */}
             <h4 style={{ marginTop: '2rem' }}>2. Service Agreement, Support Plan & Privacy Consent</h4>
-            <p style={{ color: '#64748b', marginBottom: '1rem' }}>Service Agreement and Support Plan are auto-filled from intake data. Privacy Consent uses the NDIS form template (filled with participant details). Generate, then send for signature one at a time.</p>
+            <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+              Service Agreement and Support Plan are auto-filled from intake data. Privacy Consent uses the NDIS form template (filled with participant details). After generating, use{' '}
+              <strong>Download to sign</strong> for offline or your own signing tool, or <strong>Sign with Nexus Core</strong> when Adobe Sign is enabled for your organisation.
+            </p>
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
               <button className="btn btn-primary" onClick={handleGenerateForms} disabled={working || !hasIntakeData}>
                 Generate forms from intake
@@ -1297,18 +1393,53 @@ export default function OnboardingPage() {
                     <tr key={f.id}>
                       <td>{f.display_name}</td>
                       <td>{f.status}</td>
-                      <td style={{ display: 'flex', gap: '0.25rem' }}>
+                      <td style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
                         {['generated', 'draft'].includes(f.status) && (
                           <>
-                            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => handleViewDocument(f.id, false)} title="View filled document in CRM">View document</button>
-                            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => handleViewPreview(f.id)} title="View prefill data">View data</button>
+                            <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => handleViewDocument(f.id, false)} title="View filled document in CRM">View document</button>
+                            <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => handleViewPreview(f.id)} title="View prefill data">View data</button>
                             <label className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', margin: 0, cursor: 'pointer' }}>
                               Upload revised
                               <input type="file" accept=".pdf,.docx" style={{ display: 'none' }} onChange={(e) => { const file = e.target.files?.[0]; if (file) handleUploadRevised(f.id, file); e.target.value = ''; }} />
                             </label>
-                            <button className="btn btn-primary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => handleSendForm(f.id)} disabled={working}>Send for signature</button>
-                            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', color: '#dc2626' }} onClick={() => handleDeleteForm(f.id)} disabled={working} title="Delete form (can regenerate)">Delete</button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                              onClick={() => handleDownloadFormDocument(f.id, f.display_name, f.form_type)}
+                              disabled={working}
+                              title="Save the filled PDF or Word file to sign outside Nexus Core"
+                            >
+                              Download to sign
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                              onClick={() => handleSendForm(f.id)}
+                              disabled={working || !NEXUS_CORE_ADOBE_SIGN_ENABLED}
+                              title={
+                                NEXUS_CORE_ADOBE_SIGN_ENABLED
+                                  ? 'Send for signature via Nexus Core (Adobe Sign)'
+                                  : NEXUS_CORE_SIGN_COMING_SOON_TITLE
+                              }
+                            >
+                              Sign with Nexus Core
+                            </button>
+                            <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', color: '#dc2626' }} onClick={() => handleDeleteForm(f.id)} disabled={working} title="Delete form (can regenerate)">Delete</button>
                           </>
+                        )}
+                        {['sent', 'viewed', 'signed'].includes(f.status) && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                            onClick={() => handleDownloadFormDocument(f.id, f.display_name, f.form_type)}
+                            disabled={working}
+                            title="Download the filled document copy"
+                          >
+                            Download copy
+                          </button>
                         )}
                         {f.status === 'signed' && <span style={{ color: 'green' }}>Signed {f.signed_at ? formatDate(f.signed_at) : ''}</span>}
                         {['sent', 'viewed'].includes(f.status) && <span style={{ color: '#64748b' }}>Awaiting signature</span>}

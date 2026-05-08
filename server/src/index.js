@@ -138,6 +138,7 @@ import usersRouter from './routes/users.js';
 import adminRouter from './routes/admin.js';
 import orgFeaturesRouter from './routes/orgFeatures.js';
 import orgMicrosoftDriveRouter from './routes/orgMicrosoftDrive.js';
+import registersRouter from './routes/registers.js';
 import nexusFormTemplatesRouter from './routes/nexusFormTemplates.js';
 import nexusGeneratedFormsRouter from './routes/nexusGeneratedForms.js';
 import participantServiceAgreementsRouter from './routes/participantServiceAgreements.js';
@@ -190,6 +191,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/auth/supabase', supabaseAuthRouter);
 app.use('/api/email/oauth', emailOAuthRouter);
 app.use('/api/integrations/microsoft-drive', orgMicrosoftDriveRouter);
+app.use('/api/registers', requireAuth, registersRouter);
 
 // Public staff onboarding form (token in URL, no login)
 app.use('/api/public/staff-onboarding', staffOnboardingPublicRouter);

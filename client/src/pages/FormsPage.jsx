@@ -30,6 +30,15 @@ export default function FormsPage() {
   const [addFormLabel, setAddFormLabel] = useState('');
   const [addFormWorkflow, setAddFormWorkflow] = useState('participant_onboarding');
   const [adding, setAdding] = useState(false);
+  const [analyzeByTemplateId, setAnalyzeByTemplateId] = useState({});
+  const [docPackData, setDocPackData] = useState(null);
+  const [packWorking, setPackWorking] = useState(false);
+  const [newPackName, setNewPackName] = useState('');
+  const [newPackWorkflow, setNewPackWorkflow] = useState('both');
+  const [expandedPackId, setExpandedPackId] = useState(null);
+  const [packItemDraft, setPackItemDraft] = useState([]);
+  const [defaultStaffPack, setDefaultStaffPack] = useState('');
+  const [defaultParticipantPack, setDefaultParticipantPack] = useState('');
 
   const load = (workflowFilter = null) => {
     setLoading(true);
@@ -54,6 +63,109 @@ export default function FormsPage() {
     else if (tab === 'staff') load('staff_onboarding');
     else load();
   }, [tab]);
+
+  useEffect(() => {
+    if (tab !== 'development') return;
+    forms
+      .onboardingDocumentPacks()
+      .then((d) => {
+        setDocPackData(d);
+        setDefaultStaffPack(d.defaults?.default_staff_onboarding_pack_id || '');
+        setDefaultParticipantPack(d.defaults?.default_participant_onboarding_pack_id || '');
+      })
+      .catch(() => setDocPackData(null));
+  }, [tab]);
+
+  const reloadDocPacks = () =>
+    forms
+      .onboardingDocumentPacks()
+      .then((d) => {
+        setDocPackData(d);
+        setDefaultStaffPack(d.defaults?.default_staff_onboarding_pack_id || '');
+        setDefaultParticipantPack(d.defaults?.default_participant_onboarding_pack_id || '');
+      })
+      .catch(() => {});
+
+  const workflowLabel = (w) =>
+    w === 'staff_onboarding' ? 'Staff' : w === 'participant_onboarding' ? 'Participant' : 'Staff & participant';
+
+  const handleCreatePack = async (e) => {
+    e.preventDefault();
+    const name = newPackName.trim();
+    if (!name) return;
+    setPackWorking(true);
+    setMessage('');
+    try {
+      await forms.createOnboardingDocumentPack({ display_name: name, workflow: newPackWorkflow });
+      setNewPackName('');
+      setMessage('Pack created. Add PDFs from your policy library below.');
+      await reloadDocPacks();
+    } catch (err) {
+      setMessage(err.message || 'Failed to create pack');
+    } finally {
+      setPackWorking(false);
+    }
+  };
+
+  const handleSavePackDefaults = async () => {
+    setPackWorking(true);
+    setMessage('');
+    try {
+      await forms.patchOnboardingDocumentPackDefaults({
+        default_staff_onboarding_pack_id: defaultStaffPack || null,
+        default_participant_onboarding_pack_id: defaultParticipantPack || null
+      });
+      setMessage('Default packs saved.');
+      await reloadDocPacks();
+    } catch (err) {
+      setMessage(err.message || 'Failed to save defaults');
+    } finally {
+      setPackWorking(false);
+    }
+  };
+
+  const handleDeletePack = async (packId) => {
+    if (!confirm('Delete this pack? Onboarding emails may attach all policy PDFs until you choose another default.')) return;
+    setPackWorking(true);
+    setMessage('');
+    try {
+      await forms.deleteOnboardingDocumentPack(packId);
+      if (expandedPackId === packId) {
+        setExpandedPackId(null);
+        setPackItemDraft([]);
+      }
+      setMessage('Pack deleted.');
+      await reloadDocPacks();
+    } catch (err) {
+      setMessage(err.message || 'Delete failed');
+    } finally {
+      setPackWorking(false);
+    }
+  };
+
+  const openPackEditor = (pack) => {
+    setExpandedPackId(pack.id);
+    setPackItemDraft((pack.items || []).map((i) => i.policy_file_id));
+  };
+
+  const toggleDraftPolicy = (policyFileId) => {
+    setPackItemDraft((prev) => (prev.includes(policyFileId) ? prev.filter((x) => x !== policyFileId) : [...prev, policyFileId]));
+  };
+
+  const handleSavePackItems = async () => {
+    if (!expandedPackId) return;
+    setPackWorking(true);
+    setMessage('');
+    try {
+      await forms.setOnboardingDocumentPackItems(expandedPackId, packItemDraft);
+      setMessage('Pack PDFs updated.');
+      await reloadDocPacks();
+    } catch (err) {
+      setMessage(err.message || 'Save failed');
+    } finally {
+      setPackWorking(false);
+    }
+  };
 
   const templates = templatesAll;
   const clientTemplates = templates.filter((t) => (t.workflow || 'participant_onboarding') === 'participant_onboarding');
@@ -97,6 +209,42 @@ export default function FormsPage() {
       load(tab === 'client' ? 'participant_onboarding' : tab === 'staff' ? 'staff_onboarding' : null);
     } catch (err) {
       setMessage(err.message || 'Upload failed');
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const mappingFieldCount = (t) => {
+    if (!t?.mapping_json) return 0;
+    try {
+      const m = typeof t.mapping_json === 'object' ? t.mapping_json : JSON.parse(t.mapping_json);
+      return Object.keys(m.contract_field_map || {}).length;
+    } catch {
+      return 0;
+    }
+  };
+
+  const handleContractAnalyze = async (templateId) => {
+    const key = `${templateId}_contract`;
+    const file = uploadFile[key];
+    if (!file) {
+      setMessage('Choose a contract file for analysis (DOCX, PDF, or a scan image).');
+      return;
+    }
+    setUploading(key);
+    setMessage('');
+    try {
+      const data = await forms.contractUploadAnalyze(templateId, file);
+      setAnalyzeByTemplateId((prev) => ({ ...prev, [templateId]: data }));
+      const n = data.all_placeholders?.length ?? 0;
+      let msg = `Contract analyzed: ${n} field reference(s) detected; merge mapping saved.`;
+      if (data.image_only) msg = data.message || `Saved ${n} detected label(s) from the scan.`;
+      else if (data.analysis_only) msg = data.message || `Word mapping saved (${n} placeholders). Upload a fillable PDF as the template file.`;
+      setMessage(msg);
+      setUploadFile((prev) => ({ ...prev, [key]: null }));
+      load(tab === 'client' ? 'participant_onboarding' : tab === 'staff' ? 'staff_onboarding' : null);
+    } catch (err) {
+      setMessage(err.message || 'Analysis failed');
     } finally {
       setUploading(null);
     }
@@ -278,6 +426,118 @@ export default function FormsPage() {
             </p>
           </div>
 
+          <div style={{ marginBottom: '1.5rem', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fffbeb' }}>
+            <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1rem' }}>Onboarding document packs</h4>
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', color: '#78350f' }}>
+              Upload policy PDFs under <strong>Staff → profile → Company policy PDFs</strong>, then group them into packs. Packs can be emailed during{' '}
+              <strong>staff onboarding</strong> (welcome email) and <strong>participant onboarding</strong> (coordinator button on the onboarding page). If no pack applies, Nexus attaches{' '}
+              <strong>all</strong> policy PDFs for your organisation (legacy behaviour).
+            </p>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Default staff pack</label>
+                <select
+                  value={defaultStaffPack}
+                  onChange={(e) => setDefaultStaffPack(e.target.value)}
+                  style={{ minWidth: 220, padding: '0.35rem' }}
+                  disabled={packWorking}
+                >
+                  <option value="">None — attach all policy PDFs</option>
+                  {(docPackData?.packs || [])
+                    .filter((p) => p.workflow === 'staff_onboarding' || p.workflow === 'both')
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name} ({p.item_count ?? 0})
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Default participant pack</label>
+                <select
+                  value={defaultParticipantPack}
+                  onChange={(e) => setDefaultParticipantPack(e.target.value)}
+                  style={{ minWidth: 220, padding: '0.35rem' }}
+                  disabled={packWorking}
+                >
+                  <option value="">None — attach all policy PDFs</option>
+                  {(docPackData?.packs || [])
+                    .filter((p) => p.workflow === 'participant_onboarding' || p.workflow === 'both')
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name} ({p.item_count ?? 0})
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <button type="button" className="btn btn-secondary" disabled={packWorking} onClick={handleSavePackDefaults}>
+                Save defaults
+              </button>
+            </div>
+
+            <form onSubmit={handleCreatePack} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>New pack name</label>
+                <input value={newPackName} onChange={(e) => setNewPackName(e.target.value)} placeholder="e.g. Clinical policies" style={{ padding: '0.35rem', minWidth: 200 }} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Used for</label>
+                <select value={newPackWorkflow} onChange={(e) => setNewPackWorkflow(e.target.value)} style={{ padding: '0.35rem' }}>
+                  <option value="both">Staff &amp; participant</option>
+                  <option value="staff_onboarding">Staff only</option>
+                  <option value="participant_onboarding">Participant only</option>
+                </select>
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={packWorking || !newPackName.trim()}>
+                Create pack
+              </button>
+            </form>
+
+            {!docPackData?.policy_files?.length ? (
+              <p style={{ color: '#92400e', fontSize: '0.9rem' }}>No policy PDFs uploaded yet. Add files from a staff profile (Company policy PDFs) first.</p>
+            ) : null}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {(docPackData?.packs || []).map((p) => (
+                <div key={p.id} style={{ border: '1px solid #fde68a', borderRadius: 8, padding: '0.75rem', background: '#fff' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center' }}>
+                    <div>
+                      <strong>{p.display_name}</strong>
+                      <span style={{ marginLeft: 8, fontSize: '0.85rem', color: '#64748b' }}>
+                        {workflowLabel(p.workflow)} · {p.item_count ?? 0} PDF(s)
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openPackEditor(p)} disabled={packWorking}>
+                        {expandedPackId === p.id ? 'Editing…' : 'Edit PDFs'}
+                      </button>
+                      <button type="button" className="btn btn-secondary btn-sm" style={{ color: '#b91c1c' }} onClick={() => handleDeletePack(p.id)} disabled={packWorking}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                  {expandedPackId === p.id && (
+                    <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #fef3c7' }}>
+                      <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem', color: '#64748b' }}>Toggle PDFs to include. Order follows the list below (add files in the order you want them attached).</p>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', maxHeight: 220, overflow: 'auto', marginBottom: '0.5rem' }}>
+                        {(docPackData?.policy_files || []).map((f) => (
+                          <label key={f.id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={packItemDraft.includes(f.id)} onChange={() => toggleDraftPolicy(f.id)} />
+                            {f.display_name}
+                          </label>
+                        ))}
+                      </div>
+                      <button type="button" className="btn btn-primary btn-sm" disabled={packWorking} onClick={handleSavePackItems}>
+                        Save pack PDFs
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
           {customTemplates.length > 0 && (
             <>
               <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1rem' }}>Custom forms</h4>
@@ -291,16 +551,50 @@ export default function FormsPage() {
                       <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>{WORKFLOW_LABELS[t.workflow] || t.workflow}</p>
                       <p style={{ margin: '0.25rem 0 0.5rem 0', fontSize: '0.85rem' }}>
                         Current: {hasFile ? <strong>{fileInfo.filename}</strong> : <span style={{ color: '#94a3b8' }}>No file</span>}
+                        {mappingFieldCount(t) > 0 && (
+                          <span style={{ marginLeft: 8, color: '#64748b' }}>
+                            · {mappingFieldCount(t)} placeholder(s) mapped to profile/intake fields
+                          </span>
+                        )}
                       </p>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                         <input
                           type="file"
-                          accept=".pdf,.docx"
+                          accept=".pdf"
                           onChange={(e) => setUploadFile((prev) => ({ ...prev, [t.id]: e.target.files?.[0] || null }))}
                         />
                         <button type="button" className="btn btn-primary" disabled={uploading === t.id || !uploadFile[t.id]} onClick={() => handleUpload(t.id, { templateId: t.id })}>
-                          {uploading === t.id ? 'Uploading…' : 'Upload'}
+                          {uploading === t.id ? 'Uploading…' : 'Upload PDF'}
                         </button>
+                      </div>
+                      <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+                        <p style={{ margin: '0 0 0.35rem 0', fontSize: '0.85rem', fontWeight: 500 }}>Upload contract &amp; auto-detect fields</p>
+                        <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.8rem', color: '#64748b' }}>
+                          Templates are <strong>PDF</strong> with AcroForm fields (fillable). Nexus reads field names and scanned text (OCR) to map values from staff or participant profiles and intake data. Word <code>{'{tags}'}</code> are still detected if you analyze a .docx export.
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          <input
+                            type="file"
+                            accept=".pdf,.docx,.png,.jpg,.jpeg,.webp"
+                            onChange={(e) => setUploadFile((prev) => ({ ...prev, [`${t.id}_contract`]: e.target.files?.[0] || null }))}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={uploading === `${t.id}_contract` || !uploadFile[`${t.id}_contract`]}
+                            onClick={() => handleContractAnalyze(t.id)}
+                          >
+                            {uploading === `${t.id}_contract` ? 'Analyzing…' : 'Analyze & save mapping'}
+                          </button>
+                        </div>
+                        {analyzeByTemplateId[t.id] && (
+                          <p style={{ margin: '0.5rem 0 0', fontSize: '0.8rem', color: '#475569' }}>
+                            Last run: {analyzeByTemplateId[t.id].docx_placeholders?.length ?? 0} Word placeholders,{' '}
+                            {analyzeByTemplateId[t.id].pdf_form_fields?.length ?? 0} PDF fields,{' '}
+                            {analyzeByTemplateId[t.id].ocr_labels?.length ?? 0} text/OCR labels.
+                            {analyzeByTemplateId[t.id].ocr_used ? ' OCR was used.' : ''}
+                          </p>
+                        )}
                       </div>
                     </div>
                   );

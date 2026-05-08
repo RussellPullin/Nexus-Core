@@ -12,6 +12,9 @@ import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from
 import { pullSummaryFromExcel } from '../services/excelPull.service.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
 import { ensureProviderProfile } from '../services/onboarding.service.js';
+import { generateStaffContractBuffers } from '../services/staffContractFill.service.js';
+import { buildPolicyAttachmentsForEmail } from '../services/onboardingDocumentPacks.service.js';
+import { getStaffIntakeFieldMap, mergeStaffIntakeForProfile } from '../services/staffOnboardingSync.service.js';
 import {
   getShifterFieldsByStaffId,
   setShifterEnabledForStaffEmail,
@@ -795,23 +798,9 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     text += `The form will collect your personal and employment details, compliance documents, and policy acknowledgements. Please sign to confirm you have read and acknowledged the company policies (attached).\n\n`;
     text += `If you have any questions, contact your manager.`;
 
-    const attachments = [];
-    const policyFiles = providerProfileId
-      ? db.prepare('SELECT id, display_name, file_path FROM company_policy_files WHERE provider_profile_id = ?').all(providerProfileId)
-      : [];
-    for (const pf of policyFiles) {
-      const fullPath = join(projectRoot, pf.file_path);
-      if (existsSync(fullPath)) {
-        try {
-          const content = readFileSync(fullPath);
-          const filename = (pf.display_name || pf.file_path).replace(/^.*[/\\]/, '') || 'policy.pdf';
-          attachments.push({ filename, content, contentType: 'application/pdf' });
-        } catch (e) {
-          console.warn('[start-onboarding] Could not read policy file:', pf.file_path, e?.message);
-        }
-      }
-    }
-    // PLACEHOLDER: connect policy PDF upload to this list; policy files are attached from company_policy_files above
+    const packIdBody = req.body?.pack_id != null && req.body.pack_id !== '' ? String(req.body.pack_id) : null;
+    const { attachments, resolvedPackId } = buildPolicyAttachmentsForEmail(providerProfileId, packIdBody, 'staff_onboarding', projectRoot);
+    db.prepare(`UPDATE staff_onboarding SET document_pack_id = ? WHERE id = ?`).run(resolvedPackId, onboarding.id);
 
     const attachmentsForEmail = attachments.map((a) => ({
       ...a,
@@ -824,6 +813,45 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     console.error('[start-onboarding]', err);
     const msg = formatSmtpAuthError(err);
     res.status(400).json({ error: msg });
+  }
+});
+
+router.get('/:id/employment-contract', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const staffId = req.params.id;
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const row = visibleStaffById(staffId, orgId);
+    if (!row) return res.status(404).json({ error: 'Staff not found' });
+
+    const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
+    const onboarding = db.prepare('SELECT id, provider_profile_id FROM staff_onboarding WHERE staff_id = ?').get(staffId);
+    let providerProfileId = onboarding?.provider_profile_id;
+    if (!providerProfileId) {
+      const { profile } = getProviderProfileForUser(req.session.user.id);
+      providerProfileId = profile?.id || null;
+    }
+    if (!providerProfileId) return res.status(400).json({ error: 'No provider profile for your organisation.' });
+
+    const rawIntake = onboarding?.id ? getStaffIntakeFieldMap(onboarding.id) : {};
+    const merged = mergeStaffIntakeForProfile(rawIntake, staffFull?.name);
+    const { docx, pdf, templateMeta } = await generateStaffContractBuffers(staffFull, merged, providerProfileId);
+    if (!pdf?.length && !docx?.length) {
+      return res.status(404).json({
+        error: 'No employment contract template. In Forms → Form development, add a staff custom form and upload a fillable PDF template.'
+      });
+    }
+    const base = (templateMeta?.displayName || 'employment-contract').replace(/[^a-zA-Z0-9-_]+/g, '_');
+    if (pdf?.length) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${base}.pdf"`);
+      return res.send(pdf);
+    }
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${base}.docx"`);
+    return res.send(docx);
+  } catch (err) {
+    console.error('[staff employment-contract]', err);
+    res.status(500).json({ error: err.message });
   }
 });
 

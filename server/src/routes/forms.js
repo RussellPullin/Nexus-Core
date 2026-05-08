@@ -18,6 +18,16 @@ import {
   createFormTemplate as createFormTemplateService
 } from '../services/onboarding.service.js';
 import { getTemplatePath, getTemplateDir, getCustomTemplatePath, getCustomTemplateDir } from '../services/formTemplatePath.service.js';
+import { analyzeContractTemplateBuffer, suggestContractFieldMap } from '../services/contractTemplateAnalyze.service.js';
+import {
+  listPacks,
+  createPack,
+  updatePack,
+  deletePack,
+  getPackItemsDetailed,
+  setPackItems,
+  setProviderPackDefaults
+} from '../services/onboardingDocumentPacks.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
@@ -37,6 +47,15 @@ function getProviderProfileForUser(userId) {
   }
   const profile = ensureProviderProfile(orgId);
   return { profile, organisation_id: orgId };
+}
+
+function parseMappingJson(val) {
+  if (!val) return {};
+  try {
+    return typeof val === 'object' ? val : JSON.parse(val);
+  } catch {
+    return {};
+  }
 }
 
 // GET /api/forms/context - current user's organisation for forms
@@ -122,6 +141,109 @@ ROUTER.post('/templates', (req, res) => {
   }
 });
 
+// POST /api/forms/templates/:id/contract-upload-analyze — upload contract; OCR/heuristics detect fields; save mapping_json + optional template file
+ROUTER.post('/templates/:id/contract-upload-analyze', memoryUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    if (!req.file?.buffer) return res.status(400).json({ error: 'No file uploaded.' });
+
+    const template = db.prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(req.params.id, profile.id);
+    if (!template || template.form_type !== 'custom') {
+      return res.status(404).json({ error: 'Custom form template not found.' });
+    }
+
+    const orig = req.file.originalname || '';
+    const lower = orig.toLowerCase();
+    const ext = lower.endsWith('.docx') ? 'docx' : lower.endsWith('.pdf') ? 'pdf' : /\.(png|jpe?g|webp)$/i.test(lower) ? 'image' : '';
+
+    if (!ext) {
+      return res.status(400).json({ error: 'Use .docx, .pdf, or an image (.png, .jpg, .webp) for field detection.' });
+    }
+
+    const workflowKind = template.workflow === 'staff_onboarding' ? 'staff' : 'participant';
+    const existing = parseMappingJson(template.mapping_json);
+
+    if (ext === 'image') {
+      const analysis = await analyzeContractTemplateBuffer(req.file.buffer, orig);
+      const suggested = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
+      const contract_field_map = { ...(existing.contract_field_map || {}), ...suggested };
+      const mapping_json = {
+        ...existing,
+        contract_field_map,
+        contract_analysis: {
+          ...analysis,
+          analyzed_at: new Date().toISOString(),
+          template_file_updated: false
+        }
+      };
+      db.prepare(`UPDATE form_templates SET mapping_json = ?, updated_at = datetime('now') WHERE id = ?`).run(JSON.stringify(mapping_json), template.id);
+      return res.json({
+        ok: true,
+        image_only: true,
+        message: 'Field map updated from the scan. Upload a fillable PDF as the merge template (employment contracts fill PDF form fields).',
+        contract_field_map,
+        ...analysis
+      });
+    }
+
+    if (ext === 'docx') {
+      const analysis = await analyzeContractTemplateBuffer(req.file.buffer, orig);
+      const suggested = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
+      const contract_field_map = { ...(existing.contract_field_map || {}), ...suggested };
+      const mapping_json = {
+        ...existing,
+        contract_field_map,
+        contract_analysis: {
+          ...analysis,
+          analyzed_at: new Date().toISOString(),
+          template_file_updated: false
+        }
+      };
+      db.prepare(`UPDATE form_templates SET mapping_json = ?, updated_at = datetime('now') WHERE id = ?`).run(JSON.stringify(mapping_json), template.id);
+      return res.json({
+        ok: true,
+        analysis_only: true,
+        message:
+          'Word placeholder mapping saved. Upload a fillable PDF with “Upload PDF” — Nexus merges staff contracts from PDF form fields only.',
+        contract_field_map,
+        ...analysis
+      });
+    }
+
+    const saveExt = 'pdf';
+    const dir = getCustomTemplateDir();
+    mkdirSync(dir, { recursive: true });
+    const saveName = `${template.id}.${saveExt}`;
+    writeFileSync(join(dir, saveName), req.file.buffer);
+    db.prepare(`UPDATE form_templates SET template_filename = ?, updated_at = datetime(\'now\') WHERE id = ?`).run(saveName, template.id);
+
+    const analysis = await analyzeContractTemplateBuffer(req.file.buffer, orig);
+    const suggested = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
+    const mapping_json = {
+      ...existing,
+      contract_field_map: suggested,
+      contract_analysis: {
+        ...analysis,
+        analyzed_at: new Date().toISOString(),
+        template_file_updated: true
+      }
+    };
+    db.prepare(`UPDATE form_templates SET mapping_json = ?, updated_at = datetime(\'now\') WHERE id = ?`).run(JSON.stringify(mapping_json), template.id);
+
+    res.json({
+      ok: true,
+      template_id: template.id,
+      filename: saveName,
+      contract_field_map: suggested,
+      ...analysis
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/forms/templates/upload - upload template file for a form type (or template id for custom)
 ROUTER.post('/templates/upload', memoryUpload.single('file'), (req, res) => {
   try {
@@ -131,16 +253,20 @@ ROUTER.post('/templates/upload', memoryUpload.single('file'), (req, res) => {
     if (!req.file || !req.file.buffer) {
       return res.status(400).json({ error: 'No file uploaded.' });
     }
-    const ext = (req.file.originalname || '').toLowerCase().endsWith('.docx') ? 'docx' : 'pdf';
+    const lowerName = (req.file.originalname || '').toLowerCase();
+    const ext = lowerName.endsWith('.docx') ? 'docx' : lowerName.endsWith('.pdf') ? 'pdf' : '';
 
     if (templateId) {
       const { profile } = getProviderProfileForUser(req.session.user.id);
       if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+      if (ext !== 'pdf') {
+        return res.status(400).json({ error: 'Custom form templates must be a .pdf file.' });
+      }
       const template = db.prepare('SELECT id, template_filename FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(templateId, profile.id);
       if (!template) return res.status(404).json({ error: 'Custom form template not found.' });
       const dir = getCustomTemplateDir();
       mkdirSync(dir, { recursive: true });
-      const saveName = `${template.id}.${ext}`;
+      const saveName = `${template.id}.pdf`;
       const filePath = join(dir, saveName);
       writeFileSync(filePath, req.file.buffer);
       db.prepare('UPDATE form_templates SET template_filename = ?, updated_at = datetime(\'now\') WHERE id = ?').run(saveName, template.id);
@@ -149,6 +275,9 @@ ROUTER.post('/templates/upload', memoryUpload.single('file'), (req, res) => {
 
     if (!UPLOAD_FORM_TYPES.includes(formType)) {
       return res.status(400).json({ error: 'Invalid form_type. Use privacy_consent, service_agreement, or support_plan (or template_id for custom forms).' });
+    }
+    if (!ext) {
+      return res.status(400).json({ error: 'Upload a .pdf or .docx file.' });
     }
     const { profile } = getProviderProfileForUser(req.session.user.id);
     if (!profile) return res.status(400).json({ error: 'No organisation set.' });
@@ -222,6 +351,95 @@ ROUTER.delete('/policy-files/:id', (req, res) => {
     res.status(204).send();
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Onboarding document packs (policy PDF bundles for staff / participant onboarding emails) ---
+
+ROUTER.get('/onboarding-document-packs', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.json({ packs: [], policy_files: [], defaults: {} });
+    const packs = listPacks(profile.id).map((p) => ({
+      ...p,
+      items: getPackItemsDetailed(p.id).map((row) => ({
+        policy_file_id: row.id,
+        display_name: row.display_name
+      }))
+    }));
+    const policy_files = db
+      .prepare(`SELECT id, display_name FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`)
+      .all(profile.id);
+    const defaults = db
+      .prepare(`SELECT default_staff_onboarding_pack_id, default_participant_onboarding_pack_id FROM provider_profiles WHERE id = ?`)
+      .get(profile.id);
+    res.json({ packs, policy_files, defaults: defaults || {} });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+ROUTER.post('/onboarding-document-packs', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const created = createPack(profile.id, req.body || {});
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+ROUTER.patch('/onboarding-document-packs/:packId', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const updated = updatePack(profile.id, req.params.packId, req.body || {});
+    if (!updated) return res.status(404).json({ error: 'Pack not found.' });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+ROUTER.delete('/onboarding-document-packs/:packId', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const ok = deletePack(profile.id, req.params.packId);
+    if (!ok) return res.status(404).json({ error: 'Pack not found.' });
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+ROUTER.put('/onboarding-document-packs/:packId/items', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const ids = req.body?.policy_file_ids;
+    const items = setPackItems(profile.id, req.params.packId, ids);
+    res.json({ items });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+ROUTER.patch('/onboarding-document-packs-defaults', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const updated = setProviderPackDefaults(profile.id, req.body || {});
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

@@ -1448,6 +1448,53 @@ try {
     if (!e.message?.includes('already exists')) console.warn('staff onboarding tables migration:', e.message);
   }
 
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS onboarding_document_packs (
+        id TEXT PRIMARY KEY,
+        provider_profile_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        workflow TEXT NOT NULL DEFAULT 'both',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (provider_profile_id) REFERENCES provider_profiles(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_onboarding_document_packs_provider ON onboarding_document_packs(provider_profile_id)');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS onboarding_document_pack_items (
+        id TEXT PRIMARY KEY,
+        pack_id TEXT NOT NULL,
+        policy_file_id TEXT NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        FOREIGN KEY (pack_id) REFERENCES onboarding_document_packs(id) ON DELETE CASCADE,
+        FOREIGN KEY (policy_file_id) REFERENCES company_policy_files(id) ON DELETE CASCADE,
+        UNIQUE(pack_id, policy_file_id)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_onboarding_pack_items_pack ON onboarding_document_pack_items(pack_id)');
+
+    const ppCols = db.prepare('PRAGMA table_info(provider_profiles)').all();
+    if (!ppCols.some((c) => c.name === 'default_staff_onboarding_pack_id')) {
+      db.exec('ALTER TABLE provider_profiles ADD COLUMN default_staff_onboarding_pack_id TEXT');
+    }
+    if (!ppCols.some((c) => c.name === 'default_participant_onboarding_pack_id')) {
+      db.exec('ALTER TABLE provider_profiles ADD COLUMN default_participant_onboarding_pack_id TEXT');
+    }
+
+    const soCols = db.prepare('PRAGMA table_info(staff_onboarding)').all();
+    if (!soCols.some((c) => c.name === 'document_pack_id')) {
+      db.exec('ALTER TABLE staff_onboarding ADD COLUMN document_pack_id TEXT');
+    }
+
+    const poCols = db.prepare('PRAGMA table_info(participant_onboarding)').all();
+    if (!poCols.some((c) => c.name === 'document_pack_id')) {
+      db.exec('ALTER TABLE participant_onboarding ADD COLUMN document_pack_id TEXT');
+    }
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('onboarding_document_packs migration:', e.message);
+  }
+
   // Coordinator settings: per-user billing interval (15 min default), staff link for coordinators
   try {
     const userCols = db.prepare("PRAGMA table_info(users)").all();

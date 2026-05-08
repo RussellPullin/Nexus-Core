@@ -199,6 +199,25 @@ export function fillConsentForm(participant = {}, intake = {}, options = {}) {
 }
 
 /**
+ * Generic docx merge (docxtemplater + Word content controls). Staff employment templates may be PDF AcroForms filled in staffContractFill.service.js instead.
+ * @param {Buffer} templateBuffer
+ * @param {Record<string, string>} data
+ * @returns {Buffer}
+ */
+export function renderDocxTemplateBuffer(templateBuffer, data) {
+  const zip = new PizZip(templateBuffer);
+  const doc = new Docxtemplater(zip, {
+    paragraphLoop: true,
+    linebreaks: true,
+    nullGetter: () => ''
+  });
+  doc.render(data);
+  const outZip = doc.getZip();
+  fillContentControlsInZip(outZip, data);
+  return outZip.generate({ type: 'nodebuffer' });
+}
+
+/**
  * Convert a docx buffer to PDF using LibreOffice (soffice) if available.
  * @param {Buffer} docxBuffer - filled docx content
  * @returns {Buffer|null} PDF buffer, or null if conversion not available/fails

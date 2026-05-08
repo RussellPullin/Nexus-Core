@@ -1,7 +1,12 @@
 /**
  * Daily cron: check staff_compliance_documents for expiry in 60, 30, 7 days.
- * Send reminder email to staff and manager (or first admin). Record in staff_certification_reminders.
- * Run: node server/scripts/run-staff-certification-reminders.js (from project root; ensure .env is loaded).
+ * Send reminder email to staff and manager (or first admin in the same org). Record in staff_certification_reminders.
+ *
+ * Schedule from repo root (loads .env):
+ *   npm run staff-cert-reminders
+ *
+ * Example cron (7:00 daily):
+ *   0 7 * * * cd /path/to/repo && npm run staff-cert-reminders
  */
 
 import { config } from 'dotenv';
@@ -28,6 +33,25 @@ function addDays(ymd, days) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/** Admin with connected relay email: prefer staff.org_id, else any admin (legacy rows without org_id). */
+function relayAdminForStaffOrg(staffOrgId) {
+  const tryList = (rows) => {
+    for (const a of rows || []) {
+      if (a?.id && isEmailConfiguredForUser(a.id)) return a;
+    }
+    return null;
+  };
+  if (staffOrgId) {
+    const scoped = db
+      .prepare(`SELECT id, email FROM users WHERE role = 'admin' AND org_id = ? ORDER BY created_at ASC`)
+      .all(staffOrgId);
+    const hit = tryList(scoped);
+    if (hit) return hit;
+  }
+  const any = db.prepare(`SELECT id, email FROM users WHERE role = 'admin' ORDER BY created_at ASC`).all();
+  return tryList(any);
+}
+
 async function sendReminder(adminId, staff, doc, reminderType) {
   const subject = `Compliance document expiring – ${doc.document_type} – Nexus Core`;
   const days = reminderType === '60_days' ? 60 : reminderType === '30_days' ? 30 : 7;
@@ -43,18 +67,10 @@ async function sendManagerNotify(adminId, managerEmail, staffName, doc, reminder
 }
 
 async function run() {
-  const admin = db.prepare('SELECT id, email FROM users WHERE role = ? ORDER BY created_at ASC LIMIT 1').get('admin');
-  if (!admin) {
-    console.log('No admin user; skipping staff certification reminders.');
-    return;
-  }
-  if (!isEmailConfiguredForUser(admin.id)) {
-    console.log('Admin has not connected email in Settings; skipping staff certification reminders.');
-    return;
-  }
-
   const today = todayYmd();
   let sent = 0;
+  let skippedNoRelay = 0;
+
   for (const days of REMINDER_DAYS) {
     const targetDate = addDays(today, days);
     const reminderType = `${days}_days`;
@@ -70,8 +86,14 @@ async function run() {
       ).get(doc.staff_id, doc.document_type, reminderType);
       if (already) continue;
 
-      const staff = db.prepare('SELECT id, name, email, manager_id FROM staff WHERE id = ?').get(doc.staff_id);
+      const staff = db.prepare('SELECT id, name, email, manager_id, org_id FROM staff WHERE id = ?').get(doc.staff_id);
       if (!staff?.email) continue;
+
+      const admin = relayAdminForStaffOrg(staff.org_id);
+      if (!admin) {
+        skippedNoRelay++;
+        continue;
+      }
 
       try {
         await sendReminder(admin.id, staff, doc, reminderType);
@@ -89,7 +111,8 @@ async function run() {
       }
     }
   }
-  console.log(`Staff certification reminders done. Sent: ${sent}`);
+
+  console.log(`Staff certification reminders done. Sent: ${sent}. Skipped (no org admin with email relay): ${skippedNoRelay}`);
 }
 
 run().catch((err) => {

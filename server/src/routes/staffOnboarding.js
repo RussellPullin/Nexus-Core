@@ -15,7 +15,18 @@ import { extractExpiryFromDocument } from '../services/ocrExpiry.service.js';
 import { uploadFileToStaffFolder } from '../services/oneDriveUpload.service.js';
 import { tryPushStaffDocument } from '../services/orgOnedriveSync.service.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser } from '../services/notification.service.js';
-import { composeStaffDisplayName } from '../../../shared/onboardingFieldRegistry.js';
+import {
+  applyStaffIntakeToStaffRow,
+  getStaffIntakeFieldMap,
+  mergeStaffIntakeForProfile
+} from '../services/staffOnboardingSync.service.js';
+import {
+  generateStaffContractBuffers,
+  getStaffContractTemplate,
+  persistStaffContractDocx,
+  persistStaffContractFile
+} from '../services/staffContractFill.service.js';
+import { listPoliciesForStaffOnboarding } from '../services/onboardingDocumentPacks.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -45,14 +56,6 @@ function validateToken(token) {
 
 function getOnboarding(staffId) {
   return db.prepare('SELECT * FROM staff_onboarding WHERE staff_id = ?').get(staffId);
-}
-
-/** Flat map staff_intake_fields rows → key/value for hydrating the public form */
-function getStaffIntakeFieldMap(staffOnboardingId) {
-  const rows = db.prepare('SELECT field_key, field_value FROM staff_intake_fields WHERE staff_onboarding_id = ?').all(staffOnboardingId);
-  const m = {};
-  for (const r of rows) m[r.field_key] = r.field_value;
-  return m;
 }
 
 /**
@@ -187,12 +190,45 @@ router.post('/renew/:token/upload', (req, res, next) => {
   }
 });
 
+// GET /api/public/staff-onboarding/:token/employment-contract - prefilled docx/pdf (validates token)
+router.get('/:token/employment-contract', async (req, res) => {
+  try {
+    const staff = validateToken(req.params.token);
+    if (!staff) return res.status(404).json({ error: 'Invalid or expired link' });
+    const onboarding = getOnboarding(staff.id);
+    if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
+
+    const staffRow = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff.id);
+    const rawIntake = getStaffIntakeFieldMap(onboarding.id);
+    const merged = mergeStaffIntakeForProfile(rawIntake, staffRow?.name);
+    const { docx, pdf, templateMeta } = await generateStaffContractBuffers(staffRow, merged, onboarding.provider_profile_id);
+    if (!pdf?.length && !docx?.length) {
+      return res.status(404).json({ error: 'No employment contract template configured for your organisation.' });
+    }
+    const base = (templateMeta?.displayName || 'employment-contract').replace(/[^a-zA-Z0-9-_]+/g, '_');
+    if (pdf?.length) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${base}.pdf"`);
+      return res.send(pdf);
+    }
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${base}.docx"`);
+    return res.send(docx);
+  } catch (err) {
+    console.error('[staff-onboarding employment-contract]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/public/staff-onboarding/:token/policy/:policyId - serve policy PDF (validates token)
 router.get('/:token/policy/:policyId', (req, res) => {
   const staff = validateToken(req.params.token);
   if (!staff) return res.status(404).send('Invalid or expired link');
   const policy = db.prepare('SELECT id, display_name, file_path FROM company_policy_files WHERE id = ?').get(req.params.policyId);
   if (!policy) return res.status(404).send('Policy not found');
+  const onboarding = getOnboarding(staff.id);
+  const allowed = listPoliciesForStaffOnboarding(onboarding?.provider_profile_id, onboarding?.document_pack_id).some((p) => p.id === req.params.policyId);
+  if (!allowed) return res.status(404).send('Policy not found');
   const fullPath = join(projectRoot, policy.file_path);
   if (!existsSync(fullPath)) return res.status(404).send('File not found');
   res.setHeader('Content-Type', 'application/pdf');
@@ -212,7 +248,10 @@ router.get('/:token', (req, res) => {
     const staffRow = db.prepare('SELECT name, email, role, employment_type, hourly_rate FROM staff WHERE id = ?').get(staff.id);
     let policyFiles = [];
     if (onboarding.provider_profile_id) {
-      policyFiles = db.prepare('SELECT id, display_name, file_path FROM company_policy_files WHERE provider_profile_id = ?').all(onboarding.provider_profile_id);
+      policyFiles = listPoliciesForStaffOnboarding(onboarding.provider_profile_id, onboarding.document_pack_id).map((p) => ({
+        id: p.id,
+        display_name: p.display_name
+      }));
     }
     const rawIntake = getStaffIntakeFieldMap(onboarding.id);
     const normPersonal = normalizeStaffPersonalFields(rawIntake, staffRow?.name);
@@ -226,9 +265,10 @@ router.get('/:token', (req, res) => {
         hourly_rate: staffRow?.hourly_rate,
       },
       intakeFields,
-      policyFiles: policyFiles.map((p) => ({ id: p.id, display_name: p.display_name })),
+      policyFiles,
       currentStep: onboarding.current_step,
       status: onboarding.status,
+      employmentContractAvailable: Boolean(getStaffContractTemplate(onboarding.provider_profile_id)),
     });
   } catch (err) {
     console.error('[staff-onboarding GET]', err);
@@ -264,10 +304,10 @@ router.post('/:token/step', (req, res) => {
     }
 
     if (stepNum === 1 && data && typeof data === 'object') {
-      const displayName = composeStaffDisplayName(data);
-      if (displayName) {
-        db.prepare('UPDATE staff SET name = ?, updated_at = datetime(\'now\') WHERE id = ?').run(displayName, staff.id);
-      }
+      const intakeMerged = mergeStaffIntakeForProfile(getStaffIntakeFieldMap(onboarding.id), staff.name);
+      applyStaffIntakeToStaffRow(staff.id, intakeMerged, {
+        onlyKeys: new Set(['name', 'phone', 'address', 'date_of_birth', 'emergency_contact_name', 'emergency_contact_phone'])
+      });
     }
 
     if (stepNum === 2 && data) {
@@ -291,6 +331,25 @@ router.post('/:token/step', (req, res) => {
             INSERT INTO staff_sensitive_data (id, staff_id, tfn_encrypted, bank_bsb, bank_account_encrypted, super_fund_name, super_member_number)
             VALUES (?, ?, ?, ?, ?, ?, ?)
           `).run(uuidv4(), staff.id, encTfn, bankBsb || null, encAccount, superFund || null, superMember || null);
+        }
+      }
+      const intakeMerged = mergeStaffIntakeForProfile(getStaffIntakeFieldMap(onboarding.id), staff.name);
+      applyStaffIntakeToStaffRow(staff.id, intakeMerged, {
+        onlyKeys: new Set(['role', 'employment_type', 'hourly_rate', 'abn'])
+      });
+    }
+
+    if (stepNum === 4 && data && typeof data === 'object' && data.policy_acknowledged) {
+      const sig = data.signature != null ? String(data.signature) : '';
+      if (onboarding.provider_profile_id) {
+        const policies = listPoliciesForStaffOnboarding(onboarding.provider_profile_id, onboarding.document_pack_id);
+        db.prepare('DELETE FROM staff_policy_acknowledgements WHERE staff_onboarding_id = ?').run(onboarding.id);
+        const insertAck = db.prepare(`
+          INSERT INTO staff_policy_acknowledgements (id, staff_onboarding_id, policy_file_id, signature_data, acknowledged_at)
+          VALUES (?, ?, ?, ?, datetime('now'))
+        `);
+        for (const p of policies) {
+          insertAck.run(uuidv4(), onboarding.id, p.id, sig);
         }
       }
     }
@@ -350,7 +409,6 @@ router.post('/:token/upload-document', (req, res, next) => {
 
     const filePath = req.file.path;
     let expiryDate = req.body?.expiry_date || null;
-    // PLACEHOLDER: integrate OCR service; otherwise use manual expiry from request body
     if (!expiryDate) {
       const extracted = await extractExpiryFromDocument(filePath);
       if (extracted) expiryDate = extracted;
@@ -404,7 +462,28 @@ router.post('/:token/submit', async (req, res) => {
     if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
     if (onboarding.status === 'complete') return res.status(400).json({ error: 'Already complete' });
 
-    const staffRow = db.prepare('SELECT name FROM staff WHERE id = ?').get(staff.id);
+    const staffRowFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff.id);
+    const rawIntake = getStaffIntakeFieldMap(onboarding.id);
+    const normPersonal = normalizeStaffPersonalFields(rawIntake, staffRowFull?.name);
+    const mergedIntake = { ...rawIntake, ...normPersonal };
+    applyStaffIntakeToStaffRow(staff.id, mergedIntake);
+
+    const staffAfterSync = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff.id);
+    const { docx: contractDocx, pdf: contractPdf, templateMeta } = await generateStaffContractBuffers(
+      staffAfterSync,
+      mergedIntake,
+      onboarding.provider_profile_id
+    );
+    try {
+      if (contractPdf?.length && !contractDocx?.length) {
+        persistStaffContractFile(staff.id, contractPdf, 'pdf');
+      } else if (contractDocx?.length) {
+        persistStaffContractDocx(staff.id, contractDocx);
+      }
+    } catch (e) {
+      console.warn('[staff-onboarding submit] persist contract:', e?.message);
+    }
+
     const docs = db.prepare('SELECT id, document_type, file_path FROM staff_compliance_documents WHERE staff_id = ?').all(staff.id);
 
     for (const doc of docs) {
@@ -424,7 +503,7 @@ router.post('/:token/submit', async (req, res) => {
           console.warn('[staff-onboarding submit] org OneDrive push skip:', e?.message);
         }
         try {
-          await uploadFileToStaffFolder(staffRow?.name, doc.file_path, fullPath, `${doc.document_type}.${(doc.file_path || '').split('.').pop() || 'pdf'}`);
+          await uploadFileToStaffFolder(staffRowFull?.name, doc.file_path, fullPath, `${doc.document_type}.${(doc.file_path || '').split('.').pop() || 'pdf'}`);
         } catch (e) {
           console.warn('[staff-onboarding submit] legacy OneDrive upload skip:', e?.message);
         }
@@ -441,12 +520,30 @@ router.post('/:token/submit', async (req, res) => {
       const adminUsers = db
         .prepare(`SELECT id, email FROM users WHERE role = 'admin' AND org_id = ? ORDER BY created_at ASC`)
         .all(orgId);
-      const subject = 'Staff onboarding complete – ' + (staffRow?.name || staff.id);
-      const text = `Staff member ${staffRow?.name || staff.id} has completed their onboarding form. Review their profile and compliance documents in Nexus Core.`;
+      const subject = 'Staff onboarding complete – ' + (staffRowFull?.name || staff.id);
+      let text = `Staff member ${staffRowFull?.name || staff.id} has completed their onboarding form. Review their profile and compliance documents in Nexus Core.`;
+      const safeBase = (templateMeta?.displayName || 'Employment-contract').replace(/[^a-zA-Z0-9-_]+/g, '_');
+      const contractAttachments = [];
+      if (contractPdf?.length) {
+        contractAttachments.push({
+          filename: `${safeBase}.pdf`,
+          content: contractPdf,
+          contentType: 'application/pdf'
+        });
+      } else if (contractDocx?.length) {
+        contractAttachments.push({
+          filename: `${safeBase}.docx`,
+          content: contractDocx,
+          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        });
+      }
+      if (contractAttachments.length) {
+        text += '\n\nA prefilled employment contract is attached for signing.';
+      }
       for (const adminUser of adminUsers) {
         if (!adminUser?.email || !isEmailConfiguredForUser(adminUser.id)) continue;
         try {
-          await sendEmailViaRelay(adminUser.id, adminUser.email, subject, text, null, null);
+          await sendEmailViaRelay(adminUser.id, adminUser.email, subject, text, null, contractAttachments.length ? contractAttachments : null);
         } catch (e) {
           console.warn('[staff-onboarding submit] Admin notify failed:', e?.message);
         }

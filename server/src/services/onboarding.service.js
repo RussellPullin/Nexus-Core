@@ -948,7 +948,7 @@ export function getProviderComplianceDashboard(organisationId) {
 export function getTemplateCoverage(providerProfileId, options = {}) {
   const { workflow: filterWorkflow } = options;
   let sql = `
-    SELECT t.id, t.form_type, t.display_name, t.version, t.is_active, t.workflow, t.template_filename, prf.is_required
+    SELECT t.id, t.form_type, t.display_name, t.version, t.is_active, t.workflow, t.template_filename, t.mapping_json, prf.is_required
     FROM form_templates t
     LEFT JOIN provider_required_forms prf ON prf.form_template_id = t.id
     WHERE t.provider_profile_id = ?
@@ -967,7 +967,7 @@ export function getTemplateCoverage(providerProfileId, options = {}) {
 }
 
 export function updateFormTemplate(templateId, updates) {
-  const allowed = ['display_name', 'is_active', 'workflow'];
+  const allowed = ['display_name', 'is_active', 'workflow', 'mapping_json'];
   const setClause = [];
   const values = [];
   for (const key of allowed) {
@@ -975,6 +975,10 @@ export function updateFormTemplate(templateId, updates) {
     if (key === 'is_active') {
       setClause.push('is_active = ?');
       values.push(updates[key] ? 1 : 0);
+    } else if (key === 'mapping_json') {
+      const v = updates.mapping_json;
+      setClause.push('mapping_json = ?');
+      values.push(v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
     } else {
       setClause.push(`${key} = ?`);
       values.push(updates[key]);

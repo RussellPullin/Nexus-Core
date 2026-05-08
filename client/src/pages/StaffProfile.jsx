@@ -18,6 +18,7 @@ import {
   payRateFormFieldsFromRow,
   payRateOverridesFromFormFields,
 } from '../lib/payrollRates.js';
+import { NEXUS_CORE_SIGN_COMING_SOON_TITLE } from '../lib/featureFlags.js';
 
 const PAYROLL_SHIFT_STATUSES = ['completed', 'completed_by_admin'];
 
@@ -52,8 +53,11 @@ export default function StaffProfile() {
   const [saving, setSaving] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [onboardingSending, setOnboardingSending] = useState(false);
+  const [contractDownloading, setContractDownloading] = useState(false);
   const [complianceDocs, setComplianceDocs] = useState([]);
   const [policyFiles, setPolicyFiles] = useState([]);
+  const [staffOnboardingDocPacks, setStaffOnboardingDocPacks] = useState([]);
+  const [staffOnboardingPackChoice, setStaffOnboardingPackChoice] = useState('');
   const [policyUploading, setPolicyUploading] = useState(false);
   const [renewalSending, setRenewalSending] = useState(false);
   const [complianceUploading, setComplianceUploading] = useState(false);
@@ -89,12 +93,15 @@ export default function StaffProfile() {
       setAssignments(assignList || []);
       setParticipantsList(partList || []);
       setStaffShifts(shiftsList || []);
-      const [compList, policyList] = await Promise.all([
+      const [compList, policyList, packsRes] = await Promise.all([
         staff.getComplianceDocuments(id).catch(() => []),
-        forms.policyFilesList().catch(() => [])
+        forms.policyFilesList().catch(() => []),
+        forms.onboardingDocumentPacks().catch(() => null)
       ]);
       setComplianceDocs(Array.isArray(compList) ? compList : []);
       setPolicyFiles(Array.isArray(policyList) ? policyList : []);
+      const packs = (packsRes?.packs || []).filter((p) => p.workflow === 'staff_onboarding' || p.workflow === 'both');
+      setStaffOnboardingDocPacks(packs);
       setEditForm(staffEditFormFromRow(staffData));
     } catch (err) {
       console.error('StaffProfile load:', err);
@@ -198,6 +205,17 @@ export default function StaffProfile() {
     }
   };
 
+  const handleDownloadEmploymentContract = async () => {
+    setContractDownloading(true);
+    try {
+      await staff.downloadEmploymentContract(id);
+    } catch (err) {
+      alert(err.message || 'Could not download contract');
+    } finally {
+      setContractDownloading(false);
+    }
+  };
+
   const handleStartOnboarding = async (isResend = false) => {
     if (!data?.email) {
       alert('Add an email address for this staff member first.');
@@ -209,7 +227,8 @@ export default function StaffProfile() {
     if (!confirm(confirmMsg)) return;
     setOnboardingSending(true);
     try {
-      await staff.startOnboarding(id);
+      const body = staffOnboardingPackChoice ? { pack_id: staffOnboardingPackChoice } : {};
+      await staff.startOnboarding(id, body);
       alert('Onboarding email sent. The staff member can complete the form using the link in the email.');
       load();
     } catch (err) {
@@ -387,21 +406,57 @@ export default function StaffProfile() {
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-          <h2 style={{ marginTop: 0, marginBottom: 0 }}>{data.name}</h2>
-          {data.archived_at && <span className="archived-badge">(archived)</span>}
-          {data.onboarding_status === 'complete' && <span className="badge" style={{ background: '#22c55e', color: '#fff', padding: '0.2rem 0.5rem', borderRadius: 4, fontSize: '0.8rem' }}>Onboarding complete</span>}
-          {data.onboarding_status === 'in_progress' && <span className="badge" style={{ background: '#f59e0b', color: '#fff', padding: '0.2rem 0.5rem', borderRadius: 4, fontSize: '0.8rem' }}>Onboarding in progress</span>}
-          {(!data.onboarding_status || data.onboarding_status === 'not_started') && <span className="badge" style={{ background: '#64748b', color: '#fff', padding: '0.2rem 0.5rem', borderRadius: 4, fontSize: '0.8rem' }}>Onboarding not started</span>}
-          {(!data.onboarding_status || data.onboarding_status === 'not_started') && data.email && (
-            <button type="button" className="btn btn-primary" onClick={() => handleStartOnboarding(false)} disabled={onboardingSending} style={{ marginLeft: 'auto' }}>
-              {onboardingSending ? 'Sending…' : 'Onboard'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', minWidth: 0 }}>
+            <h2 style={{ marginTop: 0, marginBottom: 0 }}>{data.name}</h2>
+            {data.archived_at && <span className="archived-badge">(archived)</span>}
+            {data.onboarding_status === 'complete' && <span className="badge" style={{ background: '#22c55e', color: '#fff', padding: '0.2rem 0.5rem', borderRadius: 4, fontSize: '0.8rem' }}>Onboarding complete</span>}
+            {data.onboarding_status === 'in_progress' && <span className="badge" style={{ background: '#f59e0b', color: '#fff', padding: '0.2rem 0.5rem', borderRadius: 4, fontSize: '0.8rem' }}>Onboarding in progress</span>}
+            {(!data.onboarding_status || data.onboarding_status === 'not_started') && <span className="badge" style={{ background: '#64748b', color: '#fff', padding: '0.2rem 0.5rem', borderRadius: 4, fontSize: '0.8rem' }}>Onboarding not started</span>}
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginLeft: 'auto' }}>
+            {data.email && (
+              <div className="form-group" style={{ marginBottom: 0, minWidth: 0 }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: 2 }}>Policy PDF pack</label>
+                <select
+                  value={staffOnboardingPackChoice}
+                  onChange={(e) => setStaffOnboardingPackChoice(e.target.value)}
+                  style={{ maxWidth: 220, padding: '0.35rem' }}
+                  disabled={onboardingSending}
+                  title="Choose which policy PDFs attach to the onboarding email. Organisation default is set under Forms → Form development."
+                >
+                  <option value="">Organisation default</option>
+                  {staffOnboardingDocPacks.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.display_name}
+                      {p.item_count != null ? ` (${p.item_count})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {(!data.onboarding_status || data.onboarding_status === 'not_started') && data.email && (
+              <button type="button" className="btn btn-primary" onClick={() => handleStartOnboarding(false)} disabled={onboardingSending}>
+                {onboardingSending ? 'Sending…' : 'Onboard'}
+              </button>
+            )}
+            {data.onboarding_status === 'in_progress' && data.email && (
+              <button type="button" className="btn btn-secondary" onClick={() => handleStartOnboarding(true)} disabled={onboardingSending}>
+                {onboardingSending ? 'Sending…' : 'Resend onboarding email'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleDownloadEmploymentContract}
+              disabled={contractDownloading}
+              title="Prefilled employment contract from Forms → Staff (PDF or Word)"
+            >
+              {contractDownloading ? 'Downloading…' : 'Download to sign'}
             </button>
-          )}
-          {data.onboarding_status === 'in_progress' && data.email && (
-            <button type="button" className="btn btn-secondary" onClick={() => handleStartOnboarding(true)} disabled={onboardingSending} style={{ marginLeft: 'auto' }}>
-              {onboardingSending ? 'Sending…' : 'Resend onboarding email'}
+            <button type="button" className="btn btn-primary" disabled title={NEXUS_CORE_SIGN_COMING_SOON_TITLE}>
+              Sign with Nexus Core
             </button>
-          )}
+          </div>
         </div>
 
         {!showEdit ? (
@@ -694,8 +749,10 @@ export default function StaffProfile() {
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h3>Company policy PDFs (for onboarding emails)</h3>
-        {/* PLACEHOLDER: connect this to the list used in onboarding emails; policy files here are attached when admin clicks Onboard */}
-        <p style={{ color: '#64748b', marginBottom: '1rem' }}>These PDFs are attached to the welcome email when you click Onboard. Upload policies for new staff to read and acknowledge.</p>
+        <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+          These PDFs can be attached to staff welcome emails (Onboard) and participant onboarding packs. Group them into packs and set organisation defaults under{' '}
+          <strong>Forms → Form development → Onboarding document packs</strong>.
+        </p>
         <div style={{ marginBottom: '1rem' }}>
           <input type="file" accept=".pdf" onChange={handlePolicyUpload} disabled={policyUploading} />
           {policyUploading && <span style={{ marginLeft: '0.5rem' }}>Uploading…</span>}

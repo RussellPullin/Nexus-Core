@@ -20,6 +20,7 @@ import FinancialPage from './pages/FinancialPage';
 import CaseTasksPage from './pages/CaseTasksPage';
 import OnboardingPage from './pages/OnboardingPage';
 import AdminPage from './pages/AdminPage';
+import RegistersPage from './pages/RegistersPage';
 import FeatureFlagsAdminPage from './pages/FeatureFlagsAdminPage';
 import LoginPage from './pages/LoginPage';
 import SetupOrgPage from './pages/SetupOrgPage';
@@ -166,6 +167,11 @@ function Layout({ productSurface, children }) {
           <NavLink to={`${prefix}/forms`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Forms
           </NavLink>
+          {canManageUsers && (
+            <NavLink to={`${prefix}/registers`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              Registers
+            </NavLink>
+          )}
           {canManageUsers && (
             <NavLink to={`${prefix}/admin`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               Admin
@@ -328,6 +334,7 @@ export default function App() {
           <Route path="/forms" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
           <Route path="/admin/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/registers" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
 
           <Route path="/" element={<ProtectedRoute><DefaultProductRedirect /></ProtectedRoute>} />
 
@@ -350,6 +357,7 @@ export default function App() {
               <Route path="onboarding/:id" element={<OnboardingPage />} />
               <Route path="forms" element={<FormsPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="registers" element={<RegistersPage />} />
               <Route path="admin" element={<AdminPage />} />
               <Route path="admin/feature-flags" element={<FeatureFlagsAdminPage />} />
             </Route>

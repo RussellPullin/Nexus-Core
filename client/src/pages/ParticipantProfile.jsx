@@ -4,6 +4,7 @@ import { backToPreviousListPath, participantProfileBackLabel } from '../lib/list
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { participants, organisations, ndis, smartDefaults, onboarding, formTemplates } from '../lib/api';
+import { NEXUS_CORE_SIGN_COMING_SOON_TITLE } from '../lib/featureFlags.js';
 import CopyableField from '../components/CopyableField';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate, toInputDate } from '../lib/dateUtils';
@@ -2825,6 +2826,9 @@ export default function ParticipantProfile() {
               </button>
 
               <h4 style={{ marginTop: '1.5rem' }}>Generated agreements</h4>
+              <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem' }}>
+                Download to sign with your own process. Nexus Core e-sign (Adobe) will appear on Sign with Nexus Core when that integration is finalised.
+              </p>
               {saAgreements.length === 0 ? (
                 <p className="empty-state">None yet.</p>
               ) : (
@@ -2845,8 +2849,17 @@ export default function ParticipantProfile() {
                         <td>{g.status || '—'}</td>
                         <td>
                           <a className="btn btn-secondary" style={{ fontSize: '0.8rem' }} href={formTemplates.generatedPdfUrl(g.id)} target="_blank" rel="noopener noreferrer">
-                            Download PDF
+                            Download to sign
                           </a>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            style={{ fontSize: '0.8rem', marginLeft: 6 }}
+                            disabled
+                            title={NEXUS_CORE_SIGN_COMING_SOON_TITLE}
+                          >
+                            Sign with Nexus Core
+                          </button>
                           {g.onedrive_web_url ? (
                             <a
                               href={g.onedrive_web_url}

@@ -41,6 +41,10 @@ export const users = {
   revokeDelegate: (userId) => fetchApi(`/users/delegate-grants/${userId}`, { method: 'DELETE' })
 };
 
+export const registers = {
+  snapshot: () => fetchApi('/registers/snapshot')
+};
+
 export const admin = {
   coordinatorActivity: (params) => fetchApi(`/admin/coordinator-activity?${new URLSearchParams(params || {}).toString()}`),
   billableSummary: (params) => fetchApi(`/admin/billable-summary?${new URLSearchParams(params || {}).toString()}`),
@@ -454,7 +458,7 @@ export const staff = {
   removeAssignment: (staffId, assignmentId) => fetchApi(`/staff/${staffId}/assignments/${assignmentId}`, { method: 'DELETE' }),
   getExcelSummary: (staffId) => fetchApi(`/staff/${staffId}/excel-summary`),
   getShiftHoursSummary: (staffId) => fetchApi(`/staff/${staffId}/shift-hours-summary`),
-  startOnboarding: (staffId) => fetchApi(`/staff/${staffId}/start-onboarding`, { method: 'POST' }),
+  startOnboarding: (staffId, body) => fetchApi(`/staff/${staffId}/start-onboarding`, { method: 'POST', body: JSON.stringify(body || {}) }),
   getComplianceDocuments: (staffId) => fetchApi(`/staff/${staffId}/compliance-documents`),
   updateComplianceDocumentExpiry: (staffId, docId, expiryDate) =>
     fetchApi(`/staff/${staffId}/compliance-documents/${docId}`, { method: 'PATCH', body: JSON.stringify({ expiry_date: expiryDate || null }) }),
@@ -496,7 +500,27 @@ export const staff = {
     return text ? JSON.parse(text) : null;
   },
   sendShifterInvites: (staff_ids) =>
-    fetchApi('/staff/shifter-invites', { method: 'POST', body: JSON.stringify({ staff_ids }) })
+    fetchApi('/staff/shifter-invites', { method: 'POST', body: JSON.stringify({ staff_ids }) }),
+  /** Browser-only: downloads prefilled employment contract (PDF; from fillable PDF template or Word path + conversion when applicable). */
+  downloadEmploymentContract: async (staffId) => {
+    const res = await fetch(`${API}/staff/${staffId}/employment-contract`, { credentials: 'include' });
+    if (!res.ok) {
+      const text = await res.text();
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || res.statusText);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition');
+    let filename = 'employment-contract.pdf';
+    const m = cd && /filename="([^"]+)"/i.exec(cd);
+    if (m) filename = m[1];
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 };
 
 export const shifts = {
@@ -733,6 +757,8 @@ export const onboarding = {
     method: 'POST',
     body: JSON.stringify({ provider_organisation_id: providerOrganisationId || null })
   }),
+  sendOnboardingPack: (participantId, body) =>
+    fetchApi(`/onboarding/participants/${participantId}/send-onboarding-pack`, { method: 'POST', body: JSON.stringify(body || {}) }),
   get: (participantId) => fetchApi(`/onboarding/participants/${participantId}`),
   status: (participantId) => fetchApi(`/onboarding/participants/${participantId}/status`),
   updateIntakeFields: (participantId, fields) => fetchApi(`/onboarding/participants/${participantId}/intake-fields`, {
@@ -823,6 +849,21 @@ export const forms = {
     }
     return text ? JSON.parse(text) : null;
   },
+  contractUploadAnalyze: async (templateId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API}/forms/templates/${templateId}/contract-upload-analyze`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Analyze failed');
+    }
+    return text ? JSON.parse(text) : null;
+  },
   policyFilesList: () => fetchApi('/forms/policy-files'),
   policyFilesUpload: async (file, displayName) => {
     const form = new FormData();
@@ -836,5 +877,14 @@ export const forms = {
     }
     return text ? JSON.parse(text) : null;
   },
-  policyFilesDelete: (id) => fetchApi(`/forms/policy-files/${id}`, { method: 'DELETE' })
+  policyFilesDelete: (id) => fetchApi(`/forms/policy-files/${id}`, { method: 'DELETE' }),
+  onboardingDocumentPacks: () => fetchApi('/forms/onboarding-document-packs'),
+  createOnboardingDocumentPack: (data) => fetchApi('/forms/onboarding-document-packs', { method: 'POST', body: JSON.stringify(data || {}) }),
+  updateOnboardingDocumentPack: (packId, data) =>
+    fetchApi(`/forms/onboarding-document-packs/${packId}`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
+  deleteOnboardingDocumentPack: (packId) => fetchApi(`/forms/onboarding-document-packs/${packId}`, { method: 'DELETE' }),
+  setOnboardingDocumentPackItems: (packId, policy_file_ids) =>
+    fetchApi(`/forms/onboarding-document-packs/${packId}/items`, { method: 'PUT', body: JSON.stringify({ policy_file_ids }) }),
+  patchOnboardingDocumentPackDefaults: (data) =>
+    fetchApi('/forms/onboarding-document-packs-defaults', { method: 'PATCH', body: JSON.stringify(data || {}) })
 };

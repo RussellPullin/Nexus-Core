@@ -27,6 +27,8 @@ import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { fillConsentForm, getConsentFormPath, convertDocxToPdf } from '../services/consentForm.service.js';
 import { tryPushParticipantDocument } from '../services/orgOnedriveSync.service.js';
+import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from '../services/notification.service.js';
+import { buildPolicyAttachmentsForEmail } from '../services/onboardingDocumentPacks.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
@@ -69,6 +71,77 @@ router.post('/participants/:id/initialize', (req, res) => {
     res.status(201).json(payload);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    if (!isEmailConfiguredForUser(userId)) {
+      return res.status(400).json({
+        error: 'Connect your email in Settings to send messages.',
+        code: 'EMAIL_NOT_CONNECTED'
+      });
+    }
+
+    const onboarding = getOnboardingByParticipant(req.params.id);
+    if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
+
+    const participant = db.prepare(`SELECT id, name, email FROM participants WHERE id = ?`).get(req.params.id);
+    if (!participant?.email?.trim()) return res.status(400).json({ error: 'Participant has no email address' });
+
+    const explicitPack = req.body?.pack_id != null && req.body.pack_id !== '' ? String(req.body.pack_id) : null;
+    const { attachments, resolvedPackId } = buildPolicyAttachmentsForEmail(
+      onboarding.provider_profile_id,
+      explicitPack,
+      'participant_onboarding',
+      projectRoot
+    );
+    if (!attachments.length) {
+      return res.status(400).json({
+        error:
+          'No PDFs to attach. Upload company policy PDFs (Staff profile → Company policy PDFs), create an onboarding pack under Forms → Form development, and add PDFs to that pack.'
+      });
+    }
+
+    db.prepare(
+      `UPDATE participant_onboarding SET document_pack_id = ?, last_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
+    ).run(resolvedPackId, onboarding.id);
+
+    const pp = db.prepare(`SELECT organisation_id FROM provider_profiles WHERE id = ?`).get(onboarding.provider_profile_id);
+    const org = pp?.organisation_id ? db.prepare(`SELECT name FROM organisations WHERE id = ?`).get(pp.organisation_id) : null;
+    const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
+
+    const subject = `Onboarding documents – ${orgName}`;
+    let text = `Hi ${participant.name || 'there'},\n\n`;
+    text += `Please find attached documents from ${orgName}. Keep them for your records.\n\n`;
+    text += `Your coordinator will guide you through the rest of onboarding in Nexus Core.\n\n`;
+    text += `If you have questions, reply to this email.\n`;
+
+    const attachmentsForEmail = attachments.map((a) => ({
+      ...a,
+      content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content
+    }));
+    await sendEmailViaRelay(userId, participant.email.trim(), subject, text, null, attachmentsForEmail);
+
+    createAuditEvent({
+      participantId: req.params.id,
+      participantOnboardingId: onboarding.id,
+      actorType: 'user',
+      actorId: userId,
+      eventType: 'onboarding_document_pack_sent',
+      entityType: 'onboarding',
+      entityId: onboarding.id,
+      newValue: { pack_id: resolvedPackId, attachment_count: attachments.length },
+      sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
+      userAgent: req.headers['user-agent'] || null
+    });
+
+    res.json({ ok: true, pack_id: resolvedPackId, attachment_count: attachments.length });
+  } catch (err) {
+    console.error('[send-onboarding-pack]', err);
+    res.status(400).json({ error: formatSmtpAuthError(err) });
   }
 });
 
