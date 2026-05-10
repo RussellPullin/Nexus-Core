@@ -23,6 +23,34 @@ function cellStr(v) {
   return String(v);
 }
 
+/**
+ * Shifter stores the shift-level incident ticket as Yes/No in progress_notes.incidents.
+ * The incident register lists only rows where the ticket is Yes (not "No" or narrative-only).
+ */
+export function isIncidentTicketYes(incidents) {
+  const raw = String(incidents ?? '').trim();
+  if (!raw) return false;
+  const firstLine = raw.split(/\r?\n/)[0].trim();
+  const firstToken = firstLine.split(/[\s,:;–—-]+/)[0].toLowerCase();
+  return firstToken === 'yes' || firstToken === 'y';
+}
+
+/** Text for the Incident column: detail after "Yes", or session notes when the field is only the flag. */
+function incidentRegisterNarrative(incidents, sessionDetails) {
+  const raw = String(incidents ?? '').trim();
+  const sess = String(sessionDetails ?? '').trim();
+  if (!raw) return sess;
+  const lines = raw.split(/\r?\n/);
+  const firstLine = lines[0]?.trim() ?? '';
+  const rest = lines.slice(1).join('\n').trim();
+  const firstToken = firstLine.split(/[\s,:;–—-]+/)[0].toLowerCase();
+  if (firstToken === 'yes' || firstToken === 'y') {
+    if (rest) return rest;
+    return sess || firstLine;
+  }
+  return raw;
+}
+
 /** Human-readable columns for in-app tables (pad with "Column n" if row wider). */
 const REGISTER_UI_HEADERS = {
   Complaints: [
@@ -219,17 +247,19 @@ export function buildTemplateDataBySheet(organizationId) {
        ORDER BY datetime(pn.created_at) DESC`
     )
     .all(organizationId)
+    .filter((r) => isIncidentTicketYes(r.incidents))
     .map((r, i) => {
       const when = `${fmtDate(r.support_date)}${r.start_time ? ` ${r.start_time}` : ''}`.trim();
       const persons = `${r.participant_name || ''}${r.participant_email ? ` (${r.participant_email})` : ''}`;
+      const narrative = incidentRegisterNarrative(r.incidents, r.session_details);
       return [
         i + 1,
         i + 1,
         when,
         persons,
-        'Y',
+        'N',
         r.staff_name || '',
-        r.incidents || '',
+        narrative,
         'N',
         r.session_details || '',
         'Logged from Nexus progress notes',

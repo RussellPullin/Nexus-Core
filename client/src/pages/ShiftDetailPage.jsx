@@ -76,6 +76,8 @@ export default function ShiftDetailPage() {
   const [addChargeForm, setAddChargeForm] = useState({ ndis_line_item_id: '', quantity: '1', unit_price: '', claim_type: 'standard' });
   const [editingQty, setEditingQty] = useState(null);
   const [qtyValue, setQtyValue] = useState('');
+  const [editingPrice, setEditingPrice] = useState(null);
+  const [priceValue, setPriceValue] = useState('');
   const [travelItems, setTravelItems] = useState({ km: [], time: [] });
   const [showAddTravel, setShowAddTravel] = useState(false);
   const [addTravelQty, setAddTravelQty] = useState('');
@@ -308,8 +310,16 @@ export default function ShiftDetailPage() {
       quantity: qty,
       claim_type: addChargeForm.claim_type
     };
-    if (isQuotable && addChargeForm.unit_price != null && String(addChargeForm.unit_price).trim() !== '') {
-      payload.unit_price = parseFloat(addChargeForm.unit_price);
+    const priceStr = addChargeForm.unit_price != null ? String(addChargeForm.unit_price).trim() : '';
+    if (isQuotable) {
+      if (priceStr !== '') payload.unit_price = parseFloat(addChargeForm.unit_price);
+    } else if (priceStr !== '') {
+      const override = parseFloat(addChargeForm.unit_price);
+      if (Number.isNaN(override) || override < 0) {
+        alert('Override unit price must be a valid non-negative number.');
+        return;
+      }
+      payload.unit_price = override;
     }
     try {
       const added = await shifts.lineItems.add(id, payload);
@@ -333,6 +343,23 @@ export default function ShiftDetailPage() {
       setShiftLineItemsLockedInState(true);
       setEditingQty(null);
       setQtyValue('');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleUpdateUnitPrice = async (lineItem) => {
+    const p = parseFloat(priceValue);
+    if (Number.isNaN(p) || p < 0) {
+      alert('Unit price must be a valid non-negative number.');
+      return;
+    }
+    try {
+      const updated = await shifts.lineItems.update(id, lineItem.id, { unit_price: p });
+      setLineItems((prev) => prev.map((li) => (li.id === lineItem.id ? updated : li)));
+      setShiftLineItemsLockedInState(true);
+      setEditingPrice(null);
+      setPriceValue('');
     } catch (err) {
       alert(err.message);
     }
@@ -644,6 +671,7 @@ export default function ShiftDetailPage() {
                     <tr>
                       <th>Name</th>
                       <th>Quantity</th>
+                      <th>Unit price</th>
                       <th>Total cost</th>
                       <th>Claim Type</th>
                       <th style={{ width: 60 }}></th>
@@ -702,11 +730,68 @@ export default function ShiftDetailPage() {
                                 color: '#3b82f6'
                               }}
                               onClick={() => {
+                                setEditingPrice(null);
+                                setPriceValue('');
                                 setEditingQty(li.id);
                                 setQtyValue(String(li.quantity));
                               }}
                             >
                               {li.quantity} {li.unit}
+                            </button>
+                          )}
+                        </td>
+                        <td>
+                          {editingPrice === li.id ? (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.85rem' }}>$</span>
+                              <input
+                                type="number"
+                                className="no-spinner"
+                                value={priceValue}
+                                onChange={(e) => setPriceValue(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleUpdateUnitPrice(li)}
+                                step="0.01"
+                                min={0}
+                                style={{ width: 88, padding: '0.25rem' }}
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                                onClick={() => handleUpdateUnitPrice(li)}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                                onClick={() => { setEditingPrice(null); setPriceValue(''); }}
+                              >
+                                Cancel
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: '0.25rem',
+                                textAlign: 'left',
+                                color: '#3b82f6'
+                              }}
+                              title="Click to change unit price (e.g. discounted rate)"
+                              onClick={() => {
+                                setEditingQty(null);
+                                setQtyValue('');
+                                setEditingPrice(li.id);
+                                setPriceValue(String(li.unit_price ?? ''));
+                              }}
+                            >
+                              ${Number(li.unit_price || 0).toFixed(2)}
                             </button>
                           )}
                         </td>
@@ -881,21 +966,46 @@ export default function ShiftDetailPage() {
                 const selected = ndisItems.find((n) => n.id === addChargeForm.ndis_line_item_id);
                 const effRate = selected && getEffectiveNdisRate(selected, shift?.participant_remoteness || 'standard');
                 const isQuotable = selected && (effRate == null || Number(effRate) === 0);
-                return isQuotable ? (
-                  <div className="form-group">
-                    <label>Agreed unit price ($) *</label>
-                    <input
-                      type="number"
-                      className="no-spinner"
-                      value={addChargeForm.unit_price}
-                      onChange={(e) => setAddChargeForm({ ...addChargeForm, unit_price: e.target.value })}
-                      step="0.01"
-                      min="0"
-                      required
-                      placeholder="Enter agreed price per unit"
-                    />
-                  </div>
-                ) : null;
+                if (isQuotable) {
+                  return (
+                    <div className="form-group">
+                      <label>Agreed unit price ($) *</label>
+                      <input
+                        type="number"
+                        className="no-spinner"
+                        value={addChargeForm.unit_price}
+                        onChange={(e) => setAddChargeForm({ ...addChargeForm, unit_price: e.target.value })}
+                        step="0.01"
+                        min="0"
+                        required
+                        placeholder="Enter agreed price per unit"
+                      />
+                    </div>
+                  );
+                }
+                if (selected && effRate != null && Number(effRate) !== 0) {
+                  return (
+                    <div className="form-group">
+                      <label>
+                        Override unit price ($){' '}
+                        <span style={{ fontWeight: 400, color: '#64748b' }}>(optional)</span>
+                      </label>
+                      <input
+                        type="number"
+                        className="no-spinner"
+                        value={addChargeForm.unit_price}
+                        onChange={(e) => setAddChargeForm({ ...addChargeForm, unit_price: e.target.value })}
+                        step="0.01"
+                        min="0"
+                        placeholder={`Default ${Number(effRate).toFixed(2)} (NDIS catalogue)`}
+                      />
+                      <small style={{ display: 'block', marginTop: '0.35rem', color: '#64748b' }}>
+                        Leave blank to use the catalogue rate. Enter a lower amount for an agreed discount or special price.
+                      </small>
+                    </div>
+                  );
+                }
+                return null;
               })()}
               <div className="form-group">
                 <label>Claim Type</label>

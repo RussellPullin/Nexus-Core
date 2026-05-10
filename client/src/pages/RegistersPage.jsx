@@ -75,7 +75,7 @@ export default function RegistersPage() {
                 <button
                   type="button"
                   onClick={() => setActiveId(v.id)}
-                  className={v.id === active?.id ? 'nav-link active' : 'nav-link'}
+                  className={v.id === active?.id ? 'registers-nav-link registers-nav-link-active' : 'registers-nav-link'}
                   style={{
                     width: '100%',
                     textAlign: 'left',
@@ -125,7 +125,10 @@ export default function RegistersPage() {
               )}
               {active.row_count > 0 && (
                 <div style={{ overflowX: 'auto', maxHeight: 'min(60vh, 520px)', overflowY: 'auto' }}>
-                  <table className="table-condensed" style={{ fontSize: '0.82rem', whiteSpace: 'nowrap', width: '100%' }}>
+                  <table
+                    className="table-condensed registers-data-table"
+                    style={{ fontSize: '0.82rem', whiteSpace: 'nowrap', width: '100%' }}
+                  >
                     <thead>
                       <tr>
                         {active.columns.map((col, i) => (

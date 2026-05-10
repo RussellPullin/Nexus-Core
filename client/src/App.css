@@ -170,6 +170,24 @@ body {
   margin-bottom: 1rem;
 }
 
+/* Registers page: do not reuse .nav-link (sidebar = white text on dark bg) */
+.registers-nav-link {
+  color: var(--brand-text);
+}
+.registers-nav-link:hover {
+  color: var(--brand-teal-dark);
+  background: rgba(15, 23, 42, 0.06);
+}
+.registers-nav-link-active {
+  color: var(--brand-teal-dark);
+  font-weight: 600;
+}
+
+.registers-data-table thead th {
+  color: var(--brand-text);
+  background: var(--brand-surface-alt);
+}
+
 .table-wrap {
   overflow-x: auto;
 }
