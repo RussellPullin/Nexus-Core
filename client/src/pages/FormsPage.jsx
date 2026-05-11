@@ -37,6 +37,27 @@ function placeholdersFromTemplate(t) {
   return keys;
 }
 
+/** Normalize Ollama JSON: merge_map object with allowed values only. */
+function normalizeOllamaMergeMap(parsed, allowed) {
+  const raw =
+    parsed && typeof parsed.merge_map === 'object' && parsed.merge_map != null
+      ? parsed.merge_map
+      : parsed && typeof parsed === 'object'
+        ? parsed
+        : null;
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  const skip = new Set(['merge_map', 'fields', 'notes', 'field_labels']);
+  for (const [k, v] of Object.entries(raw)) {
+    if (skip.has(k)) continue;
+    const key = String(k || '').trim();
+    const val = String(v || '').trim();
+    if (!key || key.length > 220 || !allowed.includes(val)) continue;
+    out[key] = val;
+  }
+  return out;
+}
+
 export default function FormsPage() {
   const { user } = useAuth();
   const { productSurface } = useParams();
@@ -53,7 +74,8 @@ export default function FormsPage() {
   const [uploadFile, setUploadFile] = useState({});
   const [uploading, setUploading] = useState(null);
   const [analyzeByTemplateId, setAnalyzeByTemplateId] = useState({});
-  const [ollamaWorkingId, setOllamaWorkingId] = useState(null);
+  /** `map:${templateId}` | `read:${templateId}` */
+  const [ollamaKey, setOllamaKey] = useState(null);
 
   const [docPackData, setDocPackData] = useState(null);
   const [packWorking, setPackWorking] = useState(false);
@@ -113,7 +135,7 @@ export default function FormsPage() {
     try {
       await forms.createTemplate({ display_name: name, workflow });
       setNewLabelByWf((prev) => ({ ...prev, [workflow]: '' }));
-      setMessage('Document added. Upload a PDF in the table below, then detect fields or refine mapping with Ollama.');
+      setMessage('Document added. Upload a PDF in the table below, then use Detect (heuristics), Read form (Ollama), or Ollama map.');
       loadTemplates();
     } catch (err) {
       setMessage(err.message || 'Could not add document');
@@ -185,17 +207,111 @@ export default function FormsPage() {
     }
   };
 
+  const handleOllamaReadDocument = async (t, workflow) => {
+    const contractKey = `${t.id}_contract`;
+    const file = uploadFile[contractKey];
+    if (!file) {
+      setMessage(
+        'Choose a file in the second file picker (same as Detect). Nexus extracts text on the server; Ollama on this computer reads that text like a person to find fields.'
+      );
+      return;
+    }
+    const allowed = workflow === WF_STAFF ? STAFF_CONTRACT_MERGE_KEYS : PARTICIPANT_CONTRACT_MERGE_KEYS;
+    const baseUrl = resolveLocalOllamaBaseUrl(user);
+    const kind = workflow === WF_STAFF ? 'staff employment / HR' : 'NDIS participant onboarding';
+    setOllamaKey(`read:${t.id}`);
+    setMessage('');
+    try {
+      const data = await forms.contractAnalyzePreview(t.id, file);
+      const excerpt = String(data.text_excerpt || data.text_preview || '').trim();
+      const pdfFields = data.pdf_form_fields || [];
+      if (!excerpt && pdfFields.length === 0) {
+        setMessage('No text could be extracted from this file. Try a text-based PDF, Word document, or a clearer scan.');
+        return;
+      }
+      const model = await pickFirstLocalModelName(baseUrl);
+      if (!model) {
+        setMessage('Could not list Ollama models. Is Ollama running? For HTTPS sites set OLLAMA_ORIGINS to this site URL (see Settings → Ollama).');
+        return;
+      }
+      const excerptForModel = excerpt.slice(0, 26000);
+      const prompt = `You are reading a ${kind} form as a human would: headings, labels, blanks, tables, and any fill-in areas.
+
+Known PDF AcroForm field names (keys must match these EXACTLY when filling PDFs — use identical spelling/case): ${JSON.stringify(pdfFields)}
+
+Heuristic placeholder list (hints only; you may add more keys you find in the text): ${JSON.stringify(data.all_placeholders || [])}
+
+Document text (may be truncated):
+---
+${excerptForModel}
+---
+
+Task: infer every distinct merge target: PDF field names from the list above, plus Word-style {Placeholders} or line labels that need data.
+
+Return ONLY valid JSON of this exact shape:
+{"merge_map":{"ExactPdfOrPlaceholderKey":"one_of_allowed_keys",...},"notes":"optional brief note"}
+
+Rules:
+- Each VALUE must be exactly one string from this allowed list: ${JSON.stringify(allowed)}
+- Each KEY should be the exact PDF field name when it appears in the PDF field list; otherwise use the placeholder or the shortest stable label as it should appear for merge (often same as PDF field name).
+- Include every PDF field name from the list that is a real fill-in, mapped to the best allowed value.
+- Do not invent allowed keys; values must be from the list only.`;
+
+      const parsed = await generateLocalOllamaJson(baseUrl, model, prompt, 5000);
+      const ollamaMap = normalizeOllamaMergeMap(parsed, allowed);
+      if (!Object.keys(ollamaMap).length) {
+        setMessage(
+          'Ollama did not return a usable merge_map. Try a larger model, shorten the document, or run Detect then Ollama map. Ensure the JSON uses the merge_map key.'
+        );
+        return;
+      }
+
+      const existing = parseMappingJson(t.mapping_json);
+      const prevMap = existing.contract_field_map || {};
+      const mergedMap = { ...prevMap, ...ollamaMap };
+      const prevPh = Array.isArray(existing.contract_analysis?.all_placeholders) ? existing.contract_analysis.all_placeholders : [];
+      const mergedPh = [...new Set([...prevPh, ...(data.all_placeholders || []), ...Object.keys(ollamaMap)])];
+      const mapping_json = {
+        ...existing,
+        contract_field_map: mergedMap,
+        contract_analysis: {
+          ...(existing.contract_analysis || {}),
+          docx_placeholders: data.docx_placeholders,
+          pdf_form_fields: data.pdf_form_fields,
+          ocr_labels: data.ocr_labels,
+          ocr_used: data.ocr_used,
+          text_preview: data.text_preview,
+          file_kind: data.file_kind,
+          all_placeholders: mergedPh,
+          analyzed_at: new Date().toISOString(),
+          text_excerpt_length: excerpt.length
+        },
+        ollama_document_read: { at: new Date().toISOString(), model, keys: Object.keys(ollamaMap) }
+      };
+      await forms.updateTemplate(t.id, { mapping_json });
+      setAnalyzeByTemplateId((prev) => ({ ...prev, [t.id]: { ...data, all_placeholders: mergedPh, contract_field_map: mergedMap } }));
+      setMessage(
+        `Ollama read the document and saved ${Object.keys(ollamaMap).length} field mapping(s). Use “Detect” to persist server heuristics too, or “Ollama map” to tweak keys.`
+      );
+      loadTemplates();
+    } catch (err) {
+      setMessage(err.message || 'Ollama read failed');
+    } finally {
+      setOllamaKey(null);
+    }
+  };
+
   const handleOllamaRefineMapping = async (t, workflow) => {
     const placeholders =
       (analyzeByTemplateId[t.id]?.all_placeholders?.length && analyzeByTemplateId[t.id].all_placeholders) ||
       placeholdersFromTemplate(t);
     if (!placeholders.length) {
-      setMessage('Run “Detect fields” first, or ensure this template has saved analysis so Ollama has field names to map.');
+      setMessage('Run “Read form (Ollama)” or “Detect fields” first so there are field names to map.');
       return;
     }
     const allowed = workflow === WF_STAFF ? STAFF_CONTRACT_MERGE_KEYS : PARTICIPANT_CONTRACT_MERGE_KEYS;
     const baseUrl = resolveLocalOllamaBaseUrl(user);
-    setOllamaWorkingId(t.id);
+    setOllamaKey(`map:${t.id}`);
     setMessage('');
     try {
       const model = await pickFirstLocalModelName(baseUrl);
@@ -204,27 +320,24 @@ export default function FormsPage() {
         return;
       }
       const prompt = `You map PDF or Word form field names to data keys for mail merge.
-Respond with ONLY a single JSON object (no markdown, no explanation). Keys are form field names or placeholders exactly as listed. Values must be one of the allowed merge keys.
+Respond with ONLY a single JSON object (no markdown, no explanation). Use this exact shape: {"merge_map":{...}}
+
+Keys are form field names or placeholders exactly as listed. Values must be one of the allowed merge keys.
 
 Allowed merge keys (use only these as values): ${JSON.stringify(allowed)}
 
 Form field names and labels to map: ${JSON.stringify(placeholders)}
 
-Example output shape: {"EmployeeName":"employee_name","NDIS_Number":"ndis_number"}`;
-      const parsed = await generateLocalOllamaJson(baseUrl, model, prompt, 1200);
-      if (!parsed || typeof parsed !== 'object') {
-        setMessage('Ollama did not return valid JSON. Try again or adjust the model.');
+Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number"}}`;
+      const parsed = await generateLocalOllamaJson(baseUrl, model, prompt, 2200);
+      const ollamaMap = normalizeOllamaMergeMap(parsed, allowed);
+      if (!Object.keys(ollamaMap).length) {
+        setMessage('Ollama did not return a usable merge_map object.');
         return;
       }
       const existing = parseMappingJson(t.mapping_json);
       const prevMap = existing.contract_field_map || {};
-      const merged = { ...prevMap };
-      for (const [k, v] of Object.entries(parsed)) {
-        const key = String(k || '').trim();
-        const val = String(v || '').trim();
-        if (!key || !allowed.includes(val)) continue;
-        merged[key] = val;
-      }
+      const merged = { ...prevMap, ...ollamaMap };
       const mapping_json = {
         ...existing,
         contract_field_map: merged,
@@ -236,7 +349,7 @@ Example output shape: {"EmployeeName":"employee_name","NDIS_Number":"ndis_number
     } catch (err) {
       setMessage(err.message || 'Ollama mapping failed');
     } finally {
-      setOllamaWorkingId(null);
+      setOllamaKey(null);
     }
   };
 
@@ -408,11 +521,20 @@ Example output shape: {"EmployeeName":"employee_name","NDIS_Number":"ndis_number
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        disabled={ollamaWorkingId === t.id}
-                        onClick={() => handleOllamaRefineMapping(t, wf)}
-                        title="Uses Ollama in this browser only"
+                        disabled={uploading === contractKey || !uploadFile[contractKey] || ollamaKey === `read:${t.id}`}
+                        onClick={() => handleOllamaReadDocument(t, wf)}
+                        title="Server extracts text; Ollama on this PC reads the document to find fields (HTTPS: set OLLAMA_ORIGINS)"
                       >
-                        {ollamaWorkingId === t.id ? 'Ollama…' : 'Ollama map'}
+                        {ollamaKey === `read:${t.id}` ? 'Reading…' : 'Read form'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={ollamaKey === `map:${t.id}`}
+                        onClick={() => handleOllamaRefineMapping(t, wf)}
+                        title="Map known field names to profile keys using Ollama in this browser"
+                      >
+                        {ollamaKey === `map:${t.id}` ? 'Ollama…' : 'Ollama map'}
                       </button>
                       <button type="button" className="btn btn-secondary btn-sm" style={{ color: '#b91c1c' }} onClick={() => handleDeleteTemplate(t.id)}>
                         Delete
@@ -490,7 +612,7 @@ Example output shape: {"EmployeeName":"employee_name","NDIS_Number":"ndis_number
           {renderWorkflowSection(
             WF_PARTICIPANT,
             'Participant onboarding — upload form',
-            'Add each PDF you want included when onboarding packs are generated. Upload a fillable PDF, run Detect for heuristics, then Ollama map to refine placeholder → profile keys (Ollama runs in this browser only).',
+            'Add each PDF you want included when onboarding packs are generated. Detect uses OCR and patterns only. Read form sends document text to Ollama on this computer so it can infer fields the way a person would; then use Ollama map to adjust mappings.',
             null
           )}
           {renderWorkflowSection(

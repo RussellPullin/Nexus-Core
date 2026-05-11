@@ -156,6 +156,41 @@ ROUTER.post('/templates', (req, res) => {
   }
 });
 
+// POST /api/forms/templates/:id/contract-analyze-preview — extract text/fields only (no DB write); for browser Ollama "read document"
+ROUTER.post('/templates/:id/contract-analyze-preview', memoryUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    if (!req.file?.buffer) return res.status(400).json({ error: 'No file uploaded.' });
+
+    const template = db.prepare('SELECT id, workflow, form_type FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(req.params.id, profile.id);
+    if (!template || template.form_type !== 'custom') {
+      return res.status(404).json({ error: 'Custom form template not found.' });
+    }
+
+    const orig = req.file.originalname || '';
+    const lower = orig.toLowerCase();
+    const ext = lower.endsWith('.docx') ? 'docx' : lower.endsWith('.pdf') ? 'pdf' : /\.(png|jpe?g|webp)$/i.test(lower) ? 'image' : '';
+    if (!ext) {
+      return res.status(400).json({ error: 'Use .docx, .pdf, or an image (.png, .jpg, .webp).' });
+    }
+
+    const analysis = await analyzeContractTemplateBuffer(req.file.buffer, orig);
+    const workflowKind = template.workflow === 'staff_onboarding' ? 'staff' : 'participant';
+    const suggested_heuristic = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
+    res.json({
+      ok: true,
+      preview_only: true,
+      workflow_kind: workflowKind,
+      suggested_heuristic,
+      ...analysis
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/forms/templates/:id/contract-upload-analyze — upload contract; OCR/heuristics detect fields; save mapping_json + optional template file
 ROUTER.post('/templates/:id/contract-upload-analyze', memoryUpload.single('file'), async (req, res) => {
   try {

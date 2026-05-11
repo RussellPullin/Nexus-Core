@@ -865,6 +865,22 @@ export const forms = {
     }
     return text ? JSON.parse(text) : null;
   },
+  /** Text/field extraction only (no save). Use with local Ollama to infer fields from document wording. */
+  contractAnalyzePreview: async (templateId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API}/forms/templates/${templateId}/contract-analyze-preview`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Preview extract failed');
+    }
+    return text ? JSON.parse(text) : null;
+  },
   policyFilesList: () => fetchApi('/forms/policy-files'),
   policyFilesUpload: async (file, displayName) => {
     const form = new FormData();
