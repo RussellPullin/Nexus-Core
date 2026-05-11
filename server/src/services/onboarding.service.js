@@ -1,9 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
-import { getConsentFormPath, fillConsentForm, convertDocxToPdf } from './consentForm.service.js';
+import { getConsentFormPath, fillConsentForm, convertDocxToPdf, renderDocxTemplateBuffer } from './consentForm.service.js';
+import { getCustomTemplatePath } from './formTemplatePath.service.js';
+import { applyContractPlaceholderMap, buildParticipantCustomMergeData, fillStaffContractPdfBuffer } from './staffContractFill.service.js';
 import { ensurePlanManagerOrg, buildOrgLookupMaps } from './organisations.service.js';
 import { fillServiceAgreement, fillSupportPlan, getServiceAgreementTemplatePath, getSupportPlanTemplatePath } from './formFill.service.js';
 import { composeParticipantLegalName, participantPrefillFieldPaths } from '../../../shared/onboardingFieldRegistry.js';
@@ -532,8 +534,16 @@ export async function generateFormPack({
     : null;
 
   const allTemplates = getProviderTemplates(onboarding.provider_profile_id);
-  const templates = allTemplates.filter((t) => ['service_agreement', 'support_plan', 'privacy_consent'].includes(t.form_type));
-  if (!templates.length) throw new Error('No templates configured. Save intake first to enable auto-filled forms.');
+  const coreTemplates = allTemplates.filter((t) => ['service_agreement', 'support_plan', 'privacy_consent'].includes(t.form_type));
+  const customParticipantTemplates = allTemplates.filter(
+    (t) => t.form_type === 'custom' && (t.workflow || 'participant_onboarding') === 'participant_onboarding'
+  );
+  if (!coreTemplates.length && !customParticipantTemplates.length) {
+    throw new Error(
+      'No templates configured. Save intake first to enable auto-filled forms, or add a participant custom document under Forms.'
+    );
+  }
+  const templates = [...coreTemplates, ...customParticipantTemplates];
 
   const organisationId = onboarding.organisation_id || null;
   const pathOpts = (t) => ({
@@ -603,6 +613,35 @@ export async function generateFormPack({
         draftPath = persistGeneratedDraft(participantId, template.form_type, version, formSnapshot);
         sourceJson = JSON.stringify(formSnapshot);
       }
+    } else if (template.form_type === 'custom') {
+      const resolved = getCustomTemplatePath(template.id, template.template_filename);
+      if (!resolved) {
+        continue;
+      }
+      const mapping = parseJson(template.mapping_json, {});
+      const baseMerge = buildParticipantCustomMergeData(participant, plan, intake);
+      const data = applyContractPlaceholderMap(baseMerge, mapping.contract_field_map || {});
+      if (resolved.type === 'pdf') {
+        const pdfBytes = readFileSync(resolved.path);
+        const filled = await fillStaffContractPdfBuffer(pdfBytes, data);
+        draftPath = persistFilledDocument(participantId, template.form_type, version, filled, 'pdf');
+      } else {
+        const templateBuf = readFileSync(resolved.path);
+        const docx = renderDocxTemplateBuffer(templateBuf, data);
+        const pdfBuffer = convertDocxToPdf(docx);
+        const ext = pdfBuffer ? 'pdf' : 'docx';
+        draftPath = persistFilledDocument(participantId, template.form_type, version, pdfBuffer || docx, ext);
+      }
+      sourceJson = JSON.stringify({
+        ...snapshot,
+        template: {
+          id: template.id,
+          form_type: 'custom',
+          display_name: template.display_name,
+          version: template.template_version || template.version
+        },
+        mapping
+      });
     } else {
       const formSnapshot = {
         ...snapshot,
@@ -990,6 +1029,17 @@ export function updateFormTemplate(templateId, updates) {
   return db.prepare('SELECT * FROM form_templates WHERE id = ?').get(templateId);
 }
 
+function ensureProviderRequiredFormLink(providerProfileId, formTemplateId) {
+  const exists = db
+    .prepare('SELECT 1 FROM provider_required_forms WHERE provider_profile_id = ? AND form_template_id = ?')
+    .get(providerProfileId, formTemplateId);
+  if (exists) return;
+  db.prepare(`
+    INSERT INTO provider_required_forms (id, provider_profile_id, form_template_id, is_required)
+    VALUES (?, ?, ?, 1)
+  `).run(uuidv4(), providerProfileId, formTemplateId);
+}
+
 /** Create a custom form template. version = v1, v2, ... for form_type 'custom'. */
 export function createFormTemplate(providerProfileId, { display_name, workflow = 'participant_onboarding' }) {
   const nextVersion = db.prepare(`
@@ -1003,5 +1053,24 @@ export function createFormTemplate(providerProfileId, { display_name, workflow =
       id, provider_profile_id, form_type, display_name, version, is_active, workflow, renewal_days
     ) VALUES (?, ?, 'custom', ?, ?, 1, ?, 365)
   `).run(id, providerProfileId, display_name, version, workflow);
+  if (workflow === 'participant_onboarding') {
+    ensureProviderRequiredFormLink(providerProfileId, id);
+  }
   return db.prepare('SELECT * FROM form_templates WHERE id = ?').get(id);
+}
+
+/** Delete a custom template row and its file on disk. */
+export function deleteCustomFormTemplate(templateId, providerProfileId) {
+  const t = db.prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(templateId, providerProfileId);
+  if (!t || t.form_type !== 'custom') return false;
+  const resolved = getCustomTemplatePath(t.id, t.template_filename);
+  if (resolved?.path && existsSync(resolved.path)) {
+    try {
+      unlinkSync(resolved.path);
+    } catch {
+      /* ignore */
+    }
+  }
+  db.prepare('DELETE FROM form_templates WHERE id = ? AND provider_profile_id = ?').run(templateId, providerProfileId);
+  return true;
 }

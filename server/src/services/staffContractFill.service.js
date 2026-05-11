@@ -10,7 +10,11 @@ import { PDFDocument } from 'pdf-lib';
 import { db } from '../db/index.js';
 import { getCustomTemplatePath } from './formTemplatePath.service.js';
 import { renderDocxTemplateBuffer, convertDocxToPdf } from './consentForm.service.js';
-import { composeStaffDisplayName } from '../../../shared/onboardingFieldRegistry.js';
+import {
+  composeStaffDisplayName,
+  composeParticipantLegalName,
+  splitParticipantNameFromFull
+} from '../../../shared/onboardingFieldRegistry.js';
 import { mergeStaffIntakeForProfile } from './staffOnboardingSync.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -56,6 +60,46 @@ export function applyContractPlaceholderMap(baseData, contractFieldMap) {
 }
 
 /**
+ * Flat merge map for participant custom PDF/DOCX (intake + profile + plan dates).
+ * @param {object} participant - participants row
+ * @param {object|null} plan - current plan or null
+ * @param {Record<string, string>} intake - participant_intake_fields map
+ */
+export function buildParticipantCustomMergeData(participant, plan, intake) {
+  const i = intake || {};
+  const p = participant || {};
+  const today = new Date().toISOString().slice(0, 10);
+  const split = splitParticipantNameFromFull(p.name || '');
+  const first = String(i.first_name || '').trim() || split.first_name;
+  const last = String(i.last_name || '').trim() || split.last_name;
+  const fullLegal = composeParticipantLegalName(i) || String(p.name || '').trim();
+  const addrFromIntake = [i.street_address, i.suburb_city, i.state, i.postcode].filter(Boolean).join(', ');
+  const data = {
+    today,
+    date: today,
+    first_name: first,
+    last_name: last,
+    full_legal_name: fullLegal,
+    name: fullLegal,
+    ndis_number: String(i.ndis_number || p.ndis_number || '').trim(),
+    email: String(i.email || p.email || '').trim(),
+    phone: String(i.phone || p.phone || '').trim(),
+    address: (addrFromIntake || p.address || '').trim(),
+    date_of_birth: String(i.date_of_birth || p.date_of_birth || '').trim().slice(0, 10),
+    plan_start_date: plan?.start_date ? String(plan.start_date).slice(0, 10) : '',
+    plan_end_date: plan?.end_date ? String(plan.end_date).slice(0, 10) : ''
+  };
+  if (intake && typeof intake === 'object') {
+    for (const [key, value] of Object.entries(intake)) {
+      if (!key) continue;
+      const safeKey = String(key).replace(/\s+/g, '_').replace(/-/g, '_');
+      if (!(safeKey in data)) data[safeKey] = toSafeString(value);
+    }
+  }
+  return data;
+}
+
+/**
  * First active custom template for staff onboarding with an uploaded file.
  */
 export function getStaffContractTemplate(providerProfileId) {
@@ -64,7 +108,7 @@ export function getStaffContractTemplate(providerProfileId) {
     .prepare(
       `SELECT id, display_name, template_filename, mapping_json FROM form_templates
        WHERE provider_profile_id = ? AND workflow = 'staff_onboarding' AND form_type = 'custom' AND is_active = 1
-       ORDER BY created_at ASC LIMIT 1`
+       ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, created_at DESC LIMIT 1`
     )
     .get(providerProfileId);
   if (!row) return null;

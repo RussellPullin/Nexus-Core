@@ -15,7 +15,8 @@ import {
   seedCoreTemplates,
   getTemplateCoverage,
   updateFormTemplate as updateFormTemplateService,
-  createFormTemplate as createFormTemplateService
+  createFormTemplate as createFormTemplateService,
+  deleteCustomFormTemplate
 } from '../services/onboarding.service.js';
 import { getTemplatePath, getTemplateDir, getCustomTemplatePath, getCustomTemplateDir } from '../services/formTemplatePath.service.js';
 import { analyzeContractTemplateBuffer, suggestContractFieldMap } from '../services/contractTemplateAnalyze.service.js';
@@ -104,6 +105,20 @@ ROUTER.get('/templates', (req, res) => {
       template_files: templateFiles,
       missing_core_types: coverage.missing_core_types || []
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/forms/templates/:id — custom templates only; removes file on disk
+ROUTER.delete('/templates/:id', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set for your account.' });
+    const ok = deleteCustomFormTemplate(req.params.id, profile.id);
+    if (!ok) return res.status(404).json({ error: 'Custom form template not found.' });
+    res.status(204).send();
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

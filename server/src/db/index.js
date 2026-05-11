@@ -1495,6 +1495,34 @@ try {
     if (!e.message?.includes('already exists')) console.warn('onboarding_document_packs migration:', e.message);
   }
 
+  // Link participant custom form_templates to provider_required_forms (for generateFormPack)
+  try {
+    const orphans = db
+      .prepare(
+        `
+      SELECT ft.id AS id, ft.provider_profile_id AS provider_profile_id
+      FROM form_templates ft
+      WHERE ft.form_type = 'custom'
+        AND (ft.workflow = 'participant_onboarding' OR ft.workflow IS NULL)
+        AND NOT EXISTS (
+          SELECT 1 FROM provider_required_forms prf
+          WHERE prf.form_template_id = ft.id AND prf.provider_profile_id = ft.provider_profile_id
+        )
+    `
+      )
+      .all();
+    const ins = db.prepare(`
+      INSERT INTO provider_required_forms (id, provider_profile_id, form_template_id, is_required)
+      VALUES (?, ?, ?, 1)
+    `);
+    for (const row of orphans) {
+      ins.run(randomUUID(), row.provider_profile_id, row.id);
+    }
+    if (orphans.length) console.log(`[nexus] Backfilled provider_required_forms for ${orphans.length} participant custom form(s).`);
+  } catch (e) {
+    if (!e.message?.includes('no such table')) console.warn('provider_required_forms custom backfill:', e.message);
+  }
+
   // Coordinator settings: per-user billing interval (15 min default), staff link for coordinators
   try {
     const userCols = db.prepare("PRAGMA table_info(users)").all();

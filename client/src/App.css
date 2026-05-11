@@ -256,6 +256,41 @@ body {
   cursor: pointer;
 }
 
+.forms-subheading {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  color: #334155;
+}
+.forms-callout {
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+.forms-data-table {
+  width: 100%;
+  max-width: 960px;
+}
+.forms-data-table td,
+.forms-data-table th {
+  vertical-align: top;
+}
+.forms-actions-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.forms-file-inline {
+  max-width: 140px;
+  font-size: 0.8rem;
+}
+.forms-ok {
+  color: #166534;
+  font-weight: 500;
+}
+
 .btn {
   padding: 0.5rem 1rem;
   border: none;

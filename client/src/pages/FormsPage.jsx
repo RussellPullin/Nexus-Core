@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { PARTICIPANT_CONTRACT_MERGE_KEYS, STAFF_CONTRACT_MERGE_KEYS } from '@nexus-shared/contractFormMergeKeys';
 import { forms } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
+import { resolveLocalOllamaBaseUrl, pickFirstLocalModelName, generateLocalOllamaJson } from '../lib/localOllama.js';
 
 const WF_PARTICIPANT = 'participant_onboarding';
 const WF_STAFF = 'staff_onboarding';
@@ -11,7 +14,31 @@ function workflowLabel(w) {
   return 'Staff and participant';
 }
 
+function parseMappingJson(raw) {
+  if (!raw) return {};
+  try {
+    return typeof raw === 'object' ? raw : JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function mappingFieldCount(t) {
+  const m = parseMappingJson(t?.mapping_json);
+  const map = m.contract_field_map || {};
+  return Object.keys(map).length;
+}
+
+function placeholdersFromTemplate(t) {
+  const m = parseMappingJson(t?.mapping_json);
+  const fromAnalysis = m.contract_analysis?.all_placeholders;
+  if (Array.isArray(fromAnalysis) && fromAnalysis.length) return fromAnalysis;
+  const keys = Object.keys(m.contract_field_map || {});
+  return keys;
+}
+
 export default function FormsPage() {
+  const { user } = useAuth();
   const { productSurface } = useParams();
   const settingsFormTemplatesHref = productSurface ? `/${productSurface}/settings?expand=form-templates` : '/settings?expand=form-templates';
 
@@ -26,6 +53,7 @@ export default function FormsPage() {
   const [uploadFile, setUploadFile] = useState({});
   const [uploading, setUploading] = useState(null);
   const [analyzeByTemplateId, setAnalyzeByTemplateId] = useState({});
+  const [ollamaWorkingId, setOllamaWorkingId] = useState(null);
 
   const [docPackData, setDocPackData] = useState(null);
   const [packWorking, setPackWorking] = useState(false);
@@ -85,12 +113,29 @@ export default function FormsPage() {
     try {
       await forms.createTemplate({ display_name: name, workflow });
       setNewLabelByWf((prev) => ({ ...prev, [workflow]: '' }));
-      setMessage('Document added. Upload a PDF below, then run field detection if needed.');
+      setMessage('Document added. Upload a PDF in the table below, then detect fields or refine mapping with Ollama.');
       loadTemplates();
     } catch (err) {
       setMessage(err.message || 'Could not add document');
     } finally {
       setAddingWf(null);
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId) => {
+    if (!confirm('Delete this document template? This cannot be undone.')) return;
+    setMessage('');
+    try {
+      await forms.deleteTemplate(templateId);
+      setAnalyzeByTemplateId((prev) => {
+        const next = { ...prev };
+        delete next[templateId];
+        return next;
+      });
+      setMessage('Template deleted.');
+      loadTemplates();
+    } catch (err) {
+      setMessage(err.message || 'Delete failed');
     }
   };
 
@@ -137,6 +182,61 @@ export default function FormsPage() {
       setMessage(err.message || 'Detection failed');
     } finally {
       setUploading(null);
+    }
+  };
+
+  const handleOllamaRefineMapping = async (t, workflow) => {
+    const placeholders =
+      (analyzeByTemplateId[t.id]?.all_placeholders?.length && analyzeByTemplateId[t.id].all_placeholders) ||
+      placeholdersFromTemplate(t);
+    if (!placeholders.length) {
+      setMessage('Run “Detect fields” first, or ensure this template has saved analysis so Ollama has field names to map.');
+      return;
+    }
+    const allowed = workflow === WF_STAFF ? STAFF_CONTRACT_MERGE_KEYS : PARTICIPANT_CONTRACT_MERGE_KEYS;
+    const baseUrl = resolveLocalOllamaBaseUrl(user);
+    setOllamaWorkingId(t.id);
+    setMessage('');
+    try {
+      const model = await pickFirstLocalModelName(baseUrl);
+      if (!model) {
+        setMessage('Could not list Ollama models. Is Ollama running? For HTTPS sites set OLLAMA_ORIGINS to this site URL (see Settings → Ollama).');
+        return;
+      }
+      const prompt = `You map PDF or Word form field names to data keys for mail merge.
+Respond with ONLY a single JSON object (no markdown, no explanation). Keys are form field names or placeholders exactly as listed. Values must be one of the allowed merge keys.
+
+Allowed merge keys (use only these as values): ${JSON.stringify(allowed)}
+
+Form field names and labels to map: ${JSON.stringify(placeholders)}
+
+Example output shape: {"EmployeeName":"employee_name","NDIS_Number":"ndis_number"}`;
+      const parsed = await generateLocalOllamaJson(baseUrl, model, prompt, 1200);
+      if (!parsed || typeof parsed !== 'object') {
+        setMessage('Ollama did not return valid JSON. Try again or adjust the model.');
+        return;
+      }
+      const existing = parseMappingJson(t.mapping_json);
+      const prevMap = existing.contract_field_map || {};
+      const merged = { ...prevMap };
+      for (const [k, v] of Object.entries(parsed)) {
+        const key = String(k || '').trim();
+        const val = String(v || '').trim();
+        if (!key || !allowed.includes(val)) continue;
+        merged[key] = val;
+      }
+      const mapping_json = {
+        ...existing,
+        contract_field_map: merged,
+        ollama_refine: { at: new Date().toISOString(), model }
+      };
+      await forms.updateTemplate(t.id, { mapping_json });
+      setMessage(`Ollama saved ${Object.keys(merged).length} mapping entr${Object.keys(merged).length === 1 ? 'y' : 'ies'}.`);
+      loadTemplates();
+    } catch (err) {
+      setMessage(err.message || 'Ollama mapping failed');
+    } finally {
+      setOllamaWorkingId(null);
     }
   };
 
@@ -239,73 +339,106 @@ export default function FormsPage() {
     }
   };
 
-  const renderCustomRows = (wf) => {
+  const handlePolicyDelete = async (policyId, label) => {
+    if (!confirm(`Remove policy “${label}” from the library? Packs that include it will be updated when you save packs again.`)) return;
+    setPackWorking(true);
+    setMessage('');
+    try {
+      await forms.policyFilesDelete(policyId);
+      setMessage('Policy removed.');
+      reloadDocPacks();
+    } catch (err) {
+      setMessage(err.message || 'Delete failed');
+    } finally {
+      setPackWorking(false);
+    }
+  };
+
+  const renderCustomTable = (wf) => {
     const list = customForWorkflow(wf);
     if (list.length === 0) {
-      return <p className="forms-muted">No uploaded documents yet. Add one with the form above.</p>;
+      return <p className="forms-muted">No documents yet. Use “Add document” above.</p>;
     }
     return (
-      <ul className="forms-doc-list">
-        {list.map((t) => {
-          const fileInfo = templateFiles[t.id];
-          const hasFile = fileInfo?.has_file;
-          const contractKey = `${t.id}_contract`;
-          return (
-            <li key={t.id} className="forms-doc-card">
-              <div className="forms-doc-title">{t.display_name || 'Untitled'}</div>
-              <p className="forms-muted" style={{ margin: '0.25rem 0 0.75rem' }}>
-                Template file: {hasFile ? <strong>{fileInfo.filename}</strong> : <span>No PDF yet</span>}
-              </p>
-              <div className="forms-row">
-                <input
-                  type="file"
-                  accept=".pdf"
-                  onChange={(e) => setUploadFile((prev) => ({ ...prev, [t.id]: e.target.files?.[0] || null }))}
-                />
-                <button type="button" className="btn btn-primary btn-sm" disabled={uploading === t.id || !uploadFile[t.id]} onClick={() => handleUploadPdf(t.id)}>
-                  {uploading === t.id ? 'Uploading…' : 'Upload PDF'}
-                </button>
-              </div>
-              <div className="forms-detect">
-                <span className="forms-detect-label">Read the form and save field mapping</span>
-                <p className="forms-muted forms-detect-hint">
-                  Detects PDF form field names, Word <code>{'{placeholders}'}</code>, and labels in scanned pages (OCR). For richer AI-assisted workflows elsewhere in Nexus, use{' '}
-                  <strong>Settings → Form templates</strong> (branding, variables) and keep <strong>Ollama</strong> running on this computer when your organisation uses local AI.
-                </p>
-                <div className="forms-row">
-                  <input
-                    type="file"
-                    accept=".pdf,.docx,.png,.jpg,.jpeg,.webp"
-                    onChange={(e) => setUploadFile((prev) => ({ ...prev, [contractKey]: e.target.files?.[0] || null }))}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    disabled={uploading === contractKey || !uploadFile[contractKey]}
-                    onClick={() => handleContractAnalyze(t.id)}
-                  >
-                    {uploading === contractKey ? 'Working…' : 'Detect fields'}
-                  </button>
-                </div>
-                {analyzeByTemplateId[t.id] && (
-                  <p className="forms-muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
-                    Last run: {analyzeByTemplateId[t.id].pdf_form_fields?.length ?? 0} PDF fields,{' '}
-                    {analyzeByTemplateId[t.id].docx_placeholders?.length ?? 0} Word tags,{' '}
-                    {analyzeByTemplateId[t.id].ocr_labels?.length ?? 0} text labels.
-                  </p>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="table-wrap" style={{ marginTop: '0.75rem' }}>
+        <table className="table-condensed forms-data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>PDF</th>
+              <th>Mapped fields</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((t) => {
+              const fileInfo = templateFiles[t.id];
+              const hasFile = fileInfo?.has_file;
+              const contractKey = `${t.id}_contract`;
+              const m = parseMappingJson(t.mapping_json);
+              const analyzedAt = m.contract_analysis?.analyzed_at;
+              return (
+                <tr key={t.id}>
+                  <td>{t.display_name || 'Untitled'}</td>
+                  <td>{hasFile ? <span className="forms-ok">{fileInfo.filename}</span> : <span className="forms-muted">None</span>}</td>
+                  <td>
+                    {mappingFieldCount(t)}
+                    {analyzedAt ? <span className="forms-muted" style={{ display: 'block', fontSize: '0.8rem' }}>Analyzed {analyzedAt.slice(0, 10)}</span> : null}
+                  </td>
+                  <td>
+                    <div className="forms-actions-cell">
+                      <input
+                        type="file"
+                        accept=".pdf"
+                        className="forms-file-inline"
+                        onChange={(e) => setUploadFile((prev) => ({ ...prev, [t.id]: e.target.files?.[0] || null }))}
+                      />
+                      <button type="button" className="btn btn-primary btn-sm" disabled={uploading === t.id || !uploadFile[t.id]} onClick={() => handleUploadPdf(t.id)}>
+                        {uploading === t.id ? '…' : 'Upload'}
+                      </button>
+                      <input
+                        type="file"
+                        accept=".pdf,.docx,.png,.jpg,.jpeg,.webp"
+                        className="forms-file-inline"
+                        onChange={(e) => setUploadFile((prev) => ({ ...prev, [contractKey]: e.target.files?.[0] || null }))}
+                      />
+                      <button type="button" className="btn btn-secondary btn-sm" disabled={uploading === contractKey || !uploadFile[contractKey]} onClick={() => handleContractAnalyze(t.id)}>
+                        {uploading === contractKey ? '…' : 'Detect'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={ollamaWorkingId === t.id}
+                        onClick={() => handleOllamaRefineMapping(t, wf)}
+                        title="Uses Ollama in this browser only"
+                      >
+                        {ollamaWorkingId === t.id ? 'Ollama…' : 'Ollama map'}
+                      </button>
+                      <button type="button" className="btn btn-secondary btn-sm" style={{ color: '#b91c1c' }} onClick={() => handleDeleteTemplate(t.id)}>
+                        Delete
+                      </button>
+                    </div>
+                    {analyzeByTemplateId[t.id] && (
+                      <p className="forms-muted" style={{ fontSize: '0.78rem', margin: '0.35rem 0 0' }}>
+                        Last detect: {analyzeByTemplateId[t.id].pdf_form_fields?.length ?? 0} PDF fields ·{' '}
+                        {analyzeByTemplateId[t.id].docx_placeholders?.length ?? 0} Word · {analyzeByTemplateId[t.id].ocr_labels?.length ?? 0} OCR labels
+                      </p>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     );
   };
 
-  const renderWorkflowSection = (workflow, heading, lede) => (
+  const renderWorkflowSection = (workflow, heading, lede, staffNote) => (
     <section className="card forms-section" key={workflow}>
       <h2 className="forms-section-heading">{heading}</h2>
       <p className="forms-lede">{lede}</p>
+      {staffNote ? <p className="forms-muted forms-callout">{staffNote}</p> : null}
       <form className="forms-add-row" onSubmit={(e) => handleAddForm(e, workflow)}>
         <input
           type="text"
@@ -319,9 +452,11 @@ export default function FormsPage() {
           {addingWf === workflow ? 'Adding…' : 'Add document'}
         </button>
       </form>
-      {renderCustomRows(workflow)}
+      {renderCustomTable(workflow)}
     </section>
   );
+
+  const bannerIsError = (message || '').toLowerCase().includes('fail') || (message || '').toLowerCase().includes('could not');
 
   return (
     <div className="forms-page">
@@ -343,13 +478,7 @@ export default function FormsPage() {
       </p>
 
       {message && (
-        <div
-          className="forms-banner"
-          style={{
-            background: message.toLowerCase().includes('fail') ? '#fef2f2' : '#f0fdf4',
-            color: message.toLowerCase().includes('fail') ? '#991b1b' : '#166534'
-          }}
-        >
+        <div className="forms-banner" style={{ background: bannerIsError ? '#fef2f2' : '#f0fdf4', color: bannerIsError ? '#991b1b' : '#166534' }}>
           {message}
         </div>
       )}
@@ -361,12 +490,14 @@ export default function FormsPage() {
           {renderWorkflowSection(
             WF_PARTICIPANT,
             'Participant onboarding — upload form',
-            'Add one row per PDF you want participants to complete or sign during onboarding. Upload a fillable PDF, then run field detection so Nexus can merge profile and intake data.'
+            'Add each PDF you want included when onboarding packs are generated. Upload a fillable PDF, run Detect for heuristics, then Ollama map to refine placeholder → profile keys (Ollama runs in this browser only).',
+            null
           )}
           {renderWorkflowSection(
             WF_STAFF,
             'Staff onboarding — upload form',
-            'Same flow for employment or compliance PDFs used in staff onboarding.'
+            'Upload employment or compliance PDFs for staff onboarding.',
+            'When multiple staff documents exist, the employment merge uses the one most recently updated (PDF or Word on file).'
           )}
 
           <section className="card forms-section">
@@ -375,7 +506,7 @@ export default function FormsPage() {
               Policy PDFs can be grouped into packs and attached to staff welcome mail and participant onboarding mail. Choose whether each pack applies to staff onboarding, participant onboarding, or both.
             </p>
 
-            <form onSubmit={handlePolicyUpload} className="forms-add-row" style={{ marginBottom: '1.25rem' }}>
+            <form onSubmit={handlePolicyUpload} className="forms-add-row" style={{ marginBottom: '1rem' }}>
               <input
                 type="text"
                 className="form-input"
@@ -390,7 +521,39 @@ export default function FormsPage() {
               </button>
             </form>
 
-            <div className="forms-pack-defaults">
+            <h3 className="forms-subheading">Policy library</h3>
+            {(docPackData?.policy_files || []).length === 0 ? (
+              <p className="forms-muted">No policy PDFs yet. Upload one above.</p>
+            ) : (
+              <div className="table-wrap">
+                <table className="table-condensed forms-data-table">
+                  <thead>
+                    <tr>
+                      <th>Display name</th>
+                      <th>Id</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(docPackData?.policy_files || []).map((f) => (
+                      <tr key={f.id}>
+                        <td>{f.display_name}</td>
+                        <td className="forms-muted" style={{ fontSize: '0.85rem' }}>
+                          {f.id.slice(0, 8)}…
+                        </td>
+                        <td>
+                          <button type="button" className="btn btn-secondary btn-sm" style={{ color: '#b91c1c' }} disabled={packWorking} onClick={() => handlePolicyDelete(f.id, f.display_name)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="forms-pack-defaults" style={{ marginTop: '1.25rem' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="forms-label">Default pack — staff onboarding email</label>
                 <select
@@ -449,12 +612,6 @@ export default function FormsPage() {
                 Create pack
               </button>
             </form>
-
-            {!docPackData?.policy_files?.length ? (
-              <p className="forms-muted" style={{ marginTop: '1rem' }}>
-                No policy PDFs yet. Upload one above (or from a staff profile under company policy PDFs).
-              </p>
-            ) : null}
 
             <div className="forms-pack-list">
               {(docPackData?.packs || []).map((p) => (

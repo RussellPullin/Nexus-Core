@@ -829,6 +829,7 @@ export const forms = {
   templates: (workflow) => fetchApi(`/forms/templates${workflow ? `?workflow=${encodeURIComponent(workflow)}` : ''}`),
   createTemplate: (data) => fetchApi('/forms/templates', { method: 'POST', body: JSON.stringify(data) }),
   updateTemplate: (id, data) => fetchApi(`/forms/templates/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteTemplate: (id) => fetchApi(`/forms/templates/${id}`, { method: 'DELETE' }),
   uploadTemplate: async (formTypeOrTemplateId, file, options = {}) => {
     const form = new FormData();
     form.append('file', file);
