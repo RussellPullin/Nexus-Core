@@ -2,7 +2,12 @@
  * Central LLM service - Ollama only (privacy by design).
  * All AI features in the CRM use this service.
  * Uses OLLAMA_MODEL if set; otherwise auto-detects first available model from Ollama.
+ *
+ * When an org has ai_staff_local_ollama, interactive staff flows must use Ollama on the
+ * staff PC (browser). Server-side Ollama is skipped unless automationAllowServerLlm (cron/API key).
  */
+
+import { fetchFlagsForOrg } from './orgFeatures.service.js';
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 const AI_ENABLED = process.env.AI_ENABLED !== 'false';
@@ -32,6 +37,53 @@ function getModel() {
 export async function isAvailable() {
   const { available } = await getConnectionStatus();
   return available;
+}
+
+/**
+ * Whether the API may call server-side Ollama for this org context.
+ * @param {string|null|undefined} orgId
+ * @param {{ automationAllowServerLlm?: boolean }} [opts]
+ */
+export async function isServerLlmAllowed(orgId, opts = {}) {
+  if (opts.automationAllowServerLlm) return true;
+  if (orgId == null || orgId === '') return true;
+  try {
+    const { flags } = await fetchFlagsForOrg(orgId);
+    if (flags.ai_staff_local_ollama) return false;
+  } catch {
+    return true;
+  }
+  return true;
+}
+
+/**
+ * Server Ollama reachable AND allowed for this org (staff-local orgs => false unless automation).
+ */
+export async function isAvailableForOrg(orgId, opts = {}) {
+  if (!(await isServerLlmAllowed(orgId, opts))) return false;
+  return isAvailable();
+}
+
+/**
+ * @param {string|null|undefined} orgId
+ * @param {string} prompt
+ * @param {object} [options] token/temperature options
+ * @param {{ automationAllowServerLlm?: boolean }} [orgOpts]
+ */
+export async function completeJsonForOrg(orgId, prompt, options = {}, orgOpts = {}) {
+  if (!(await isServerLlmAllowed(orgId, orgOpts))) return null;
+  return completeJson(prompt, options);
+}
+
+/**
+ * @param {string|null|undefined} orgId
+ * @param {string} prompt
+ * @param {object} [options]
+ * @param {{ automationAllowServerLlm?: boolean }} [orgOpts]
+ */
+export async function completeForOrg(orgId, prompt, options = {}, orgOpts = {}) {
+  if (!(await isServerLlmAllowed(orgId, orgOpts))) return null;
+  return complete(prompt, options);
 }
 
 /**
@@ -159,4 +211,14 @@ export function getConfig() {
   return { model: getModel(), baseUrl: OLLAMA_BASE_URL, enabled: AI_ENABLED };
 }
 
-export default { isAvailable, getConnectionStatus, complete, completeJson, getConfig };
+export default {
+  isAvailable,
+  isServerLlmAllowed,
+  isAvailableForOrg,
+  completeForOrg,
+  completeJsonForOrg,
+  getConnectionStatus,
+  complete,
+  completeJson,
+  getConfig
+};

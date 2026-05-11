@@ -349,7 +349,10 @@ router.get('/:id/refresh-expense', async (req, res) => {
       return res.json(shift);
     }
     const orgId = req.session?.user?.org_id || null;
-    const { shifts } = await pullShiftsFromExcel({ organizationId: orgId || undefined }).catch(() => ({
+    const { shifts } = await pullShiftsFromExcel({
+      organizationId: orgId || undefined,
+      automationAllowServerLlm: false
+    }).catch(() => ({
       shifts: [],
     }));
     const excelShift = (shifts || []).find(

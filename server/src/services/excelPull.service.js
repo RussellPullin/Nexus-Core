@@ -356,7 +356,7 @@ function readCellAtCol(row, colIdx) {
 
 /**
  * @param {Buffer} buffer
- * @param {{ log?: function, useLlm?: boolean }} [options] - useLlm defaults true; set false to skip Ollama.
+ * @param {{ log?: function, useLlm?: boolean, organizationId?: string|null, automationAllowServerLlm?: boolean }} [options] - useLlm defaults true; set false to skip Ollama.
  */
 async function parseWorkbookRows(buffer, options = {}) {
   const log = options.log || (() => {});
@@ -386,6 +386,8 @@ async function parseWorkbookRows(buffer, options = {}) {
   const { fieldToCol, llmUsed } = await resolveShiftExcelColumns(headers, sampleRows, {
     log,
     useLlm: options.useLlm !== false,
+    organizationId: options.organizationId ?? null,
+    automationAllowServerLlm: options.automationAllowServerLlm === true
   });
   if (llmUsed) log('Excel Shifts sheet: Ollama assisted column mapping');
 
@@ -520,7 +522,7 @@ function rowToWebhookShift(row) {
  * otherwise falls back to application credentials: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
  * ONEDRIVE_ADMIN_USER_ID, optional ONEDRIVE_EXCEL_PATH.
  * When organizationId is set and Shifter is configured, the path under OneDrive is read from Shifter Org Admin profiles first.
- * @param {object} [options] - { log, useLlm, organizationId } useLlm defaults true (Ollama refines columns when needed).
+ * @param {object} [options] - { log, useLlm, organizationId, automationAllowServerLlm } useLlm defaults true (Ollama refines columns when needed).
  * @returns {{ shifts: Array, llmUsed?: boolean, error?: string }}
  */
 export async function pullShiftsFromExcel(options = {}) {
@@ -532,7 +534,12 @@ export async function pullShiftsFromExcel(options = {}) {
     log,
   });
 
-  const { rows, llmUsed } = await parseWorkbookRows(buffer, { log, useLlm });
+  const { rows, llmUsed } = await parseWorkbookRows(buffer, {
+    log,
+    useLlm,
+    organizationId: options.organizationId || null,
+    automationAllowServerLlm: options.automationAllowServerLlm === true
+  });
 
   const filtered = rows.filter((r) => r.shiftId && r.date);
   const deduped = dedupeExcelShiftRows(filtered);

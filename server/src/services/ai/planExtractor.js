@@ -40,7 +40,7 @@ const FORMAT_EXAMPLES = `Common NDIS plan formats:
 /**
  * Phase 1: Extract total plan budget and dates only (ground truth first).
  */
-async function extractTotalAndDates(text) {
+async function extractTotalAndDates(text, orgId, orgOpts) {
   const prompt = `Extract from this NDIS plan text:
 1. Total plan budget – the single dollar figure for the WHOLE plan. Look for: "Total funded supports $X", "Your plan is valued at $X", "Total plan budget: $X", "Plan total $X". Do NOT use "Total Core Supports" or "Total Capacity Building Supports" – those are category subtotals.
 2. Plan start and end dates (YYYY-MM-DD). Look for: "NDIS plan start date: 11 October 2023", "NDIS plan review due date: 10 October 2025", "plan started on X and will be reviewed by Y", "Plan Approved: X".
@@ -54,7 +54,7 @@ Plan text (first 20000 chars – include budget section where "Total funded supp
 ---
 ${text.slice(0, 20000)}
 ---`;
-  const result = await llm.completeJson(prompt, { maxTokens: 500 });
+  const result = await llm.completeJsonForOrg(orgId, prompt, { maxTokens: 500 }, orgOpts);
   return result;
 }
 
@@ -63,7 +63,7 @@ ${text.slice(0, 20000)}
  * @param {string} text
  * @param {{ start_date?: string, end_date?: string }|null} planDatesHint
  */
-async function extractFundReleaseSchedule(text, planDatesHint) {
+async function extractFundReleaseSchedule(text, planDatesHint, orgId, orgOpts) {
   const dateHint = planDatesHint?.start_date
     ? `If the document does not give exact release dates but gives an interval (e.g. every 3 months), set period_months (e.g. 3) and leave scheduled_date null for those rows—do not invent dates. Known plan start from earlier extraction (for context only): ${planDatesHint.start_date}.`
     : 'If only an interval is stated without dates, set period_months and leave scheduled_date null—do not invent dates.';
@@ -97,7 +97,7 @@ Plan text (first 16000 chars):
 ---
 ${text.slice(0, 16000)}
 ---`;
-  const result = await llm.completeJson(prompt, { maxTokens: 1200 });
+  const result = await llm.completeJsonForOrg(orgId, prompt, { maxTokens: 1200 }, orgOpts);
   if (!result || typeof result !== 'object') return null;
   return {
     pattern: result.pattern || 'unknown',
@@ -114,7 +114,7 @@ ${text.slice(0, 16000)}
  * @param {number|null} totalPlanBudget - Total plan budget to match
  * @param {{ budgets: Array, sum: number }|null} previousAttempt - If provided, adds correction feedback to prompt
  */
-async function extractBudgetsWithTotal(text, totalPlanBudget, previousAttempt = null) {
+async function extractBudgetsWithTotal(text, totalPlanBudget, previousAttempt, orgId, orgOpts) {
   const totalHint = totalPlanBudget ? `\nCRITICAL: The sum of all budget amounts MUST equal ${totalPlanBudget}. Verify your math before returning. If you include a category, its amount must be explicitly stated in the document.` : '';
 
   const correctionBlock = previousAttempt && totalPlanBudget
@@ -157,7 +157,7 @@ Plan text:
 ---
 ${text.slice(0, 24000)}
 ---`;
-  const result = await llm.completeJson(prompt, { maxTokens: 3500 });
+  const result = await llm.completeJsonForOrg(orgId, prompt, { maxTokens: 3500 }, orgOpts);
   return result;
 }
 
@@ -243,14 +243,17 @@ function mergePhase1WithHints(phase1Total, phase1Dates, hints) {
  * Two-phase: first get total and dates, then extract budgets constrained to sum to total.
  * If the sum does not match, retries once with correction feedback.
  * @param {string} text
- * @param {{ totalPlanBudgetHint?: number|null, planDatesHint?: { start_date?: string|null, end_date?: string|null }|null }} [options]
+ * @param {{ totalPlanBudgetHint?: number|null, planDatesHint?: { start_date?: string|null, end_date?: string|null }|null, organizationId?: string|null, automationAllowServerLlm?: boolean }} [options]
  */
 export async function extractPlanFromText(text, options = {}) {
   if (!text || text.trim().length < 50) {
     return { budgets: [], plan_dates: null, total_plan_budget: null, fund_release_schedule: null };
   }
 
-  const phase1 = await extractTotalAndDates(text);
+  const orgId = options.organizationId ?? null;
+  const orgOpts = { automationAllowServerLlm: options.automationAllowServerLlm === true };
+
+  const phase1 = await extractTotalAndDates(text, orgId, orgOpts);
   const phase1TotalRaw = phase1?.total_plan_budget;
   const { total_plan_budget, plan_dates } = mergePhase1WithHints(
     phase1TotalRaw,
@@ -259,8 +262,8 @@ export async function extractPlanFromText(text, options = {}) {
   );
 
   const [phase2, fundReleaseRaw] = await Promise.all([
-    extractBudgetsWithTotal(text, total_plan_budget),
-    extractFundReleaseSchedule(text, plan_dates)
+    extractBudgetsWithTotal(text, total_plan_budget, null, orgId, orgOpts),
+    extractFundReleaseSchedule(text, plan_dates, orgId, orgOpts)
   ]);
 
   if (!phase2 || !Array.isArray(phase2.budgets)) {
@@ -278,7 +281,7 @@ export async function extractPlanFromText(text, options = {}) {
     const sum = budgets.reduce((s, b) => s + b.amount, 0);
     const diff = Math.abs(sum - total_plan_budget) / total_plan_budget;
     if (diff > 0.01) {
-      const retryResult = await extractBudgetsWithTotal(text, total_plan_budget, { budgets, sum });
+      const retryResult = await extractBudgetsWithTotal(text, total_plan_budget, { budgets, sum }, orgId, orgOpts);
       if (retryResult?.budgets?.length > 0) {
         const retryBudgets = apply10and13Filter(normalizeBudgets(retryResult.budgets), total_plan_budget);
         const retrySum = retryBudgets.reduce((s, b) => s + b.amount, 0);

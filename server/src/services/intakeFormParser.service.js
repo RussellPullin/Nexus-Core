@@ -68,9 +68,10 @@ const SUPPORT_CATEGORY_OPTIONS = [
  * Parse a completed Client Intake Form PDF text into structured data.
  * Uses LLM when available for robust extraction; falls back to simple regex when not.
  * @param {string} pdfText - Raw text extracted from the PDF
+ * @param {{ organizationId?: string|null, automationAllowServerLlm?: boolean }} [opts]
  * @returns {Promise<{ participant: object, intake: object, contacts: object[], plan: object|null, goals: string[] }>}
  */
-export async function parseIntakeFormText(pdfText) {
+export async function parseIntakeFormText(pdfText, opts = {}) {
   const text = String(pdfText || '').trim();
   if (!text || text.length < 50) {
     return {
@@ -83,9 +84,11 @@ export async function parseIntakeFormText(pdfText) {
     };
   }
 
+  const orgId = opts.organizationId ?? null;
+  const orgLlmOpts = { automationAllowServerLlm: opts.automationAllowServerLlm === true };
   let out;
-  if (await llm.isAvailable()) {
-    out = await parseWithLlm(text);
+  if (await llm.isAvailableForOrg(orgId, orgLlmOpts)) {
+    out = await parseWithLlm(text, orgId, orgLlmOpts);
   } else {
     out = parseDeterministic(text);
   }
@@ -98,7 +101,7 @@ export async function parseIntakeFormText(pdfText) {
 /**
  * LLM-based parsing for flexible extraction from handwritten or varied layouts.
  */
-async function parseWithLlm(text) {
+async function parseWithLlm(text, orgId, orgLlmOpts) {
   const prompt = `You are parsing a completed NDIS Client Intake Form (standard multi-page layout).
 Extract all filled-in fields from the form text below. Return valid JSON only, no markdown or explanation.
 
@@ -168,7 +171,7 @@ ${text.slice(0, 12000)}
 ---`;
 
   try {
-    const parsed = await llm.completeJson(prompt, { maxTokens: 2000 });
+    const parsed = await llm.completeJsonForOrg(orgId, prompt, { maxTokens: 2000 }, orgLlmOpts);
     if (!parsed) return parseDeterministic(text);
 
     const participant = buildParticipantFromParsed(parsed);

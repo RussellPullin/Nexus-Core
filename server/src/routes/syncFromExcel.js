@@ -4,6 +4,8 @@
  * Requires session auth (coordinator) or optionally CRM_API_KEY for cron/scripts.
  */
 import { Router } from 'express';
+import { db } from '../db/index.js';
+import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import {
   ONEDRIVE_EXCEL_APP_ONLY_REQUIRED_HINT,
   ONEDRIVE_EXCEL_DELEGATED_OR_ENV_HINT,
@@ -90,11 +92,17 @@ router.post('/from-excel', async (req, res) => {
       req.body?.useLlm !== 'false' &&
       req.query?.useLlm !== 'false';
 
-    const orgId = req.session?.user?.org_id || null;
+    const orgId = resolveSyncedOrgId(req);
     if (hasSession && !orgId) {
       return res.status(400).json({
-        error: 'Your account has no organisation. Cannot sync for another tenant.',
+        error: 'Your account has no organisation (or pass org_id as a super admin). Cannot sync.',
         code: 'NO_ORG',
+      });
+    }
+    if (!hasSession && hasKey && !orgId) {
+      return res.status(400).json({
+        error: 'org_id is required in body or query when using the server API key (CRM_API_KEY).',
+        code: 'ORG_ID_REQUIRED',
       });
     }
     let shifts;
@@ -103,10 +111,12 @@ router.post('/from-excel', async (req, res) => {
     let onedrive_error = null;
 
     try {
+      const automationLlm = Boolean(hasKey && !hasSession);
       const pulled = await pullShiftsFromExcel({
         log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
         useLlm,
         organizationId: orgId || undefined,
+        automationAllowServerLlm: automationLlm
       });
       shifts = pulled.shifts;
       llmUsed = !!pulled.llmUsed;

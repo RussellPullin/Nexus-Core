@@ -232,7 +232,9 @@ app.get('/api/ai/status', requireAuth, async (req, res) => {
         enabled: config.enabled,
         error: status?.error,
         warning: status?.warning,
-        baseUrl: config.baseUrl
+        baseUrl: config.baseUrl,
+        /** When true, signed-in staff AI does not use server Ollama; the sidebar "AI" dot uses this computer only. */
+        staffLocalAiMode: orgAllowsLocalOllama
       },
       orgAllowsLocalOllama,
       /** True when API env AI_STAFF_LOCAL_OLLAMA=true forces the flag on for every org (see orgFeatures.service). */
@@ -249,7 +251,8 @@ app.get('/api/ai/status', requireAuth, async (req, res) => {
         baseUrl: cfgOnErr.baseUrl,
         model: null,
         enabled: true,
-        warning: undefined
+        warning: undefined,
+        staffLocalAiMode: false
       },
       orgAllowsLocalOllama: false,
       deploymentForcesStaffLocalOllama: process.env.AI_STAFF_LOCAL_OLLAMA === 'true',

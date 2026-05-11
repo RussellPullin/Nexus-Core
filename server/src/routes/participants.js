@@ -570,12 +570,12 @@ function extractGoalsDeterministic(text) {
   return dedupeGoalsList(collected);
 }
 
-async function extractPlanGoals(text, useAi) {
+async function extractPlanGoals(text, useAi, organizationId = null) {
   const deterministic = extractGoalsDeterministic(text);
   if (!useAi) return deterministic;
 
   try {
-    if (!await llm.isAvailable() || String(text || '').trim().length < 80) {
+    if (!(await llm.isAvailableForOrg(organizationId, {})) || String(text || '').trim().length < 80) {
       return deterministic;
     }
     const fullText = String(text || '');
@@ -611,7 +611,7 @@ Plan text:
 ---
 ${textForLlm}
 ---`;
-    const ai = await llm.completeJson(prompt, { maxTokens: 1200 });
+    const ai = await llm.completeJsonForOrg(organizationId, prompt, { maxTokens: 1200 }, {});
     const aiGoals = Array.isArray(ai?.goals)
       ? ai.goals.map(cleanGoalText).filter((g) => g.length >= 12)
       : [];
@@ -1264,7 +1264,9 @@ router.post('/parse-intake-form', memoryUpload.single('file'), async (req, res) 
       console.error('PDF parse error:', e);
       return res.status(400).json({ error: 'Could not read PDF. Ensure it is a valid PDF file.' });
     }
-    const parsed = await parseIntakeFormText(pdfText);
+    const parsed = await parseIntakeFormText(pdfText, {
+      organizationId: req.session?.user?.org_id || null
+    });
     if (parsed.error) {
       return res.status(400).json({ error: parsed.error });
     }
@@ -1294,7 +1296,9 @@ router.post('/from-intake-form', requireCoordinatorOrAdmin, memoryUpload.single(
         console.error('PDF parse error:', e);
         return res.status(400).json({ error: 'Could not read PDF. Ensure it is a valid PDF file.' });
       }
-      parsed = await parseIntakeFormText(pdfText);
+      parsed = await parseIntakeFormText(pdfText, {
+        organizationId: req.session?.user?.org_id || null
+      });
     } else if (req.body?.participant) {
       parsed = {
         participant: req.body.participant,
@@ -1904,9 +1908,9 @@ function extractCsvHeadersFromBuffer(buffer) {
   return { headers };
 }
 
-/** LLM-assisted CSV parse: ask Ollama (server or precomputed client mapping) to map headers, then parse. Falls back to deterministic parse if LLM unavailable. */
+/** LLM-assisted CSV parse: client mapping from staff PC Ollama when org uses ai_staff_local_ollama; else server Ollama. */
 async function parseParticipantsCsvWithLlm(buffer, options = {}) {
-  const { clientHeaderMapping } = options;
+  const { clientHeaderMapping, organizationId } = options;
   const baseResult = parseParticipantsCsv(buffer);
   if (baseResult.error && baseResult.rows.length === 0) return baseResult;
 
@@ -1953,7 +1957,12 @@ async function parseParticipantsCsvWithLlm(buffer, options = {}) {
 
   const useClient =
     clientHeaderMapping && typeof clientHeaderMapping === 'object' && Object.keys(clientHeaderMapping).length > 0;
-  if (!useClient && !(await llm.isAvailable())) {
+  const serverLlmAllowed = await llm.isServerLlmAllowed(organizationId, {});
+  if (!useClient && !serverLlmAllowed) {
+    console.warn('[participants] Staff-local AI mode: server CSV mapping skipped (use Ollama on this computer and parse again)');
+    return { ...baseResult, llmUsed: false };
+  }
+  if (!useClient && !(await llm.isAvailableForOrg(organizationId, {}))) {
     console.warn('[participants] Ollama not available, using rule-based CSV mapping');
     return { ...baseResult, llmUsed: false };
   }
@@ -1963,7 +1972,7 @@ async function parseParticipantsCsvWithLlm(buffer, options = {}) {
     if (useClient) {
       mapping = clientHeaderMapping;
     } else {
-      mapping = await llm.completeJson(prompt, { maxTokens: 500 });
+      mapping = await llm.completeJsonForOrg(organizationId, prompt, { maxTokens: 500 }, {});
     }
     if (!mapping || typeof mapping !== 'object') return { ...baseResult, llmUsed: false };
 
@@ -2169,7 +2178,10 @@ router.post('/parse-csv', memoryUpload.single('file'), async (req, res) => {
     const useLlm = req.body?.useLlm === 'true' || req.body?.useLlm === true;
     const clientMap = useLlm ? await parseLlmColumnMappingFromMultipart(req) : null;
     const result = useLlm
-      ? await parseParticipantsCsvWithLlm(req.file.buffer, { clientHeaderMapping: clientMap || undefined })
+      ? await parseParticipantsCsvWithLlm(req.file.buffer, {
+          clientHeaderMapping: clientMap || undefined,
+          organizationId: req.session?.user?.org_id || null
+        })
       : { ...parseParticipantsCsv(req.file.buffer), llmUsed: false };
     if (result.error && result.rows.length === 0) {
       return res.status(400).json({ error: result.error });
@@ -2194,7 +2206,10 @@ router.post('/import-csv', requireCoordinatorOrAdmin, memoryUpload.single('file'
     const useLlm = req.body?.useLlm === 'true' || req.body?.useLlm === true;
     const clientMap = useLlm ? await parseLlmColumnMappingFromMultipart(req) : null;
     const result = useLlm
-      ? await parseParticipantsCsvWithLlm(req.file.buffer, { clientHeaderMapping: clientMap || undefined })
+      ? await parseParticipantsCsvWithLlm(req.file.buffer, {
+          clientHeaderMapping: clientMap || undefined,
+          organizationId: req.session?.user?.org_id || null
+        })
       : parseParticipantsCsv(req.file.buffer);
     const { rows, error: parseError } = result;
     if (rows.length === 0) {
@@ -2538,6 +2553,7 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
       return res.status(400).json({ error: 'No file uploaded' });
     }
     const useAi = req.body?.useAi === 'true' || req.body?.useAi === true;
+    const parsePlanOrgId = req.session?.user?.org_id || null;
     const ext = (req.file.originalname || '').toLowerCase();
     let parsed;
     let fundReleaseScheduleResponse = null;
@@ -2564,19 +2580,20 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
         let llmBudgets = [];
         let goals;
         let aiResultForMerge = null;
-        if (useAi && await llm.isAvailable() && pdfText.trim().length > 50) {
+        if (useAi && (await llm.isAvailableForOrg(parsePlanOrgId, {})) && pdfText.trim().length > 50) {
           const [aiResult, goalsResult] = await Promise.all([
             extractPlanFromText(pdfText, {
               totalPlanBudgetHint: deterministic.total_plan_budget ?? null,
-              planDatesHint: deterministic.plan_dates ?? null
+              planDatesHint: deterministic.plan_dates ?? null,
+              organizationId: parsePlanOrgId
             }),
-            extractPlanGoals(pdfText, true)
+            extractPlanGoals(pdfText, true, parsePlanOrgId)
           ]);
           aiResultForMerge = aiResult;
           llmBudgets = Array.isArray(aiResult?.budgets) ? aiResult.budgets : [];
           goals = goalsResult;
         } else {
-          goals = await extractPlanGoals(pdfText, useAi);
+          goals = await extractPlanGoals(pdfText, useAi, parsePlanOrgId);
         }
 
         const { total_plan_budget: mergedTotal, plan_dates: mergedPlanDates, merge_warnings } = mergeParsePlanMetadata(
@@ -2633,7 +2650,7 @@ router.post('/:id/parse-plan', memoryUpload.single('file'), async (req, res) => 
       const noBudgets = !Array.isArray(parsed.budgets) || parsed.budgets.length === 0;
       if (noBudgets) {
         const hint = useAi
-          ? ' Enable local AI (Ollama) on the server and in your user Settings, then try again. Re-export the plan from the NDIS portal as a text-based PDF if it was scanned.'
+          ? ' Install and run Ollama on this computer (Settings → Ollama) if your organisation uses per-device AI, or ask your admin about server-side Ollama. Re-export the plan from the NDIS portal as a text-based PDF if it was scanned.'
           : ' Re-export the plan from the NDIS portal as a text-based PDF with selectable text (not a photo scan).';
         return res.status(400).json({ error: `${parsed.error}${hint}` });
       }
@@ -2826,7 +2843,9 @@ router.post('/:id/plans/:planId/parse-plan-manager-statement', memoryUpload.sing
       return res.status(400).json({ error: `PDF read failed: ${msg}` });
     }
 
-    const { parsed, hints, validation_warning } = await parsePlanManagerStatementDocument(text, useAi);
+    const { parsed, hints, validation_warning } = await parsePlanManagerStatementDocument(text, useAi, {
+      organizationId: req.session?.user?.org_id || null
+    });
     if (!parsed?.budgets?.length) {
       return res.status(400).json({
         error: validation_warning || 'Could not extract category rows from this PDF. Try OCR, a text-based export, or enable local AI.',

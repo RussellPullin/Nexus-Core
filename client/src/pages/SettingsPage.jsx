@@ -551,11 +551,14 @@ export default function SettingsPage() {
               </p>
             )}
             <p className="form-hint" style={{ margin: '0 0 0.5rem 0' }}>
-              <strong>Two different paths:</strong> (1) <em>This computer</em> — Ollama below is for CSV column mapping from your browser to your PC. (2) <em>API server</em> — PDF/Excel AI uses Ollama only where the <strong>server</strong> can reach it (<code style={{ fontSize: '0.85em' }}>OLLAMA_BASE_URL</code>); a cloud API cannot see Ollama on your laptop unless you expose it on the network.
+              <strong>Staff AI policy:</strong> With this setting on, <strong>AI in your browser</strong> (CSV mapping, plan PDF with AI, intake form, plan manager statements) uses <strong>only Ollama on this computer</strong>. The Nexus server does not run those LLMs for your signed-in session. Install Ollama here and keep it running when you use AI features.
+            </p>
+            <p className="form-hint" style={{ margin: '0 0 0.5rem 0', fontSize: '0.88rem', color: '#64748b' }}>
+              <strong>Automation only:</strong> Scheduled Excel sync using the server API key may still use Ollama on the <strong>API host</strong> if your administrator configured <code style={{ fontSize: '0.85em' }}>OLLAMA_BASE_URL</code> — that path does not use your laptop.
             </p>
             {aiStatus?.server && (
               <p className="form-hint" style={{ margin: '0 0 0.75rem 0', fontSize: '0.88rem' }}>
-                Server AI status:{' '}
+                Server Ollama (for automation / non-staff flows):{' '}
                 {aiStatus.server.available ? (
                   <span className="settings-success" style={{ display: 'inline' }}>
                     reachable
@@ -564,7 +567,7 @@ export default function SettingsPage() {
                   </span>
                 ) : (
                   <span style={{ color: '#64748b' }}>
-                    not in use{aiStatus.server.error ? ` — ${aiStatus.server.error}` : ''}
+                    not reachable{aiStatus.server.error ? ` — ${aiStatus.server.error}` : ''}
                   </span>
                 )}
               </p>

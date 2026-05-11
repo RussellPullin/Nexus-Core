@@ -62,7 +62,7 @@ function ProductLayout() {
 
 function Layout({ productSurface, children }) {
   const { user, logout, canManageUsers, canAccessCaseTasks } = useAuth();
-  const [aiReachable, setAiReachable] = useState({ server: null, local: null });
+  const [aiReachable, setAiReachable] = useState({ server: null, local: null, staffLocalAiMode: false });
   const [emailBannerDismissed, setEmailBannerDismissed] = useState(() =>
     typeof sessionStorage !== 'undefined' && sessionStorage.getItem(EMAIL_BANNER_KEY) === '1'
   );
@@ -71,7 +71,7 @@ function Layout({ productSurface, children }) {
 
   useEffect(() => {
     if (!user) {
-      setAiReachable({ server: null, local: null });
+      setAiReachable({ server: null, local: null, staffLocalAiMode: false });
       return;
     }
     let cancel = false;
@@ -79,6 +79,7 @@ function Layout({ productSurface, children }) {
       try {
         const s = await ai.status();
         if (cancel) return;
+        const staffLocalAiMode = Boolean(s?.orgAllowsLocalOllama || s?.server?.staffLocalAiMode);
         const serverOk = Boolean(s?.server?.available);
         let localOk = null;
         if (s?.orgAllowsLocalOllama) {
@@ -88,9 +89,9 @@ function Layout({ productSurface, children }) {
         } else {
           localOk = null;
         }
-        setAiReachable({ server: serverOk, local: localOk });
+        setAiReachable({ server: serverOk, local: localOk, staffLocalAiMode });
       } catch {
-        if (!cancel) setAiReachable({ server: false, local: false });
+        if (!cancel) setAiReachable({ server: false, local: false, staffLocalAiMode: false });
       }
     })();
     return () => { cancel = true; };
@@ -192,14 +193,18 @@ function Layout({ productSurface, children }) {
           <span
             className="nav-ai-status"
             title={(() => {
-              const { server, local } = aiReachable;
+              const { server, local, staffLocalAiMode } = aiReachable;
               if (server === null && local === null) return 'Checking AI…';
               const bits = [];
-              if (server) bits.push('Server AI: Ollama reachable from API');
-              else if (server === false) bits.push('Server AI: not available (normal on cloud if Ollama is only on your PC)');
+              if (staffLocalAiMode) {
+                bits.push('Your org uses AI on each staff computer (Ollama). Green means Ollama is running here.');
+              }
+              if (server) bits.push('Server AI: Ollama reachable from API (used for scheduled sync / API key jobs, not staff browser AI when per-device mode is on)');
+              else if (server === false && !staffLocalAiMode) bits.push('Server AI: not available');
+              else if (server === false && staffLocalAiMode) bits.push('Server AI: not used for your signed-in session in per-device mode');
               if (local === true) bits.push('This computer: Ollama OK');
               if (local === false) bits.push('This computer: Ollama not linked (Settings → Ollama)');
-              if (local === null && server !== null) bits.push('This computer: staff Ollama off for org');
+              if (local === null && server !== null && !staffLocalAiMode) bits.push('This computer: staff Ollama off for org');
               if (bits.length === 0) return 'No AI path ready';
               return bits.join(' · ');
             })()}
@@ -209,12 +214,17 @@ function Layout({ productSurface, children }) {
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                background:
-                  aiReachable.server === true || aiReachable.local === true
-                    ? '#22c55e'
-                    : aiReachable.server === false || aiReachable.local === false
-                      ? '#94a3b8'
-                      : 'transparent',
+                background: (() => {
+                  const { server, local, staffLocalAiMode } = aiReachable;
+                  if (staffLocalAiMode) {
+                    if (local === true) return '#22c55e';
+                    if (local === false) return '#94a3b8';
+                    return 'transparent';
+                  }
+                  if (server === true || local === true) return '#22c55e';
+                  if (server === false || local === false) return '#94a3b8';
+                  return 'transparent';
+                })(),
                 display: 'inline-block',
                 marginRight: 4
               }}

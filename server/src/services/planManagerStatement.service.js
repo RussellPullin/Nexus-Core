@@ -367,16 +367,18 @@ Rules:
 - providers: every payee/provider name with a dollar amount for that category; sum of provider spent should match category spent when the document shows both.
 - If the document is not a plan manager statement, return budgets: [] and explain in notes.`;
 
-export async function extractPlanManagerStatementWithLlm(text) {
+export async function extractPlanManagerStatementWithLlm(text, opts = {}) {
+  const orgId = opts.organizationId ?? null;
+  const orgLlmOpts = { automationAllowServerLlm: opts.automationAllowServerLlm === true };
   if (!text || String(text).trim().length < 40) return null;
-  if (!(await llm.isAvailable())) return null;
+  if (!(await llm.isAvailableForOrg(orgId, orgLlmOpts))) return null;
   const prompt = `${LLM_SCHEMA}
 
 Document text:
 ---
 ${String(text).slice(0, 48000)}
 ---`;
-  const raw = await llm.completeJson(prompt, { maxTokens: 8000 });
+  const raw = await llm.completeJsonForOrg(orgId, prompt, { maxTokens: 8000 }, orgLlmOpts);
   if (!raw || typeof raw !== 'object') return null;
   return normalizeLlmStatement(raw);
 }
@@ -780,7 +782,9 @@ export function applyPlanManagerStatement(db, { participantId, planId, parsed, a
   };
 }
 
-export async function parsePlanManagerStatementDocument(text, useAi) {
+export async function parsePlanManagerStatementDocument(text, useAi, opts = {}) {
+  const orgId = opts.organizationId ?? null;
+  const orgLlmOpts = { automationAllowServerLlm: opts.automationAllowServerLlm === true };
   const normalized = normalizeStatementText(text);
   const hints = deterministicStatementHints(normalized);
   const dwe = parseDoItWithEaseMonthlyStatement(normalized);
@@ -789,16 +793,28 @@ export async function parsePlanManagerStatementDocument(text, useAi) {
   }
   let parsed = null;
   if (useAi) {
-    parsed = await extractPlanManagerStatementWithLlm(normalized);
+    parsed = await extractPlanManagerStatementWithLlm(normalized, { organizationId: orgId, automationAllowServerLlm: orgLlmOpts.automationAllowServerLlm });
   }
+  const serverAi = await llm.isAvailableForOrg(orgId, orgLlmOpts);
+  const staffBlocksServer = !(await llm.isServerLlmAllowed(orgId, orgLlmOpts));
   if (!parsed || !parsed.budgets?.length) {
+    let validation_warning;
+    if (!useAi) {
+      validation_warning =
+        'Enable AI and ensure the PDF has selectable text, or try OCR for scanned statements.';
+    } else if (staffBlocksServer) {
+      validation_warning =
+        'Your organisation uses AI on each staff computer only. Install and run Ollama on this PC (Settings → Ollama), then try again — the server does not run plan-statement AI for signed-in staff in this mode. Or ensure the PDF has selectable text.';
+    } else if (!serverAi) {
+      validation_warning =
+        'Enable local AI (Ollama) on the API server for best results on varied statement layouts, or ensure the PDF has selectable text.';
+    } else {
+      validation_warning = 'Statement layout not recognised; try OCR or a clearer export.';
+    }
     return {
       parsed: parsed || { budgets: [], notes: 'Could not extract structured rows.' },
       hints,
-      validation_warning:
-        !useAi || !(await llm.isAvailable())
-          ? 'Enable local AI (Ollama) for best results on varied statement layouts, or ensure the PDF has selectable text.'
-          : 'Statement layout not recognised; try OCR or a clearer export.'
+      validation_warning
     };
   }
   return { parsed, hints, validation_warning: null };

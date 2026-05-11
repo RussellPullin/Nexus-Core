@@ -2,10 +2,16 @@
 
 Use this when Nexus runs in the cloud (e.g. Fly) and staff use **Chrome or Edge** on Windows or Mac. Safari often blocks local-network calls.
 
-## What works after setup
+## What works after setup (per-device org policy)
 
-- **Browser → Ollama on this PC** for participant CSV column mapping (and related flows that send `llm_column_mapping_json` from the client).
-- This does **not** give the cloud API access to Ollama on the laptop. Server-only features (some PDF/Excel AI) still need `OLLAMA_BASE_URL` reachable **from the API server**, or a future cloud LLM integration.
+When the org has **AI: Ollama on staff computers** (or `AI_STAFF_LOCAL_OLLAMA=true`):
+
+- **Browser → Ollama on this PC** is required for staff-facing AI: participant CSV column mapping (client sends `llm_column_mapping_json`), plan PDF parse with AI, intake form AI parsing, plan manager statement AI — the API **does not** call server Ollama for those signed-in flows.
+- **Sidebar “AI”** turns green only when **this computer’s** Ollama responds (not when only the server has Ollama).
+
+## Automation (no browser)
+
+`POST /api/sync/from-excel` with **CRM_API_KEY** + **org_id** (cron) may still use **server** Ollama if `OLLAMA_BASE_URL` on the API host reaches an Ollama instance. Pass `automationAllowServerLlm` internally for that path only. There is no staff laptop in cron; do not expect per-browser Ollama there.
 
 ## Preconditions
 
@@ -42,7 +48,7 @@ Must include the **exact** site origin staff use in the browser, for example `ht
 | Step | Pass? |
 |------|--------|
 | Settings → Ollama → **Test** shows Connected and at least one model | |
-| Sidebar **AI** hover tooltip mentions “This computer: Ollama OK” | |
+| Sidebar **AI** is green (per-device org) | |
 | Participants → Import CSV → enable AI → **Parse & Preview** shows “AI mapped columns” for a messy CSV | |
 
 ## Troubleshooting
@@ -54,6 +60,7 @@ Must include the **exact** site origin staff use in the browser, for example `ht
 | Intermittent / “blocked” in Safari | Use Chrome or Edge (Private Network Access / localhost policy) |
 | `127.0.0.1` vs `localhost` | Try the other in Settings URL; client retries both |
 | Feature disabled in Settings | Org flag off and `AI_STAFF_LOCAL_OLLAMA` not true — enable in Feature flags or env |
+| Plan PDF “AI” does nothing in cloud | Expected if staff mode is on but Ollama is not running on **this** PC — server LLM is skipped |
 
 ## References in repo
 
@@ -61,3 +68,5 @@ Must include the **exact** site origin staff use in the browser, for example `ht
 - Settings UI: `client/src/pages/SettingsPage.jsx`
 - Server flag merge: `server/src/services/orgFeatures.service.js`
 - AI status API: `GET /api/ai/status` in `server/src/index.js`
+- LLM org policy: `server/src/services/llm.service.js` (`isServerLlmAllowed`, `completeJsonForOrg`)
+- Excel sync + automation LLM: `server/src/routes/syncFromExcel.js`, `server/src/services/excelPull.service.js`

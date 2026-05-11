@@ -102,12 +102,14 @@ function applyDeterministicGaps(headers, fieldToCol, colToField) {
 /**
  * @param {string[]} headers - row 1 labels
  * @param {string[][]} sampleRows - up to N data rows, each array parallel to headers
- * @param {{ log?: function, useLlm?: boolean }} options
+ * @param {{ log?: function, useLlm?: boolean, organizationId?: string|null, automationAllowServerLlm?: boolean }} options
  * @returns {Promise<{ fieldToCol: Record<string, number>, sources: Record<string, string>, llmUsed: boolean }>}
  */
 export async function resolveShiftExcelColumns(headers, sampleRows, options = {}) {
   const log = options.log || (() => {});
   const useLlm = options.useLlm !== false;
+  const orgId = options.organizationId ?? null;
+  const orgLlmOpts = { automationAllowServerLlm: options.automationAllowServerLlm === true };
   const fieldToCol = {};
   const colToField = {};
   const sources = {};
@@ -136,7 +138,7 @@ export async function resolveShiftExcelColumns(headers, sampleRows, options = {}
   const enrichAlways = process.env.EXCEL_SHIFTS_LLM_ENRICH === 'true';
   const needLlm =
     useLlm &&
-    (await llm.isAvailable()) &&
+    (await llm.isAvailableForOrg(orgId, orgLlmOpts)) &&
     (enrichAlways ||
       fieldToCol.shift_id == null ||
       fieldToCol.shift_date == null ||
@@ -162,7 +164,7 @@ Rules:
 
 Example: {"Shift Date":"shift_date","Staff Name":"staff_name","Travel (KM)":"travel_km"}`;
 
-    const mapping = await llm.completeJson(prompt, { maxTokens: 1200, temperature: 0.1 });
+    const mapping = await llm.completeJsonForOrg(orgId, prompt, { maxTokens: 1200, temperature: 0.1 }, orgLlmOpts);
     if (mapping && typeof mapping === 'object') {
       llmUsed = true;
       for (const [headerKey, rawField] of Object.entries(mapping)) {
