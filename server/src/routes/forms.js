@@ -295,7 +295,7 @@ ROUTER.post('/templates/:id/contract-upload-analyze', memoryUpload.single('file'
 });
 
 // POST /api/forms/templates/upload - upload template file for a form type (or template id for custom)
-ROUTER.post('/templates/upload', memoryUpload.single('file'), (req, res) => {
+ROUTER.post('/templates/upload', memoryUpload.single('file'), async (req, res) => {
   try {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
     const formType = req.body?.form_type || req.query?.form_type;
@@ -309,18 +309,59 @@ ROUTER.post('/templates/upload', memoryUpload.single('file'), (req, res) => {
     if (templateId) {
       const { profile } = getProviderProfileForUser(req.session.user.id);
       if (!profile) return res.status(400).json({ error: 'No organisation set.' });
-      if (ext !== 'pdf') {
-        return res.status(400).json({ error: 'Custom form templates must be a .pdf file.' });
+      if (ext !== 'pdf' && ext !== 'docx') {
+        return res.status(400).json({ error: 'Custom form templates must be a .pdf or .docx file.' });
       }
-      const template = db.prepare('SELECT id, template_filename FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(templateId, profile.id);
+      const template = db.prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(templateId, profile.id);
       if (!template) return res.status(404).json({ error: 'Custom form template not found.' });
       const dir = getCustomTemplateDir();
       mkdirSync(dir, { recursive: true });
-      const saveName = `${template.id}.pdf`;
+      const saveName = `${template.id}.${ext}`;
       const filePath = join(dir, saveName);
       writeFileSync(filePath, req.file.buffer);
-      db.prepare('UPDATE form_templates SET template_filename = ?, updated_at = datetime(\'now\') WHERE id = ?').run(saveName, template.id);
-      return res.json({ ok: true, template_id: template.id, filename: saveName });
+      const otherExt = ext === 'pdf' ? 'docx' : 'pdf';
+      const otherPath = join(dir, `${template.id}.${otherExt}`);
+      if (existsSync(otherPath)) {
+        try {
+          unlinkSync(otherPath);
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const workflowKind = template.workflow === 'staff_onboarding' ? 'staff' : 'participant';
+      const existing = parseMappingJson(template.mapping_json);
+      const analysis = await analyzeContractTemplateBuffer(req.file.buffer, req.file.originalname || `template.${ext}`);
+      const suggested = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
+      const contract_field_map = { ...(existing.contract_field_map || {}), ...suggested };
+      const mapping_json = {
+        ...existing,
+        contract_field_map,
+        contract_analysis: {
+          ...analysis,
+          analyzed_at: new Date().toISOString(),
+          template_file_updated: true
+        }
+      };
+      db.prepare(
+        `UPDATE form_templates SET template_filename = ?, mapping_json = ?, updated_at = datetime('now') WHERE id = ?`
+      ).run(saveName, JSON.stringify(mapping_json), template.id);
+
+      return res.json({
+        ok: true,
+        template_id: template.id,
+        filename: saveName,
+        contract_field_map,
+        mapped_field_count: Object.keys(contract_field_map).length,
+        placeholders_found: analysis.all_placeholders?.length ?? 0,
+        docx_placeholders: analysis.docx_placeholders,
+        pdf_form_fields: analysis.pdf_form_fields,
+        ocr_labels: analysis.ocr_labels,
+        ocr_used: analysis.ocr_used,
+        text_preview: analysis.text_preview,
+        all_placeholders: analysis.all_placeholders,
+        file_kind: analysis.file_kind
+      });
     }
 
     if (!UPLOAD_FORM_TYPES.includes(formType)) {

@@ -135,7 +135,7 @@ export default function FormsPage() {
     try {
       await forms.createTemplate({ display_name: name, workflow });
       setNewLabelByWf((prev) => ({ ...prev, [workflow]: '' }));
-      setMessage('Document added. Upload a PDF in the table below, then use Detect (heuristics), Read form (Ollama), or Ollama map.');
+      setMessage('Document added. Upload a PDF or Word file once — Nexus saves it and links fields to intake data automatically (same idea as the service agreement template).');
       loadTemplates();
     } catch (err) {
       setMessage(err.message || 'Could not add document');
@@ -164,15 +164,22 @@ export default function FormsPage() {
   const handleUploadPdf = async (templateId) => {
     const file = uploadFile[templateId];
     if (!file) {
-      setMessage('Choose a PDF first.');
+      setMessage('Choose a PDF or Word file first.');
       return;
     }
     setUploading(templateId);
     setMessage('');
     try {
-      await forms.uploadTemplate(templateId, file, { templateId });
+      const data = await forms.uploadTemplate(templateId, file, { templateId });
       setUploadFile((prev) => ({ ...prev, [templateId]: null }));
-      setMessage('PDF saved.');
+      const mapped = data?.mapped_field_count ?? 0;
+      const found = data?.placeholders_found ?? 0;
+      setMessage(
+        `Template saved. Linked ${mapped} field(s) to profile/intake data from ${found} detected reference(s). When you generate the onboarding pack, this document will merge like the service agreement.`
+      );
+      if (data && typeof data === 'object') {
+        setAnalyzeByTemplateId((prev) => ({ ...prev, [templateId]: data }));
+      }
       loadTemplates();
     } catch (err) {
       setMessage(err.message || 'Upload failed');
@@ -182,7 +189,7 @@ export default function FormsPage() {
   };
 
   const handleContractAnalyze = async (templateId) => {
-    const key = `${templateId}_contract`;
+    const key = `${templateId}_adv`;
     const file = uploadFile[key];
     if (!file) {
       setMessage('Choose a file for field detection (PDF, Word, or a scan).');
@@ -208,11 +215,11 @@ export default function FormsPage() {
   };
 
   const handleOllamaReadDocument = async (t, workflow) => {
-    const contractKey = `${t.id}_contract`;
-    const file = uploadFile[contractKey];
+    const advKey = `${t.id}_adv`;
+    const file = uploadFile[advKey];
     if (!file) {
       setMessage(
-        'Choose a file in the second file picker (same as Detect). Nexus extracts text on the server; Ollama on this computer reads that text like a person to find fields.'
+        'Open “Advanced” and choose a file there, or use the main upload first. Ollama reads extracted text on this computer to find extra fields.'
       );
       return;
     }
@@ -478,7 +485,7 @@ Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number
           <thead>
             <tr>
               <th>Name</th>
-              <th>PDF</th>
+              <th>File</th>
               <th>Mapped fields</th>
               <th>Actions</th>
             </tr>
@@ -487,7 +494,7 @@ Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number
             {list.map((t) => {
               const fileInfo = templateFiles[t.id];
               const hasFile = fileInfo?.has_file;
-              const contractKey = `${t.id}_contract`;
+              const advKey = `${t.id}_adv`;
               const m = parseMappingJson(t.mapping_json);
               const analyzedAt = m.contract_analysis?.analyzed_at;
               return (
@@ -502,47 +509,48 @@ Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number
                     <div className="forms-actions-cell">
                       <input
                         type="file"
-                        accept=".pdf"
+                        accept=".pdf,.docx"
                         className="forms-file-inline"
                         onChange={(e) => setUploadFile((prev) => ({ ...prev, [t.id]: e.target.files?.[0] || null }))}
                       />
                       <button type="button" className="btn btn-primary btn-sm" disabled={uploading === t.id || !uploadFile[t.id]} onClick={() => handleUploadPdf(t.id)}>
-                        {uploading === t.id ? '…' : 'Upload'}
-                      </button>
-                      <input
-                        type="file"
-                        accept=".pdf,.docx,.png,.jpg,.jpeg,.webp"
-                        className="forms-file-inline"
-                        onChange={(e) => setUploadFile((prev) => ({ ...prev, [contractKey]: e.target.files?.[0] || null }))}
-                      />
-                      <button type="button" className="btn btn-secondary btn-sm" disabled={uploading === contractKey || !uploadFile[contractKey]} onClick={() => handleContractAnalyze(t.id)}>
-                        {uploading === contractKey ? '…' : 'Detect'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        disabled={uploading === contractKey || !uploadFile[contractKey] || ollamaKey === `read:${t.id}`}
-                        onClick={() => handleOllamaReadDocument(t, wf)}
-                        title="Server extracts text; Ollama on this PC reads the document to find fields (HTTPS: set OLLAMA_ORIGINS)"
-                      >
-                        {ollamaKey === `read:${t.id}` ? 'Reading…' : 'Read form'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        disabled={ollamaKey === `map:${t.id}`}
-                        onClick={() => handleOllamaRefineMapping(t, wf)}
-                        title="Map known field names to profile keys using Ollama in this browser"
-                      >
-                        {ollamaKey === `map:${t.id}` ? 'Ollama…' : 'Ollama map'}
+                        {uploading === t.id ? '…' : 'Upload & map from intake'}
                       </button>
                       <button type="button" className="btn btn-secondary btn-sm" style={{ color: '#b91c1c' }} onClick={() => handleDeleteTemplate(t.id)}>
                         Delete
                       </button>
                     </div>
+                    <details className="forms-advanced" style={{ marginTop: '0.5rem' }}>
+                      <summary className="forms-muted" style={{ cursor: 'pointer', fontSize: '0.85rem' }}>
+                        Advanced — re-run detection or Ollama on another file
+                      </summary>
+                      <div className="forms-actions-cell" style={{ marginTop: '0.35rem' }}>
+                        <input
+                          type="file"
+                          accept=".pdf,.docx,.png,.jpg,.jpeg,.webp"
+                          className="forms-file-inline"
+                          onChange={(e) => setUploadFile((prev) => ({ ...prev, [advKey]: e.target.files?.[0] || null }))}
+                        />
+                        <button type="button" className="btn btn-secondary btn-sm" disabled={uploading === advKey || !uploadFile[advKey]} onClick={() => handleContractAnalyze(t.id)}>
+                          {uploading === advKey ? '…' : 'Detect only'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={uploading === advKey || !uploadFile[advKey] || ollamaKey === `read:${t.id}`}
+                          onClick={() => handleOllamaReadDocument(t, wf)}
+                          title="Ollama on this PC (HTTPS: OLLAMA_ORIGINS)"
+                        >
+                          {ollamaKey === `read:${t.id}` ? 'Reading…' : 'Read form (Ollama)'}
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" disabled={ollamaKey === `map:${t.id}`} onClick={() => handleOllamaRefineMapping(t, wf)}>
+                          {ollamaKey === `map:${t.id}` ? 'Ollama…' : 'Ollama map'}
+                        </button>
+                      </div>
+                    </details>
                     {analyzeByTemplateId[t.id] && (
                       <p className="forms-muted" style={{ fontSize: '0.78rem', margin: '0.35rem 0 0' }}>
-                        Last detect: {analyzeByTemplateId[t.id].pdf_form_fields?.length ?? 0} PDF fields ·{' '}
+                        Last run: {analyzeByTemplateId[t.id].pdf_form_fields?.length ?? 0} PDF fields ·{' '}
                         {analyzeByTemplateId[t.id].docx_placeholders?.length ?? 0} Word · {analyzeByTemplateId[t.id].ocr_labels?.length ?? 0} OCR labels
                       </p>
                     )}
@@ -595,8 +603,8 @@ Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number
       {context?.message && <p className="forms-muted">{context.message}</p>}
 
       <p className="forms-lede" style={{ marginBottom: '1.25rem' }}>
-        Structured service agreements and branding live under{' '}
-        <Link to={settingsFormTemplatesHref}>Settings → Form templates</Link>. This page is for PDFs you merge during onboarding and for policy bundles.
+        The <strong>service agreement</strong> you configure under{' '}
+        <Link to={settingsFormTemplatesHref}>Settings → Form templates</Link> uses a structured template: variables are filled from the participant profile and intake when packs are generated. On this page, a <strong>custom participant or staff PDF/Word</strong> works the same way in one step: choose <strong>Upload &amp; map from intake</strong> and Nexus saves the file, detects fields (PDF names, Word tags, OCR), and saves the link to intake/profile fields automatically—no separate detect step required.
       </p>
 
       {message && (
@@ -612,7 +620,7 @@ Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number
           {renderWorkflowSection(
             WF_PARTICIPANT,
             'Participant onboarding — upload form',
-            'Add each PDF you want included when onboarding packs are generated. Detect uses OCR and patterns only. Read form sends document text to Ollama on this computer so it can infer fields the way a person would; then use Ollama map to adjust mappings.',
+            'Add a document, then use Upload & map from intake once. That runs the same kind of merge preparation as the service agreement: your file is stored and field names are matched to participant intake and profile data for onboarding pack generation.',
             null
           )}
           {renderWorkflowSection(
