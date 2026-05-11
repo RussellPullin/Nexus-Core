@@ -545,6 +545,30 @@ export default function SettingsPage() {
         <div className="settings-collapsible-body">
         {aiStatus?.orgAllowsLocalOllama ? (
           <>
+            {aiStatus?.deploymentForcesStaffLocalOllama && (
+              <p className="form-hint" style={{ margin: '0 0 0.65rem 0', padding: '0.5rem 0.65rem', background: 'var(--surface-muted, #f1f5f9)', borderRadius: 6 }}>
+                This server has <code style={{ fontSize: '0.88em' }}>AI_STAFF_LOCAL_OLLAMA=true</code>, so <strong>every organisation</strong> can use Ollama on staff computers (no per-org toggle needed in Supabase).
+              </p>
+            )}
+            <p className="form-hint" style={{ margin: '0 0 0.5rem 0' }}>
+              <strong>Two different paths:</strong> (1) <em>This computer</em> — Ollama below is for CSV column mapping from your browser to your PC. (2) <em>API server</em> — PDF/Excel AI uses Ollama only where the <strong>server</strong> can reach it (<code style={{ fontSize: '0.85em' }}>OLLAMA_BASE_URL</code>); a cloud API cannot see Ollama on your laptop unless you expose it on the network.
+            </p>
+            {aiStatus?.server && (
+              <p className="form-hint" style={{ margin: '0 0 0.75rem 0', fontSize: '0.88rem' }}>
+                Server AI status:{' '}
+                {aiStatus.server.available ? (
+                  <span className="settings-success" style={{ display: 'inline' }}>
+                    reachable
+                    {aiStatus.server.model ? ` (${aiStatus.server.model})` : ''}
+                    {aiStatus.server.warning ? ` — ${aiStatus.server.warning}` : ''}
+                  </span>
+                ) : (
+                  <span style={{ color: '#64748b' }}>
+                    not in use{aiStatus.server.error ? ` — ${aiStatus.server.error}` : ''}
+                  </span>
+                )}
+              </p>
+            )}
             <p className="form-hint" style={{ margin: '0 0 0.75rem 0' }}>
               Local AI runs in <strong>Ollama on this computer</strong>, not inside Nexus. Install it once, then allow this website to talk to Ollama (below). Open Nexus in{' '}
               <strong>Chrome or Edge</strong> for testing; Safari often blocks the connection.

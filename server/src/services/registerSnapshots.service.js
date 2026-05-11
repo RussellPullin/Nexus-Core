@@ -2,9 +2,18 @@
  * Single source for register row data: OneDrive Excel sync and in-app Registers UI.
  * When adding a Nexus feature with register-relevant data, extend buildTemplateDataBySheet
  * and add matching UI column labels in REGISTER_UI_HEADERS.
+ * Incident register: shift-level incident ticket Yes only, one row per shift. Significant risk: clinical intake fields.
  */
 
 import { db } from '../db/index.js';
+import { PARTICIPANT_INTAKE_FIELD_DEFS } from '../../../shared/onboardingFieldRegistry.js';
+
+/** Intake keys stored under participant onboarding — clinical section = risk assessment capture. */
+const RISK_ASSESSMENT_FIELD_KEYS = PARTICIPANT_INTAKE_FIELD_DEFS.filter((d) => d.section === 'clinical').map((d) => d.key);
+
+const RISK_ASSESSMENT_FIELD_LABEL = Object.fromEntries(
+  PARTICIPANT_INTAKE_FIELD_DEFS.filter((d) => d.section === 'clinical').map((d) => [d.key, d.label])
+);
 
 export function fmtDate(v) {
   if (!v) return '';
@@ -49,6 +58,45 @@ function incidentRegisterNarrative(incidents, sessionDetails) {
     return sess || firstLine;
   }
   return raw;
+}
+
+/**
+ * One incident register row per shift that reported an incident (Yes): latest matching progress note only.
+ * Notes without shift_id are still listed (one row each), keyed by progress note id.
+ */
+function dedupeIncidentProgressNotes(rows) {
+  const sorted = [...rows].sort((a, b) => {
+    const ta = new Date(a.created_at || 0).getTime();
+    const tb = new Date(b.created_at || 0).getTime();
+    return tb - ta;
+  });
+  const seen = new Set();
+  const out = [];
+  for (const r of sorted) {
+    const sid = r.shift_id != null && String(r.shift_id).trim() !== '' ? String(r.shift_id).trim() : '';
+    const key = sid ? `shift:${sid}` : `note:${r.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
+
+function buildRiskAssessmentNarrative(fieldMap) {
+  const parts = [];
+  for (const key of RISK_ASSESSMENT_FIELD_KEYS) {
+    const val = String(fieldMap[key] ?? '').trim();
+    if (!val) continue;
+    const label = RISK_ASSESSMENT_FIELD_LABEL[key] || key;
+    parts.push(`${label}: ${val}`);
+  }
+  return parts.join('\n\n');
+}
+
+function truncateForCell(s, maxLen) {
+  if (!s) return '';
+  if (s.length <= maxLen) return s;
+  return `${s.slice(0, maxLen - 1)}…`;
 }
 
 /** Human-readable columns for in-app tables (pad with "Column n" if row wider). */
@@ -234,21 +282,22 @@ export function buildTemplateDataBySheet(organizationId) {
       return [label, label, label, 1, 'Nexus Core', 'Nexus Core', fmtDate(r.created_at), fmtDate(r.created_at), ''];
     });
 
-  const incidentRows = db
-    .prepare(
-      `SELECT pn.id, pn.support_date, pn.start_time, pn.incidents, pn.session_details, pn.created_at,
-              p.name AS participant_name, p.email AS participant_email, s.name AS staff_name
-       FROM progress_notes pn
-       JOIN participants p ON p.id = pn.participant_id
-       LEFT JOIN staff s ON s.id = pn.staff_id
-       WHERE p.provider_org_id = ?
-         AND pn.incidents IS NOT NULL
-         AND trim(pn.incidents) <> ''
-       ORDER BY datetime(pn.created_at) DESC`
-    )
-    .all(organizationId)
-    .filter((r) => isIncidentTicketYes(r.incidents))
-    .map((r, i) => {
+  const incidentRows = dedupeIncidentProgressNotes(
+    db
+      .prepare(
+        `SELECT pn.id, pn.shift_id, pn.support_date, pn.start_time, pn.incidents, pn.session_details, pn.created_at,
+                p.name AS participant_name, p.email AS participant_email, s.name AS staff_name
+         FROM progress_notes pn
+         JOIN participants p ON p.id = pn.participant_id
+         LEFT JOIN staff s ON s.id = pn.staff_id
+         WHERE p.provider_org_id = ?
+           AND pn.incidents IS NOT NULL
+           AND trim(pn.incidents) <> ''
+         ORDER BY datetime(pn.created_at) DESC`
+      )
+      .all(organizationId)
+      .filter((r) => isIncidentTicketYes(r.incidents))
+  ).map((r, i) => {
       const when = `${fmtDate(r.support_date)}${r.start_time ? ` ${r.start_time}` : ''}`.trim();
       const persons = `${r.participant_name || ''}${r.participant_email ? ` (${r.participant_email})` : ''}`;
       const narrative = incidentRegisterNarrative(r.incidents, r.session_details);
@@ -275,6 +324,97 @@ export function buildTemplateDataBySheet(organizationId) {
         ''
       ];
     });
+
+  const riskKeyPlaceholders = RISK_ASSESSMENT_FIELD_KEYS.map(() => '?').join(', ');
+  const sigRiskRows = (() => {
+    if (RISK_ASSESSMENT_FIELD_KEYS.length === 0) return [];
+    const riskRows = db
+      .prepare(
+        `WITH latest AS (
+           SELECT po.id AS onboarding_id,
+                  po.participant_id,
+                  p.name AS participant_name,
+                  p.address AS participant_address,
+                  p.phone AS participant_phone,
+                  p.email AS participant_email,
+                  p.parent_guardian_phone,
+                  p.parent_guardian_email,
+                  row_number() OVER (
+                    PARTITION BY po.participant_id
+                    ORDER BY datetime(COALESCE(po.last_activity_at, po.updated_at, po.created_at)) DESC,
+                             po.id DESC
+                  ) AS rn
+           FROM participant_onboarding po
+           JOIN participants p ON p.id = po.participant_id AND p.provider_org_id = ?
+           JOIN provider_profiles pp ON pp.id = po.provider_profile_id AND pp.organisation_id = p.provider_org_id
+         )
+         SELECT l.onboarding_id,
+                l.participant_id,
+                l.participant_name,
+                l.participant_address,
+                l.participant_phone,
+                l.participant_email,
+                l.parent_guardian_phone,
+                l.parent_guardian_email,
+                pif.field_key,
+                pif.field_value
+         FROM latest l
+         JOIN participant_intake_fields pif ON pif.participant_onboarding_id = l.onboarding_id
+         WHERE l.rn = 1
+           AND pif.field_key IN (${riskKeyPlaceholders})
+           AND trim(COALESCE(pif.field_value, '')) <> ''`
+      )
+      .all(organizationId, ...RISK_ASSESSMENT_FIELD_KEYS);
+
+    const byOnboarding = new Map();
+    for (const row of riskRows) {
+      const obId = row.onboarding_id;
+      if (!byOnboarding.has(obId)) {
+        byOnboarding.set(obId, {
+          participant_name: row.participant_name,
+          participant_address: row.participant_address,
+          participant_phone: row.participant_phone,
+          participant_email: row.participant_email,
+          parent_guardian_phone: row.parent_guardian_phone,
+          parent_guardian_email: row.parent_guardian_email,
+          fields: {}
+        });
+      }
+      byOnboarding.get(obId).fields[row.field_key] = row.field_value;
+    }
+
+    const out = [];
+    for (const meta of byOnboarding.values()) {
+      const narrative = buildRiskAssessmentNarrative(meta.fields);
+      if (!narrative.trim()) continue;
+      const name = meta.participant_name || '';
+      const contact1 = `${meta.participant_phone || ''} ${meta.participant_email || ''}`.trim();
+      const contact2 = `${meta.parent_guardian_phone || ''} ${meta.parent_guardian_email || ''}`.trim();
+      out.push([
+        name,
+        name,
+        name,
+        name,
+        name,
+        meta.participant_address || '',
+        contact1,
+        contact2,
+        '',
+        '',
+        '',
+        truncateForCell(narrative, 480),
+        narrative,
+        '',
+        '',
+        '',
+        '',
+        '',
+        'Nexus Core (participant intake risk assessment)'
+      ]);
+    }
+    out.sort((a, b) => String(a[0] || '').localeCompare(String(b[0] || ''), undefined, { sensitivity: 'base' }));
+    return out;
+  })();
 
   const trainingRows = db
     .prepare(
@@ -335,36 +475,6 @@ export function buildTemplateDataBySheet(organizationId) {
     'Nexus Core',
     'Nexus Core'
   ]);
-
-  const sigRiskRows = db
-    .prepare(
-      `SELECT id, name, address, phone, email
-       FROM participants
-       WHERE provider_org_id = ?
-       ORDER BY name`
-    )
-    .all(organizationId)
-    .map((p) => [
-      p.name || '',
-      p.name || '',
-      p.name || '',
-      p.name || '',
-      p.name || '',
-      p.address || '',
-      `${p.phone || ''} ${p.email || ''}`.trim(),
-      `${p.phone || ''} ${p.email || ''}`.trim(),
-      `${p.phone || ''} ${p.email || ''}`.trim(),
-      `${p.phone || ''} ${p.email || ''}`.trim(),
-      `${p.phone || ''} ${p.email || ''}`.trim(),
-      'Refer participant profile and risk details in Nexus Core',
-      'Refer participant profile and risk details in Nexus Core',
-      '',
-      '',
-      '',
-      '',
-      '',
-      'Managed in Nexus Core'
-    ]);
 
   const policyRows = db
     .prepare(
@@ -466,7 +576,11 @@ const REGISTER_DISPLAY_ORDER = [
   { sheetKey: 'Incident register', title: 'Incident register', source: 'progress_notes_incidents' },
   { sheetKey: 'Complaints', title: 'Complaints', source: 'case_notes_complaints' },
   { sheetKey: 'Feedback and complaints', title: 'Feedback & compliments', source: 'case_notes_feedback' },
-  { sheetKey: 'Significant risk factor', title: 'Significant risk factors (participant summary)', source: 'participant_profiles' },
+  {
+    sheetKey: 'Significant risk factor',
+    title: 'Significant risk factors (intake risk assessment)',
+    source: 'participant_intake_clinical'
+  },
   { sheetKey: 'Conflict of interest register', title: 'Conflict of interest register', source: null },
   { sheetKey: 'Emergency test register', title: 'Emergency test register', source: null },
   { sheetKey: 'Collection and storage of Med', title: 'Collection & storage of medication', source: null },

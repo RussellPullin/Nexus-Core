@@ -714,7 +714,7 @@ export default function ParticipantsPage() {
             </div>
             <label className="checkbox-label" style={{ flexShrink: 0, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <input type="checkbox" checked={csvUseLlm} onChange={(e) => setCsvUseLlm(e.target.checked)} />
-              <span>Use AI (Ollama) to map columns – recommended for non-standard CSV formats</span>
+              <span>Use AI to map columns (this computer&apos;s Ollama when enabled, otherwise the API server if it has Ollama) — best for non-standard CSVs</span>
             </label>
             {isAdmin && (
               <label className="checkbox-label" style={{ flexShrink: 0, marginBottom: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
@@ -753,14 +753,12 @@ export default function ParticipantsPage() {
                   <>
                     <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.8rem', fontWeight: 500 }}>
                       {csvPreview.llmUsed ? (
-                        <span style={{ color: '#059669' }}>AI (Ollama) mapped columns</span>
+                        <span style={{ color: '#059669' }}>AI mapped columns</span>
                       ) : (
                         <span style={{ color: '#d97706' }}>
                           Rule-based mapping
                           {csvUseLlm
-                            ? aiStaffLocalOllama
-                              ? ' (Ollama on this computer or the API server was not used — open Ollama and link it in Settings)'
-                              : ' (Ollama not available – start Ollama to use AI)'
+                            ? ' (AI was not used — open Ollama on this computer and Settings → Ollama, and/or ask your admin to configure server Ollama)'
                             : ''}
                         </span>
                       )}

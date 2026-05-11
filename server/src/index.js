@@ -235,6 +235,8 @@ app.get('/api/ai/status', requireAuth, async (req, res) => {
         baseUrl: config.baseUrl
       },
       orgAllowsLocalOllama,
+      /** True when API env AI_STAFF_LOCAL_OLLAMA=true forces the flag on for every org (see orgFeatures.service). */
+      deploymentForcesStaffLocalOllama: process.env.AI_STAFF_LOCAL_OLLAMA === 'true',
       userOllamaLocalBaseUrl: u?.ollama_local_base_url || null
     });
   } catch (err) {
@@ -250,6 +252,7 @@ app.get('/api/ai/status', requireAuth, async (req, res) => {
         warning: undefined
       },
       orgAllowsLocalOllama: false,
+      deploymentForcesStaffLocalOllama: process.env.AI_STAFF_LOCAL_OLLAMA === 'true',
       userOllamaLocalBaseUrl: null
     });
   }

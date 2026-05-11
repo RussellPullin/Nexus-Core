@@ -62,7 +62,7 @@ function ProductLayout() {
 
 function Layout({ productSurface, children }) {
   const { user, logout, canManageUsers, canAccessCaseTasks } = useAuth();
-  const [ollamaOk, setOllamaOk] = useState(null);
+  const [aiReachable, setAiReachable] = useState({ server: null, local: null });
   const [emailBannerDismissed, setEmailBannerDismissed] = useState(() =>
     typeof sessionStorage !== 'undefined' && sessionStorage.getItem(EMAIL_BANNER_KEY) === '1'
   );
@@ -71,7 +71,7 @@ function Layout({ productSurface, children }) {
 
   useEffect(() => {
     if (!user) {
-      setOllamaOk(null);
+      setAiReachable({ server: null, local: null });
       return;
     }
     let cancel = false;
@@ -80,15 +80,17 @@ function Layout({ productSurface, children }) {
         const s = await ai.status();
         if (cancel) return;
         const serverOk = Boolean(s?.server?.available);
-        let localOk = false;
+        let localOk = null;
         if (s?.orgAllowsLocalOllama) {
           const base = s.userOllamaLocalBaseUrl || resolveLocalOllamaBaseUrl(user);
           const p = await probeLocalOllama(base);
           localOk = Boolean(p.ok && (p.models?.length ?? 0) > 0);
+        } else {
+          localOk = null;
         }
-        setOllamaOk(serverOk || localOk);
+        setAiReachable({ server: serverOk, local: localOk });
       } catch {
-        if (!cancel) setOllamaOk(false);
+        if (!cancel) setAiReachable({ server: false, local: false });
       }
     })();
     return () => { cancel = true; };
@@ -189,9 +191,34 @@ function Layout({ productSurface, children }) {
           </NavLink>
           <span
             className="nav-ai-status"
-            title={ollamaOk === true ? 'Ollama' : ollamaOk === false ? '—' : '…'}
+            title={(() => {
+              const { server, local } = aiReachable;
+              if (server === null && local === null) return 'Checking AI…';
+              const bits = [];
+              if (server) bits.push('Server AI: Ollama reachable from API');
+              else if (server === false) bits.push('Server AI: not available (normal on cloud if Ollama is only on your PC)');
+              if (local === true) bits.push('This computer: Ollama OK');
+              if (local === false) bits.push('This computer: Ollama not linked (Settings → Ollama)');
+              if (local === null && server !== null) bits.push('This computer: staff Ollama off for org');
+              if (bits.length === 0) return 'No AI path ready';
+              return bits.join(' · ');
+            })()}
           >
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: ollamaOk === true ? '#22c55e' : ollamaOk === false ? '#94a3b8' : 'transparent', display: 'inline-block', marginRight: 4 }} />
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background:
+                  aiReachable.server === true || aiReachable.local === true
+                    ? '#22c55e'
+                    : aiReachable.server === false || aiReachable.local === false
+                      ? '#94a3b8'
+                      : 'transparent',
+                display: 'inline-block',
+                marginRight: 4
+              }}
+            />
             AI
           </span>
           <span className="nav-user">{user?.email}</span>

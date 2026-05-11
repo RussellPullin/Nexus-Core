@@ -117,6 +117,12 @@ export async function fetchOrgFeatureMatrix(onlyOrgId = null) {
     }
   }
 
+  if (process.env.AI_STAFF_LOCAL_OLLAMA === 'true') {
+    for (const oid of Object.keys(matrix)) {
+      matrix[oid] = { ...matrix[oid], ai_staff_local_ollama: true };
+    }
+  }
+
   return { orgs, feature_defs, matrix };
 }
 
