@@ -126,6 +126,136 @@ body {
   color: #1e293b;
 }
 
+/* Forms page — three onboarding sections */
+.forms-page .forms-section {
+  margin-bottom: 1.5rem;
+  padding: 1.25rem 1.35rem;
+}
+.forms-section-heading {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.15rem;
+  color: #0f172a;
+}
+.forms-lede {
+  margin: 0 0 1rem 0;
+  color: #64748b;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+.forms-muted {
+  color: #64748b;
+  font-size: 0.92rem;
+}
+.forms-banner {
+  padding: 0.5rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+.forms-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.forms-doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.forms-doc-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1rem;
+  background: #fafafa;
+}
+.forms-doc-title {
+  font-weight: 600;
+  color: #1e293b;
+}
+.forms-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.forms-detect {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #e2e8f0;
+}
+.forms-detect-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #334155;
+}
+.forms-detect-hint {
+  margin: 0.35rem 0 0.5rem 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.forms-label {
+  display: block;
+  font-size: 0.85rem;
+  margin-bottom: 0.35rem;
+  color: #475569;
+}
+.forms-pack-defaults {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 0.5rem;
+}
+.forms-pack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.forms-pack-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: #fff;
+}
+.forms-pack-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: center;
+}
+.forms-pack-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.forms-pack-body {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #f1f5f9;
+}
+.forms-policy-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 220px;
+  overflow: auto;
+  margin-bottom: 0.5rem;
+}
+.forms-policy-check {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
 .btn {
   padding: 0.5rem 1rem;
   border: none;
