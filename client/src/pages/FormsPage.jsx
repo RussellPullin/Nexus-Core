@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { PARTICIPANT_CONTRACT_MERGE_KEYS, STAFF_CONTRACT_MERGE_KEYS } from '@nexus-shared/contractFormMergeKeys';
 import { forms } from '../lib/api';
@@ -62,6 +62,7 @@ export default function FormsPage() {
   const { user } = useAuth();
   const { productSurface } = useParams();
   const settingsFormTemplatesHref = productSurface ? `/${productSurface}/settings?expand=form-templates` : '/settings?expand=form-templates';
+  const settingsOpenaiHref = productSurface ? `/${productSurface}/settings?expand=openai-forms` : '/settings?expand=openai-forms';
 
   const [context, setContext] = useState(null);
   const [templatesAll, setTemplatesAll] = useState([]);
@@ -76,6 +77,10 @@ export default function FormsPage() {
   const [analyzeByTemplateId, setAnalyzeByTemplateId] = useState({});
   /** `map:${templateId}` | `read:${templateId}` */
   const [ollamaKey, setOllamaKey] = useState(null);
+  const [suggestingId, setSuggestingId] = useState(null);
+  const [mappingEditorId, setMappingEditorId] = useState(null);
+  const [mappingDraft, setMappingDraft] = useState({});
+  const [mappingSaving, setMappingSaving] = useState(false);
 
   const [docPackData, setDocPackData] = useState(null);
   const [packWorking, setPackWorking] = useState(false);
@@ -264,7 +269,17 @@ Rules:
 - Include every PDF field name from the list that is a real fill-in, mapped to the best allowed value.
 - Do not invent allowed keys; values must be from the list only.`;
 
-      const parsed = await generateLocalOllamaJson(baseUrl, model, prompt, 5000);
+      let parsed;
+      try {
+        parsed = await generateLocalOllamaJson(baseUrl, model, prompt, 5000);
+      } catch (e) {
+        setMessage(e?.message || 'Ollama read failed');
+        return;
+      }
+      if (!parsed) {
+        setMessage('Ollama returned an empty response.');
+        return;
+      }
       const ollamaMap = normalizeOllamaMergeMap(parsed, allowed);
       if (!Object.keys(ollamaMap).length) {
         setMessage(
@@ -336,7 +351,17 @@ Allowed merge keys (use only these as values): ${JSON.stringify(allowed)}
 Form field names and labels to map: ${JSON.stringify(placeholders)}
 
 Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number"}}`;
-      const parsed = await generateLocalOllamaJson(baseUrl, model, prompt, 2200);
+      let parsed;
+      try {
+        parsed = await generateLocalOllamaJson(baseUrl, model, prompt, 2200);
+      } catch (e) {
+        setMessage(e?.message || 'Ollama mapping failed');
+        return;
+      }
+      if (!parsed) {
+        setMessage('Ollama returned an empty response.');
+        return;
+      }
       const ollamaMap = normalizeOllamaMergeMap(parsed, allowed);
       if (!Object.keys(ollamaMap).length) {
         setMessage('Ollama did not return a usable merge_map object.');
@@ -357,6 +382,72 @@ Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number
       setMessage(err.message || 'Ollama mapping failed');
     } finally {
       setOllamaKey(null);
+    }
+  };
+
+  const handleServerSuggestMapping = async (templateId) => {
+    if (!context?.suggest_mapping_available) {
+      setMessage(
+        `No server AI available. An admin can add your organisation’s OpenAI API key under Settings → OpenAI (custom forms), or your host can configure server Ollama / EXTERNAL_LLM_* env. You can still map fields manually below.`
+      );
+      return;
+    }
+    setSuggestingId(templateId);
+    setMessage('');
+    try {
+      const data = await forms.aiSuggestMapping(templateId);
+      const n = data?.mapped_keys ?? 0;
+      const src = data?.source ? ` (${data.source})` : '';
+      setMessage(`AI suggested ${n} field link(s)${src}. Review in “Edit field links” if needed.`);
+      loadTemplates();
+    } catch (err) {
+      setMessage(err.message || 'Suggest mapping failed');
+    } finally {
+      setSuggestingId(null);
+    }
+  };
+
+  const openFieldLinkEditor = (t) => {
+    if (mappingEditorId === t.id) {
+      setMappingEditorId(null);
+      return;
+    }
+    const m = parseMappingJson(t.mapping_json);
+    const map = { ...(m.contract_field_map || {}) };
+    const ph = [...new Set([...placeholdersFromTemplate(t), ...Object.keys(map)])];
+    for (const p of ph) {
+      if (map[p] === undefined) map[p] = '';
+    }
+    setMappingDraft(map);
+    setMappingEditorId(t.id);
+  };
+
+  const saveFieldLinks = async (t) => {
+    setMappingSaving(true);
+    setMessage('');
+    try {
+      const existing = parseMappingJson(t.mapping_json);
+      const next = {};
+      for (const [k, v] of Object.entries(mappingDraft)) {
+        const val = String(v || '').trim();
+        if (!val) continue;
+        const allowed = t.workflow === WF_STAFF ? STAFF_CONTRACT_MERGE_KEYS : PARTICIPANT_CONTRACT_MERGE_KEYS;
+        if (!allowed.includes(val)) continue;
+        next[k] = val;
+      }
+      const mapping_json = {
+        ...existing,
+        contract_field_map: next,
+        manual_field_map_saved_at: new Date().toISOString()
+      };
+      await forms.updateTemplate(t.id, { mapping_json });
+      setMessage('Field links saved.');
+      setMappingEditorId(null);
+      loadTemplates();
+    } catch (err) {
+      setMessage(err.message || 'Save failed');
+    } finally {
+      setMappingSaving(false);
     }
   };
 
@@ -497,65 +588,134 @@ Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number
               const advKey = `${t.id}_adv`;
               const m = parseMappingJson(t.mapping_json);
               const analyzedAt = m.contract_analysis?.analyzed_at;
+              const mergeOptions = wf === WF_STAFF ? STAFF_CONTRACT_MERGE_KEYS : PARTICIPANT_CONTRACT_MERGE_KEYS;
+              const phRows = [...new Set([...placeholdersFromTemplate(t), ...Object.keys(m.contract_field_map || {})])];
               return (
-                <tr key={t.id}>
-                  <td>{t.display_name || 'Untitled'}</td>
-                  <td>{hasFile ? <span className="forms-ok">{fileInfo.filename}</span> : <span className="forms-muted">None</span>}</td>
-                  <td>
-                    {mappingFieldCount(t)}
-                    {analyzedAt ? <span className="forms-muted" style={{ display: 'block', fontSize: '0.8rem' }}>Analyzed {analyzedAt.slice(0, 10)}</span> : null}
-                  </td>
-                  <td>
-                    <div className="forms-actions-cell">
-                      <input
-                        type="file"
-                        accept=".pdf,.docx"
-                        className="forms-file-inline"
-                        onChange={(e) => setUploadFile((prev) => ({ ...prev, [t.id]: e.target.files?.[0] || null }))}
-                      />
-                      <button type="button" className="btn btn-primary btn-sm" disabled={uploading === t.id || !uploadFile[t.id]} onClick={() => handleUploadPdf(t.id)}>
-                        {uploading === t.id ? '…' : 'Upload & map from intake'}
-                      </button>
-                      <button type="button" className="btn btn-secondary btn-sm" style={{ color: '#b91c1c' }} onClick={() => handleDeleteTemplate(t.id)}>
-                        Delete
-                      </button>
-                    </div>
-                    <details className="forms-advanced" style={{ marginTop: '0.5rem' }}>
-                      <summary className="forms-muted" style={{ cursor: 'pointer', fontSize: '0.85rem' }}>
-                        Advanced — re-run detection or Ollama on another file
-                      </summary>
-                      <div className="forms-actions-cell" style={{ marginTop: '0.35rem' }}>
+                <Fragment key={t.id}>
+                  <tr>
+                    <td>{t.display_name || 'Untitled'}</td>
+                    <td>{hasFile ? <span className="forms-ok">{fileInfo.filename}</span> : <span className="forms-muted">None</span>}</td>
+                    <td>
+                      {mappingFieldCount(t)}
+                      {analyzedAt ? <span className="forms-muted" style={{ display: 'block', fontSize: '0.8rem' }}>Analyzed {analyzedAt.slice(0, 10)}</span> : null}
+                    </td>
+                    <td>
+                      <div className="forms-actions-cell">
                         <input
                           type="file"
-                          accept=".pdf,.docx,.png,.jpg,.jpeg,.webp"
+                          accept=".pdf,.docx"
                           className="forms-file-inline"
-                          onChange={(e) => setUploadFile((prev) => ({ ...prev, [advKey]: e.target.files?.[0] || null }))}
+                          onChange={(e) => setUploadFile((prev) => ({ ...prev, [t.id]: e.target.files?.[0] || null }))}
                         />
-                        <button type="button" className="btn btn-secondary btn-sm" disabled={uploading === advKey || !uploadFile[advKey]} onClick={() => handleContractAnalyze(t.id)}>
-                          {uploading === advKey ? '…' : 'Detect only'}
+                        <button type="button" className="btn btn-primary btn-sm" disabled={uploading === t.id || !uploadFile[t.id]} onClick={() => handleUploadPdf(t.id)}>
+                          {uploading === t.id ? '…' : 'Upload & map from intake'}
                         </button>
                         <button
                           type="button"
                           className="btn btn-secondary btn-sm"
-                          disabled={uploading === advKey || !uploadFile[advKey] || ollamaKey === `read:${t.id}`}
-                          onClick={() => handleOllamaReadDocument(t, wf)}
-                          title="Ollama on this PC (HTTPS: OLLAMA_ORIGINS)"
+                          disabled={suggestingId === t.id}
+                          onClick={() => handleServerSuggestMapping(t.id)}
+                          title="Uses your organisation OpenAI key, host EXTERNAL_LLM_*, or server Ollama"
                         >
-                          {ollamaKey === `read:${t.id}` ? 'Reading…' : 'Read form (Ollama)'}
+                          {suggestingId === t.id ? 'AI…' : 'Suggest mapping (server)'}
                         </button>
-                        <button type="button" className="btn btn-secondary btn-sm" disabled={ollamaKey === `map:${t.id}`} onClick={() => handleOllamaRefineMapping(t, wf)}>
-                          {ollamaKey === `map:${t.id}` ? 'Ollama…' : 'Ollama map'}
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openFieldLinkEditor(t)}>
+                          {mappingEditorId === t.id ? 'Close field links' : 'Edit field links'}
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" style={{ color: '#b91c1c' }} onClick={() => handleDeleteTemplate(t.id)}>
+                          Delete
                         </button>
                       </div>
-                    </details>
-                    {analyzeByTemplateId[t.id] && (
-                      <p className="forms-muted" style={{ fontSize: '0.78rem', margin: '0.35rem 0 0' }}>
-                        Last run: {analyzeByTemplateId[t.id].pdf_form_fields?.length ?? 0} PDF fields ·{' '}
-                        {analyzeByTemplateId[t.id].docx_placeholders?.length ?? 0} Word · {analyzeByTemplateId[t.id].ocr_labels?.length ?? 0} OCR labels
-                      </p>
-                    )}
-                  </td>
-                </tr>
+                      <details className="forms-advanced" style={{ marginTop: '0.5rem' }}>
+                        <summary className="forms-muted" style={{ cursor: 'pointer', fontSize: '0.85rem' }}>
+                          Advanced — re-run detection or Ollama on another file
+                        </summary>
+                        <div className="forms-actions-cell" style={{ marginTop: '0.35rem' }}>
+                          <input
+                            type="file"
+                            accept=".pdf,.docx,.png,.jpg,.jpeg,.webp"
+                            className="forms-file-inline"
+                            onChange={(e) => setUploadFile((prev) => ({ ...prev, [advKey]: e.target.files?.[0] || null }))}
+                          />
+                          <button type="button" className="btn btn-secondary btn-sm" disabled={uploading === advKey || !uploadFile[advKey]} onClick={() => handleContractAnalyze(t.id)}>
+                            {uploading === advKey ? '…' : 'Detect only'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={uploading === advKey || !uploadFile[advKey] || ollamaKey === `read:${t.id}`}
+                            onClick={() => handleOllamaReadDocument(t, wf)}
+                            title="Ollama on this PC (HTTPS: OLLAMA_ORIGINS)"
+                          >
+                            {ollamaKey === `read:${t.id}` ? 'Reading…' : 'Read form (Ollama)'}
+                          </button>
+                          <button type="button" className="btn btn-secondary btn-sm" disabled={ollamaKey === `map:${t.id}`} onClick={() => handleOllamaRefineMapping(t, wf)}>
+                            {ollamaKey === `map:${t.id}` ? 'Ollama…' : 'Ollama map'}
+                          </button>
+                        </div>
+                      </details>
+                      {analyzeByTemplateId[t.id] && (
+                        <p className="forms-muted" style={{ fontSize: '0.78rem', margin: '0.35rem 0 0' }}>
+                          Last run: {analyzeByTemplateId[t.id].pdf_form_fields?.length ?? 0} PDF fields ·{' '}
+                          {analyzeByTemplateId[t.id].docx_placeholders?.length ?? 0} Word · {analyzeByTemplateId[t.id].ocr_labels?.length ?? 0} OCR labels
+                        </p>
+                      )}
+                    </td>
+                  </tr>
+                  {mappingEditorId === t.id ? (
+                    <tr className="forms-map-editor-row">
+                      <td colSpan={4} style={{ background: 'var(--surface-muted, #f8fafc)', padding: '0.75rem 1rem' }}>
+                        <p className="forms-muted" style={{ margin: '0 0 0.5rem 0', fontSize: '0.88rem' }}>
+                          Link each form field or placeholder to one intake/profile merge key. Empty rows are omitted on save.
+                        </p>
+                        {phRows.length === 0 ? (
+                          <p className="forms-muted">Upload or run Detect first to list field names.</p>
+                        ) : (
+                          <div className="table-wrap">
+                            <table className="table-condensed forms-data-table" style={{ background: '#fff' }}>
+                              <thead>
+                                <tr>
+                                  <th>Form field / placeholder</th>
+                                  <th>Merge key</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {phRows.map((ph) => (
+                                  <tr key={ph}>
+                                    <td style={{ fontSize: '0.85rem', wordBreak: 'break-word' }}>{ph}</td>
+                                    <td>
+                                      <select
+                                        className="form-input"
+                                        style={{ minWidth: 200 }}
+                                        value={mappingDraft[ph] ?? ''}
+                                        onChange={(e) => setMappingDraft((prev) => ({ ...prev, [ph]: e.target.value }))}
+                                      >
+                                        <option value="">— none —</option>
+                                        {mergeOptions.map((k) => (
+                                          <option key={k} value={k}>
+                                            {k}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        <div style={{ marginTop: '0.65rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          <button type="button" className="btn btn-primary btn-sm" disabled={mappingSaving || phRows.length === 0} onClick={() => saveFieldLinks(t)}>
+                            {mappingSaving ? 'Saving…' : 'Save field links'}
+                          </button>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setMappingEditorId(null)}>
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
               );
             })}
           </tbody>
@@ -604,7 +764,9 @@ Example: {"merge_map":{"EmployeeName":"employee_name","NDIS_Number":"ndis_number
 
       <p className="forms-lede" style={{ marginBottom: '1.25rem' }}>
         The <strong>service agreement</strong> you configure under{' '}
-        <Link to={settingsFormTemplatesHref}>Settings → Form templates</Link> uses a structured template: variables are filled from the participant profile and intake when packs are generated. On this page, a <strong>custom participant or staff PDF/Word</strong> works the same way in one step: choose <strong>Upload &amp; map from intake</strong> and Nexus saves the file, detects fields (PDF names, Word tags, OCR), and saves the link to intake/profile fields automatically—no separate detect step required.
+        <Link to={settingsFormTemplatesHref}>Settings → Form templates</Link> uses a structured template: variables are filled from the participant profile and intake when packs are generated. On this page, a <strong>custom participant or staff PDF/Word</strong> works the same way in one step: choose <strong>Upload &amp; map from intake</strong> and Nexus saves the file, detects fields (PDF names, Word tags, OCR), and saves the link to intake/profile fields automatically—no separate detect step required. Use{' '}
+        <strong>Suggest mapping (server)</strong> for an AI pass (your org&apos;s{' '}
+        <Link to={settingsOpenaiHref}>OpenAI API key</Link>, host external LLM, or server Ollama), <strong>Edit field links</strong> to adjust manually, or local Ollama under Advanced.
       </p>
 
       {message && (

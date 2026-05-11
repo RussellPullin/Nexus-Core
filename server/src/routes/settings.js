@@ -14,6 +14,7 @@ import { oauthPublicApiOriginFromEnv } from '../lib/oauthPublicOrigin.js';
 import { exchangeAdobeAuthorizationCode } from '../services/adobeSign.service.js';
 import { getShifterOrgTimezoneSpecForNexusOrg } from '../services/supabaseStaffShifter.service.js';
 import { normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
+import { maskApiKey } from '../services/openaiCompatibleChat.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -219,6 +220,82 @@ router.get('/business', (req, res) => {
     const merged = mergeWithEnv(row, { noOrgRowYet: Boolean(orgId) && !row });
     res.setHeader('Cache-Control', 'no-store, private');
     res.json(merged);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/settings/openai-forms — per-org OpenAI for custom form field mapping (admin/delegate)
+router.get('/openai-forms', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = resolveTargetOrgId(req);
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account.' });
+    const row = db.prepare('SELECT openai_api_key, openai_model, openai_base_url FROM organisations WHERE id = ?').get(orgId);
+    const key = row?.openai_api_key?.trim();
+    res.setHeader('Cache-Control', 'no-store, private');
+    res.json({
+      openai_configured: !!key,
+      openai_key_hint: key ? maskApiKey(key) : null,
+      openai_model: row?.openai_model?.trim() || 'gpt-4o-mini',
+      openai_base_url: row?.openai_base_url?.trim() || ''
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/settings/openai-forms
+router.put('/openai-forms', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = resolveTargetOrgId(req);
+    if (!orgId) return res.status(400).json({ error: 'No organisation on your account.' });
+    const row = db.prepare('SELECT openai_api_key, openai_model, openai_base_url FROM organisations WHERE id = ?').get(orgId);
+    if (!row) return res.status(404).json({ error: 'Organisation not found.' });
+
+    const { openai_api_key, openai_model, openai_base_url, clear_openai_api_key } = req.body || {};
+    let nextKey = row.openai_api_key;
+    if (clear_openai_api_key === true) nextKey = null;
+    else if (openai_api_key !== undefined) {
+      const t = String(openai_api_key || '').trim();
+      if (t) nextKey = t;
+    }
+
+    let nextModel = (row.openai_model && String(row.openai_model).trim()) || 'gpt-4o-mini';
+    if (openai_model !== undefined) {
+      const m = String(openai_model || '').trim();
+      if (m && /^[a-zA-Z0-9_.-]{1,80}$/.test(m)) nextModel = m;
+    }
+
+    let nextBase = row.openai_base_url?.trim() || null;
+    if (openai_base_url !== undefined) {
+      const b = String(openai_base_url || '').trim();
+      if (!b) nextBase = null;
+      else {
+        try {
+          const u = new URL(b);
+          if (u.protocol !== 'https:') {
+            return res.status(400).json({ error: 'openai_base_url must use https://' });
+          }
+          nextBase = b.replace(/\/$/, '');
+        } catch {
+          return res.status(400).json({ error: 'Invalid openai_base_url' });
+        }
+      }
+    }
+
+    db.prepare(
+      `UPDATE organisations SET openai_api_key = ?, openai_model = ?, openai_base_url = ?, updated_at = datetime('now') WHERE id = ?`
+    ).run(nextKey, nextModel, nextBase, orgId);
+
+    const saved = db.prepare('SELECT openai_api_key, openai_model, openai_base_url FROM organisations WHERE id = ?').get(orgId);
+    const keyOut = saved?.openai_api_key?.trim();
+    res.setHeader('Cache-Control', 'no-store, private');
+    res.json({
+      openai_configured: !!keyOut,
+      openai_key_hint: keyOut ? maskApiKey(keyOut) : null,
+      openai_model: saved?.openai_model?.trim() || 'gpt-4o-mini',
+      openai_base_url: saved?.openai_base_url?.trim() || ''
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1660,6 +1660,22 @@ try {
     if (!e.message?.includes('duplicate column')) console.warn('organisations product flags migration:', e.message);
   }
   try {
+    let oColsOpenAi = db.prepare('PRAGMA table_info(organisations)').all();
+    if (!oColsOpenAi.some((c) => c.name === 'openai_api_key')) {
+      db.exec('ALTER TABLE organisations ADD COLUMN openai_api_key TEXT');
+    }
+    oColsOpenAi = db.prepare('PRAGMA table_info(organisations)').all();
+    if (!oColsOpenAi.some((c) => c.name === 'openai_model')) {
+      db.exec("ALTER TABLE organisations ADD COLUMN openai_model TEXT DEFAULT 'gpt-4o-mini'");
+    }
+    oColsOpenAi = db.prepare('PRAGMA table_info(organisations)').all();
+    if (!oColsOpenAi.some((c) => c.name === 'openai_base_url')) {
+      db.exec('ALTER TABLE organisations ADD COLUMN openai_base_url TEXT');
+    }
+  } catch (e) {
+    if (!e.message?.includes('duplicate column')) console.warn('organisations openai_* migration:', e.message);
+  }
+  try {
     let uColsProd = db.prepare('PRAGMA table_info(users)').all();
     if (!uColsProd.some((c) => c.name === 'coordination_access')) {
       db.exec('ALTER TABLE users ADD COLUMN coordination_access INTEGER DEFAULT 1');

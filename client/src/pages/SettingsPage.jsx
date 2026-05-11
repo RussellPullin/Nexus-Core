@@ -62,6 +62,12 @@ export default function SettingsPage() {
   const isDrawingRef = useRef(false);
   const [msDriveStatus, setMsDriveStatus] = useState(null);
   const [msDriveBusy, setMsDriveBusy] = useState(false);
+  const [openaiForms, setOpenaiForms] = useState(null);
+  const [openaiKeyInput, setOpenaiKeyInput] = useState('');
+  const [openaiModelDraft, setOpenaiModelDraft] = useState('gpt-4o-mini');
+  const [openaiBaseUrlDraft, setOpenaiBaseUrlDraft] = useState('');
+  const [openaiSaving, setOpenaiSaving] = useState(false);
+  const [openaiMsg, setOpenaiMsg] = useState('');
 
   useEffect(() => {
     setBillingIntervalMinutes(user?.billing_interval_minutes ?? 15);
@@ -71,6 +77,19 @@ export default function SettingsPage() {
   useEffect(() => {
     setOllamaLocalUrlDraft(resolveLocalOllamaBaseUrl(user));
   }, [user?.ollama_local_base_url, user]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    settings
+      .getOpenaiForms()
+      .then((d) => {
+        setOpenaiForms(d);
+        setOpenaiModelDraft(d?.openai_model || 'gpt-4o-mini');
+        setOpenaiBaseUrlDraft(d?.openai_base_url || '');
+        setOpenaiKeyInput('');
+      })
+      .catch(() => setOpenaiForms(null));
+  }, [isAdmin]);
 
   useEffect(() => {
     if (searchParams.get('email_connected') === '1') {
@@ -101,6 +120,13 @@ export default function SettingsPage() {
     const t = window.setTimeout(() => {
       if (expand === 'form-templates') {
         const el = document.getElementById('settings-section-form-templates');
+        if (el) {
+          el.open = true;
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+      if (expand === 'openai-forms') {
+        const el = document.getElementById('settings-section-openai-forms');
         if (el) {
           el.open = true;
           el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -531,6 +557,122 @@ export default function SettingsPage() {
           </summary>
           <div className="settings-collapsible-body">
             <FormTemplatesSettings />
+          </div>
+        </details>
+      )}
+
+      {isAdmin && (
+        <details id="settings-section-openai-forms" className="card settings-collapsible">
+          <summary className="settings-collapsible-summary">
+            <span className="settings-collapsible-summary-main">
+              <span className="settings-collapsible-title">OpenAI (custom forms)</span>
+              <span className="settings-collapsible-hint">Optional — server AI for Forms field mapping</span>
+            </span>
+          </summary>
+          <div className="settings-collapsible-body">
+            <p className="form-hint" style={{ marginTop: 0 }}>
+              Create an API key in your organisation&apos;s{' '}
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">
+                OpenAI dashboard
+              </a>
+              . Nexus sends it only from the server when staff use <strong>Suggest mapping (server)</strong> on the Forms page. Usage and billing are on your OpenAI account (free tier limits apply). Leave blank and save model/base only to keep the existing key.
+            </p>
+            {openaiForms?.openai_configured ? (
+              <p className="settings-success" style={{ fontSize: '0.9rem' }}>
+                Key on file: <code>{openaiForms.openai_key_hint}</code>
+              </p>
+            ) : (
+              <p className="form-hint">No API key stored yet.</p>
+            )}
+            <div className="form-group">
+              <label htmlFor="openai-key-input">New API key (optional — replaces current when saved)</label>
+              <input
+                id="openai-key-input"
+                type="password"
+                className="form-input"
+                autoComplete="off"
+                value={openaiKeyInput}
+                onChange={(e) => setOpenaiKeyInput(e.target.value)}
+                placeholder="sk-…"
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="openai-model">Model</label>
+              <input
+                id="openai-model"
+                type="text"
+                className="form-input"
+                value={openaiModelDraft}
+                onChange={(e) => setOpenaiModelDraft(e.target.value)}
+                placeholder="gpt-4o-mini"
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="openai-base">API base URL (optional, default https://api.openai.com)</label>
+              <input
+                id="openai-base"
+                type="url"
+                className="form-input"
+                value={openaiBaseUrlDraft}
+                onChange={(e) => setOpenaiBaseUrlDraft(e.target.value)}
+                placeholder="https://api.openai.com"
+              />
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={openaiSaving}
+                onClick={async () => {
+                  setOpenaiSaving(true);
+                  setOpenaiMsg('');
+                  try {
+                    const payload = {
+                      openai_model: openaiModelDraft.trim() || undefined,
+                      openai_base_url: openaiBaseUrlDraft.trim()
+                    };
+                    if (openaiKeyInput.trim()) payload.openai_api_key = openaiKeyInput.trim();
+                    const d = await settings.updateOpenaiForms(payload);
+                    setOpenaiForms(d);
+                    setOpenaiKeyInput('');
+                    setOpenaiMsg('Saved.');
+                  } catch (e) {
+                    setOpenaiMsg(e.message || 'Save failed');
+                  } finally {
+                    setOpenaiSaving(false);
+                  }
+                }}
+              >
+                {openaiSaving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={openaiSaving || !openaiForms?.openai_configured}
+                onClick={async () => {
+                  if (!confirm('Remove the stored OpenAI API key? Suggest mapping will use host fallback or Ollama only.')) return;
+                  setOpenaiSaving(true);
+                  setOpenaiMsg('');
+                  try {
+                    const d = await settings.updateOpenaiForms({ clear_openai_api_key: true });
+                    setOpenaiForms(d);
+                    setOpenaiKeyInput('');
+                    setOpenaiMsg('API key removed.');
+                  } catch (e) {
+                    setOpenaiMsg(e.message || 'Remove failed');
+                  } finally {
+                    setOpenaiSaving(false);
+                  }
+                }}
+              >
+                Remove API key
+              </button>
+            </div>
+            {openaiMsg ? (
+              <p className={openaiMsg.includes('fail') || openaiMsg.includes('Invalid') ? 'settings-error' : 'settings-success'} style={{ marginTop: '0.65rem' }}>
+                {openaiMsg}
+              </p>
+            ) : null}
           </div>
         </details>
       )}

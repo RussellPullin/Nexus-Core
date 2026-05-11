@@ -116,6 +116,7 @@ async function postGenerateOnce(base, model, prompt, maxTokens, useTargetAddress
   const body = {
     model,
     prompt,
+    format: 'json',
     stream: false,
     options: { num_predict: maxTokens, temperature: 0.1 }
   };
@@ -152,7 +153,12 @@ export async function generateLocalOllamaJson(baseUrl, model, prompt, maxTokens 
           if (codeBlock) jsonStr = codeBlock[1].trim();
           return JSON.parse(jsonStr);
         } catch {
-          return null;
+          const snippet = text.replace(/\s+/g, ' ').slice(0, 420);
+          throw new Error(
+            snippet
+              ? `Ollama returned non-JSON (format=json was requested). First part of response: ${snippet}`
+              : 'Ollama returned empty or non-JSON output.'
+          );
         }
       } catch (e) {
         lastErr = e;
