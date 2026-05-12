@@ -396,7 +396,8 @@ ROUTER.post('/templates/upload', memoryUpload.single('file'), async (req, res) =
         ocr_used: analysis.ocr_used,
         text_preview: analysis.text_preview,
         all_placeholders: analysis.all_placeholders,
-        file_kind: analysis.file_kind
+        file_kind: analysis.file_kind,
+        analysis_note: analysis.analysis_note ?? null
       });
     }
 

@@ -11,8 +11,16 @@
  * @returns {boolean}
  */
 export function looksLikeParticipantServicesAgreement(text) {
-  const u = String(text || '').toUpperCase();
-  if (u.includes('SERVICES AGREEMENT') && u.includes('NDIS')) return true;
+  const raw = String(text || '');
+  const u = raw.toUpperCase();
+  const compact = raw.replace(/\s/g, '').length;
+  if (compact < 35) return false;
+  if (u.includes('SERVICES AGREEMENT') && (u.includes('NDIS') || u.includes('CLIENT DETAILS') || u.includes('SERVICE PROVIDER'))) {
+    return true;
+  }
+  if (u.includes('SERVICE AGREEMENT') && (u.includes('NDIS') || u.includes('CLIENT DETAILS') || u.includes('SERVICE PROVIDER'))) {
+    return true;
+  }
   if (u.includes('CLIENT DETAILS') && u.includes('NDIS')) return true;
   if (u.includes('PLAN MANAGER') && u.includes('SERVICES AGREEMENT')) return true;
   return false;

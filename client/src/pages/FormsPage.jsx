@@ -488,6 +488,11 @@ export default function FormsPage() {
                           Last run: {analyzeByTemplateId[t.id].pdf_form_fields?.length ?? 0} PDF fields ·{' '}
                           {analyzeByTemplateId[t.id].docx_placeholders?.length ?? 0} Word · {analyzeByTemplateId[t.id].ocr_labels?.length ?? 0} OCR labels ·{' '}
                           {(analyzeByTemplateId[t.id].detected_fields || []).length} detected
+                          {analyzeByTemplateId[t.id].analysis_note ? (
+                            <span style={{ display: 'block', marginTop: '0.25rem', color: 'var(--warn-fg, #92400e)' }}>
+                              {analyzeByTemplateId[t.id].analysis_note}
+                            </span>
+                          ) : null}
                         </p>
                       )}
                     </td>

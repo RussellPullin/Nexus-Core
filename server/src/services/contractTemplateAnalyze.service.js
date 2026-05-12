@@ -6,6 +6,7 @@
 import PizZip from 'pizzip';
 import { PDFDocument } from 'pdf-lib';
 import { extractContractPdfText, ocrRasterBufferToText } from './pdfOcrText.service.js';
+import { augmentPdfTextWithPdfJs } from './pdfJsNativeText.service.js';
 import { looksLikeParticipantServicesAgreement, scanParticipantServicesAgreementFields } from './participantAgreementFieldScan.service.js';
 
 /** Max characters of document text sent to the browser for local LLM reading (preview / Ollama). */
@@ -62,6 +63,7 @@ export async function extractPdfTextForFieldDiscovery(buffer) {
       text = `${native}\n\n${ocr}`.trim();
       ocr_used = true;
     }
+    text = await augmentPdfTextWithPdfJs(buffer, text);
     return { text, ocr_used };
   }
 
@@ -70,7 +72,8 @@ export async function extractPdfTextForFieldDiscovery(buffer) {
   const parts = [];
   if (strippedLen(native) > 20) parts.push(native);
   if (strippedLen(ocr) > 20) parts.push(ocr);
-  const text = parts.length ? parts.join('\n\n---\n\n') : ocr || native;
+  let text = parts.length ? parts.join('\n\n---\n\n') : ocr || native;
+  text = await augmentPdfTextWithPdfJs(buffer, text);
   const ocr_used = hard.ocrUsed || light.ocrUsed || strippedLen(ocr) > 40;
   return { text, ocr_used };
 }
@@ -552,9 +555,14 @@ export async function analyzeContractTemplateBuffer(buffer, filename = '') {
   if (ext === 'unknown') {
     analysis_note =
       'Could not tell if this file is PDF, Word, or an image from the name or contents. Rename with a .pdf / .docx / .jpg extension, or re-upload.';
+  } else if (ext === 'pdf' && pdf_form_fields.length === 0 && all.length === 0) {
+    analysis_note =
+      strippedLen(text_excerpt) < 45
+        ? 'Almost no text was extracted (common for image-only or designer PDFs). Install Poppler so the server can OCR pages: macOS `brew install poppler`, Linux `apt install poppler-utils`. Alternatively export from Word with an embedded text layer, or upload a .docx template.'
+        : 'Text was read from the file but no field labels were inferred. If this is a scan, install Poppler for OCR; otherwise add manual placeholder rows under Edit field links.';
   } else if (ext === 'pdf' && strippedLen(text_excerpt) < 40 && pdf_form_fields.length === 0) {
     analysis_note =
-      'Almost no text was extracted from this PDF. If it is a scan, install poppler-utils (pdftoppm) on the server and ensure CONTRACT_PDF_OCR is not disabled. Fillable PDFs should still list fields when AcroForm widgets exist.';
+      'Very little text was extracted. If this is a scan, install poppler-utils (pdftoppm) on the server and ensure CONTRACT_PDF_OCR is not disabled. Fillable PDFs should still list fields when AcroForm widgets exist.';
   }
 
   return {
