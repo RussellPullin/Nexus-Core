@@ -120,23 +120,36 @@ export function getCustomTemplateDir() {
   return join(TEMPLATES_DIR, 'custom');
 }
 
+const IMAGE_TEMPLATE_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
+
+function fileTypeFromName(lower) {
+  if (lower.endsWith('.docx')) return 'docx';
+  if (lower.endsWith('.pdf')) return 'pdf';
+  if (/\.jpe?g$/i.test(lower) || lower.endsWith('.png') || lower.endsWith('.webp')) return 'image';
+  return null;
+}
+
 /**
  * @param {string} templateId - form_templates.id
  * @param {string} [templateFilename]
- * @returns {{ path: string, type: 'pdf'|'docx' } | null}
+ * @returns {{ path: string, type: 'pdf'|'docx'|'image' } | null}
  */
 export function getCustomTemplatePath(templateId, templateFilename) {
   const dir = getCustomTemplateDir();
   if (!existsSync(dir)) return null;
-  const filename = templateFilename || `${templateId}.docx`;
   const pathPdf = join(dir, `${templateId}.pdf`);
   const pathDocx = join(dir, `${templateId}.docx`);
-  const pathNamed = templateFilename ? join(dir, templateFilename) : null;
+  const safeNamed = templateFilename ? templateFilename.replace(/[/\\]/g, '') : '';
+  const pathNamed = safeNamed ? join(dir, safeNamed) : null;
   if (pathNamed && existsSync(pathNamed)) {
-    const type = pathNamed.toLowerCase().endsWith('.docx') ? 'docx' : 'pdf';
-    return { path: pathNamed, type };
+    const type = fileTypeFromName(pathNamed.toLowerCase());
+    if (type) return { path: pathNamed, type };
   }
   if (existsSync(pathDocx)) return { path: pathDocx, type: 'docx' };
   if (existsSync(pathPdf)) return { path: pathPdf, type: 'pdf' };
+  for (const ext of IMAGE_TEMPLATE_EXT) {
+    const p = join(dir, `${templateId}${ext}`);
+    if (existsSync(p)) return { path: p, type: 'image' };
+  }
   return null;
 }

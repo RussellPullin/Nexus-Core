@@ -3,15 +3,14 @@
  * DOCX: {placeholder} tags in word/*.xml. PDF: AcroForm names + OCR text heuristics when scanned.
  */
 
-import { mkdtemp, writeFile, rm } from 'fs/promises';
-import { join } from 'path';
-import { tmpdir } from 'os';
 import PizZip from 'pizzip';
 import { PDFDocument } from 'pdf-lib';
-import { extractNdisPlanPdfText } from './pdfOcrText.service.js';
+import { extractContractPdfText, ocrRasterBufferToText } from './pdfOcrText.service.js';
 
 /** Max characters of document text sent to the browser for local LLM reading (preview / Ollama). */
 export const CONTRACT_TEXT_EXCERPT_MAX = 48000;
+
+/** @typedef {{ key: string, label: string, method: 'acro'|'docx'|'ocr_heuristic', page?: number|null, confidence?: number|null }} DetectedField */
 
 /** @returns {string} */
 export function extractDocxPlainText(buffer, maxLen = CONTRACT_TEXT_EXCERPT_MAX) {
@@ -76,10 +75,10 @@ export async function extractPdfAcroFieldNames(buffer) {
 
 /** @returns {Promise<{ text: string, ocr_used: boolean }>} */
 export async function extractPdfTextWithOcrFallback(buffer) {
-  let { text, ocrUsed } = await extractNdisPlanPdfText(buffer, { forceOcr: false });
+  let { text, ocrUsed } = await extractContractPdfText(buffer, { forceOcr: false });
   const thin = String(text || '').replace(/\s/g, '').length;
-  if (thin < 120) {
-    const second = await extractNdisPlanPdfText(buffer, { forceOcr: true });
+  if (thin < 100) {
+    const second = await extractContractPdfText(buffer, { forceOcr: true });
     text = second.text;
     ocrUsed = second.ocrUsed || ocrUsed;
   }
@@ -87,42 +86,125 @@ export async function extractPdfTextWithOcrFallback(buffer) {
 }
 
 /**
- * Guess fill-in labels from OCR/plain text (e.g. "Employee name: ______").
+ * Heuristic field labels from plain / OCR text.
+ * @param {string} text
+ * @returns {{ ocr_labels: string[], detected_fields: DetectedField[] }}
+ */
+export function extractFormFieldCandidatesFromText(text) {
+  const raw = String(text || '');
+  const labels = new Set();
+  /** @type {DetectedField[]} */
+  const detected = [];
+  const add = (key, label, method) => {
+    const k = String(key || '').trim().replace(/\s+/g, '_');
+    if (!k || k.length > 120) return;
+    labels.add(k);
+    detected.push({ key: k, label: label || k, method, page: null, confidence: null });
+  };
+
+  const lines = raw.split(/\r?\n/).map((l) => l.trim());
+
+  // "Label: ___" or "Label : ______"
+  const lineColonBlank = /^([A-Za-z][A-Za-z0-9 /&'°().-]{1,64})\s*:\s*[_.\s─–—-]{2,}\s*$/;
+  for (const line of lines) {
+    const m = lineColonBlank.exec(line);
+    if (m) add(m[1], m[1], 'ocr_heuristic');
+  }
+
+  // "Label________________" (underscores run)
+  const lineUnderscore = /^([A-Za-z][A-Za-z0-9 /&'°().-]{1,64})\s*[_.─–—]{3,}\s*$/;
+  for (const line of lines) {
+    const m = lineUnderscore.exec(line);
+    if (m && !lineColonBlank.test(line)) add(m[1], m[1], 'ocr_heuristic');
+  }
+
+  // [ Field name ]
+  const bracketRe = /\[\s*([A-Za-z][A-Za-z0-9 /&'°().-]{1,64})\s*\]/g;
+  let bm;
+  while ((bm = bracketRe.exec(raw)) !== null) {
+    add(bm[1], bm[1], 'ocr_heuristic');
+  }
+
+  // "Field name …" or "Field name ..."
+  const ellipsisRe = /^([A-Za-z][A-Za-z0-9 /&'°().-]{1,64})\s*[.…]{2,}\s*$/;
+  for (const line of lines) {
+    const m = ellipsisRe.exec(line);
+    if (m) add(m[1], m[1], 'ocr_heuristic');
+  }
+
+  // Table-ish " | Header cell | "
+  const pipeRe = /\|\s*([A-Za-z][A-Za-z0-9 /&'°().-]{1,48})\s*\|/g;
+  let pm;
+  while ((pm = pipeRe.exec(raw)) !== null) {
+    if (!/^(yes|no|na|date|name)$/i.test(pm[1])) add(pm[1], pm[1], 'ocr_heuristic');
+  }
+
+  // Tick / checkbox lines: "☐ Label" or "[ ] Label" or "□ Label"
+  const tickRe = /^(?:☐|☑|□|■|\[\s*\])\s+([A-Za-z][A-Za-z0-9 /&'°().-]{1,64})/;
+  for (const line of lines) {
+    const m = tickRe.exec(line);
+    if (m) add(m[1], m[1], 'ocr_heuristic');
+  }
+
+  // Dedupe detected by key (keep first label)
+  const seen = new Set();
+  const deduped = [];
+  for (const d of detected) {
+    if (seen.has(d.key)) continue;
+    seen.add(d.key);
+    deduped.push(d);
+  }
+
+  return { ocr_labels: [...labels], detected_fields: deduped };
+}
+
+/**
  * @param {string} text
  * @returns {string[]}
  */
 export function guessLabelsFromFlatText(text) {
-  const raw = String(text || '');
-  const labels = new Set();
-  const lineRe = /^([A-Za-z][A-Za-z0-9 /&'().-]{1,52}):\s*[_.\s─–-]{3,}\s*$/;
-  const bracketRe = /\[\s*([A-Za-z][A-Za-z0-9 /&'().-]{1,52})\s*\]/g;
-  for (const line of raw.split(/\r?\n/).map((l) => l.trim())) {
-    const m = lineRe.exec(line);
-    if (m) labels.add(m[1].replace(/\s+/g, '_'));
-  }
-  let bm;
-  while ((bm = bracketRe.exec(raw)) !== null) {
-    labels.add(bm[1].replace(/\s+/g, '_'));
-  }
-  return [...labels];
+  return extractFormFieldCandidatesFromText(text).ocr_labels;
 }
 
-async function ocrImageBuffer(buffer) {
-  const dir = await mkdtemp(join(tmpdir(), 'contract-ocr-'));
-  const path = join(dir, 'scan.png');
-  try {
-    await writeFile(path, buffer);
-    const { createWorker } = await import('tesseract.js');
-    const worker = await createWorker('eng');
-    try {
-      const { data } = await worker.recognize(path);
-      return String(data?.text || '');
-    } finally {
-      await worker.terminate();
-    }
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
+/**
+ * Merge suggested placeholder → merge-key map with existing user mappings (existing wins).
+ * @param {Record<string, string>} suggested
+ * @param {Record<string, string>|null|undefined} existing
+ * @returns {Record<string, string>}
+ */
+export function mergeContractFieldMapSuggestions(suggested, existing) {
+  const ex = existing && typeof existing === 'object' ? existing : {};
+  return { ...suggested, ...ex };
+}
+
+/**
+ * @param {string[]} acroNames
+ * @param {string[]} docxPh
+ * @param {DetectedField[]} ocrDetected
+ * @returns {DetectedField[]}
+ */
+export function buildDetectedFieldsList(acroNames, docxPh, ocrDetected) {
+  /** @type {DetectedField[]} */
+  const out = [];
+  const keys = new Set();
+  for (const name of acroNames || []) {
+    const k = String(name || '').trim();
+    if (!k || keys.has(k)) continue;
+    keys.add(k);
+    out.push({ key: k, label: k, method: 'acro', page: null, confidence: null });
   }
+  for (const ph of docxPh || []) {
+    const k = String(ph || '').trim();
+    if (!k || keys.has(k)) continue;
+    keys.add(k);
+    out.push({ key: k, label: k, method: 'docx', page: null, confidence: null });
+  }
+  for (const d of ocrDetected || []) {
+    if (!d?.key || keys.has(d.key)) continue;
+    keys.add(d.key);
+    out.push(d);
+  }
+  return out;
 }
 
 const STAFF_MERGE_SYNONYMS = [
@@ -188,7 +270,7 @@ export function suggestContractFieldMap(placeholders, workflow = 'staff') {
 /**
  * @param {Buffer} buffer
  * @param {string} filename
- * @returns {Promise<{ docx_placeholders: string[], pdf_form_fields: string[], ocr_labels: string[], ocr_used: boolean, text_preview: string, text_excerpt: string, all_placeholders: string[] }>}
+ * @returns {Promise<{ docx_placeholders: string[], pdf_form_fields: string[], ocr_labels: string[], detected_fields: DetectedField[], ocr_used: boolean, text_preview: string, text_excerpt: string, all_placeholders: string[], file_kind: string }>}
  */
 export async function analyzeContractTemplateBuffer(buffer, filename = '') {
   const lower = (filename || '').toLowerCase();
@@ -197,6 +279,8 @@ export async function analyzeContractTemplateBuffer(buffer, filename = '') {
   const docx_placeholders = ext === 'docx' ? extractDocxPlaceholders(buffer) : [];
   let pdf_form_fields = [];
   let ocr_labels = [];
+  /** @type {DetectedField[]} */
+  let ocr_detected_slice = [];
   let ocr_used = false;
   let text_preview = '';
   let text_excerpt = '';
@@ -208,31 +292,38 @@ export async function analyzeContractTemplateBuffer(buffer, filename = '') {
     const t = String(text || '');
     text_preview = t.slice(0, 1200);
     text_excerpt = t.slice(0, CONTRACT_TEXT_EXCERPT_MAX);
-    ocr_labels = guessLabelsFromFlatText(t);
+    const extracted = extractFormFieldCandidatesFromText(t);
+    ocr_labels = extracted.ocr_labels;
+    ocr_detected_slice = extracted.detected_fields;
   }
 
   if (ext === 'image') {
-    const text = await ocrImageBuffer(buffer);
+    const text = await ocrRasterBufferToText(buffer, filename || 'scan.jpg');
     ocr_used = true;
     const t = String(text || '');
     text_preview = t.slice(0, 1200);
     text_excerpt = t.slice(0, CONTRACT_TEXT_EXCERPT_MAX);
-    ocr_labels = guessLabelsFromFlatText(t);
+    const extracted = extractFormFieldCandidatesFromText(t);
+    ocr_labels = extracted.ocr_labels;
+    ocr_detected_slice = extracted.detected_fields;
   }
 
   if (ext === 'docx') {
     const plain = extractDocxPlainText(buffer, CONTRACT_TEXT_EXCERPT_MAX);
     text_preview = plain.slice(0, 1200);
     text_excerpt = plain;
-    const guessed = guessLabelsFromFlatText(plain);
-    ocr_labels = guessed;
+    const extracted = extractFormFieldCandidatesFromText(plain);
+    ocr_labels = extracted.ocr_labels;
+    ocr_detected_slice = extracted.detected_fields;
   }
 
+  const detected_fields = buildDetectedFieldsList(pdf_form_fields, docx_placeholders, ocr_detected_slice);
   const all = [...new Set([...docx_placeholders, ...pdf_form_fields, ...ocr_labels])];
   return {
     docx_placeholders,
     pdf_form_fields,
     ocr_labels,
+    detected_fields,
     ocr_used,
     text_preview,
     text_excerpt,

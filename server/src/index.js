@@ -112,9 +112,6 @@ import supabaseAuthRouter from './routes/supabaseAuth.js';
 import emailOAuthRouter from './routes/emailOAuth.js';
 import participantsRouter from './routes/participants.js';
 import organisationsRouter from './routes/organisations.js';
-import * as llm from './services/llm.service.js';
-import { db } from './db/index.js';
-import { fetchFlagsForOrg } from './services/orgFeatures.service.js';
 import staffRouter, { handleSetStaffShifterEnabled } from './routes/staff.js';
 import shiftsRouter from './routes/shifts.js';
 import ndisRouter from './routes/ndis.js';
@@ -212,54 +209,6 @@ app.use('/api/form-templates', requireAuth, nexusFormTemplatesRouter);
 app.use('/api/generated-forms', requireAuth, nexusGeneratedFormsRouter);
 app.use('/api/organisations', requireAuth, organisationsRouter);
 
-app.get('/api/ai/status', requireAuth, async (req, res) => {
-  try {
-    const orgId = req.session?.user?.org_id || null;
-    const userId = req.session.user.id;
-    const [status, flagsResult, u] = await Promise.all([
-      llm.getConnectionStatus?.(),
-      fetchFlagsForOrg(orgId),
-      Promise.resolve(db.prepare('SELECT ollama_local_base_url FROM users WHERE id = ?').get(userId))
-    ]);
-    const available = Boolean(status?.available);
-    const config = llm.getConfig?.() || {};
-    const { flags } = flagsResult;
-    const orgAllowsLocalOllama = Boolean(flags.ai_staff_local_ollama);
-    res.json({
-      server: {
-        available,
-        model: config.model,
-        enabled: config.enabled,
-        error: status?.error,
-        warning: status?.warning,
-        baseUrl: config.baseUrl,
-        /** When true, signed-in staff AI does not use server Ollama; the sidebar "AI" dot uses this computer only. */
-        staffLocalAiMode: orgAllowsLocalOllama
-      },
-      orgAllowsLocalOllama,
-      /** True when API env AI_STAFF_LOCAL_OLLAMA=true forces the flag on for every org (see orgFeatures.service). */
-      deploymentForcesStaffLocalOllama: process.env.AI_STAFF_LOCAL_OLLAMA === 'true',
-      userOllamaLocalBaseUrl: u?.ollama_local_base_url || null
-    });
-  } catch (err) {
-    console.error('[api/ai/status]', err?.message || err);
-    const cfgOnErr = llm.getConfig?.() || {};
-    res.json({
-      server: {
-        available: false,
-        error: err?.message ? `Server error: ${err.message}` : 'Server error while checking Ollama.',
-        baseUrl: cfgOnErr.baseUrl,
-        model: null,
-        enabled: true,
-        warning: undefined,
-        staffLocalAiMode: false
-      },
-      orgAllowsLocalOllama: false,
-      deploymentForcesStaffLocalOllama: process.env.AI_STAFF_LOCAL_OLLAMA === 'true',
-      userOllamaLocalBaseUrl: null
-    });
-  }
-});
 // Also on the root app (in addition to staffRouter) so POST matches even if nested router fails to update.
 app.post('/api/staff/shifter-enabled', requireAuth, requireAdminOrDelegate, requireAgencyShell, handleSetStaffShifterEnabled);
 app.post('/api/staff/set-shifter-enabled', requireAuth, requireAdminOrDelegate, requireAgencyShell, handleSetStaffShifterEnabled);
@@ -296,9 +245,6 @@ function startServer(port) {
   const server = app.listen(port, '0.0.0.0');
   server.on('listening', async () => {
     console.log(`[nexus] Server listening on port ${port}`);
-    const cfg = llm.getConfig?.() || {};
-    const ok = await llm.isAvailable();
-    console.log(`[nexus] Ollama: ${ok ? 'connected' : 'not available'} (model: ${cfg.model || 'default'}, base: ${cfg.baseUrl || 'localhost:11434'})`);
   });
   server.on('error', (err) => {
     if (err?.code === 'EADDRINUSE') {

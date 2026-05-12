@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import { writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, unlinkSync, readdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
@@ -19,20 +19,14 @@ import {
   deleteCustomFormTemplate
 } from '../services/onboarding.service.js';
 import { getTemplatePath, getTemplateDir, getCustomTemplatePath, getCustomTemplateDir } from '../services/formTemplatePath.service.js';
-import { analyzeContractTemplateBuffer, suggestContractFieldMap } from '../services/contractTemplateAnalyze.service.js';
-import { completeJsonForOrg, isAvailableForOrg, isServerLlmAllowed } from '../services/llm.service.js';
-import {
-  allowedMergeKeysForWorkflow,
-  buildSuggestMappingPrompt,
-  normalizeAiMergeMap
-} from '../services/formsMappingAi.service.js';
-import { chatCompletionsJson, externalLlmFromEnv } from '../services/openaiCompatibleChat.service.js';
+import { analyzeContractTemplateBuffer, suggestContractFieldMap, mergeContractFieldMapSuggestions } from '../services/contractTemplateAnalyze.service.js';
 import {
   listPacks,
   createPack,
   updatePack,
   deletePack,
   getPackItemsDetailed,
+  getPackFormTemplateItemsDetailed,
   setPackItems,
   setProviderPackDefaults
 } from '../services/onboardingDocumentPacks.service.js';
@@ -66,8 +60,27 @@ function parseMappingJson(val) {
   }
 }
 
+function unlinkOtherCustomTemplateFiles(dir, templateId, keepBasename) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  const prefix = `${templateId}.`;
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    if (keepBasename && name === keepBasename) continue;
+    try {
+      unlinkSync(join(dir, name));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 // GET /api/forms/context - current user's organisation for forms
-ROUTER.get('/context', async (req, res) => {
+ROUTER.get('/context', (req, res) => {
   try {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
     const { profile, organisation_id } = getProviderProfileForUser(req.session.user.id);
@@ -75,23 +88,13 @@ ROUTER.get('/context', async (req, res) => {
       return res.json({
         organisation_id: null,
         organisation_name: null,
-        message: 'No organisation set. Assign your user to an organisation in Admin to manage forms.',
-        suggest_mapping_openai: false,
-        suggest_mapping_env_llm: false,
-        suggest_mapping_ollama: false
+        message: 'No organisation set. Assign your user to an organisation in Admin to manage forms.'
       });
     }
-    const org = db.prepare('SELECT id, name, openai_api_key FROM organisations WHERE id = ?').get(profile.organisation_id);
-    const hasOpenai = !!(org && String(org.openai_api_key || '').trim());
-    const hasEnvLlm = !!externalLlmFromEnv();
-    const ollamaOk = hasOpenai || hasEnvLlm ? false : await isAvailableForOrg(profile.organisation_id);
+    const org = db.prepare('SELECT id, name FROM organisations WHERE id = ?').get(profile.organisation_id);
     res.json({
       organisation_id: organisation_id || org?.id,
-      organisation_name: org?.name || null,
-      suggest_mapping_openai: hasOpenai,
-      suggest_mapping_env_llm: hasEnvLlm,
-      suggest_mapping_ollama: ollamaOk,
-      suggest_mapping_available: hasOpenai || hasEnvLlm || ollamaOk
+      organisation_name: org?.name || null
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -140,131 +143,6 @@ ROUTER.delete('/templates/:id', (req, res) => {
     const ok = deleteCustomFormTemplate(req.params.id, profile.id);
     if (!ok) return res.status(404).json({ error: 'Custom form template not found.' });
     res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/forms/templates/:id/ai-suggest-mapping — server LLM suggests merge_map (OpenAI per org, env fallback, or Ollama)
-ROUTER.post('/templates/:id/ai-suggest-mapping', async (req, res) => {
-  try {
-    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
-    const { profile } = getProviderProfileForUser(req.session.user.id);
-    if (!profile) return res.status(400).json({ error: 'No organisation set for your account.' });
-
-    const template = db.prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(req.params.id, profile.id);
-    if (!template || template.form_type !== 'custom') {
-      return res.status(404).json({ error: 'Custom form template not found.' });
-    }
-
-    const workflowKind = template.workflow === 'staff_onboarding' ? 'staff' : 'participant';
-    const allowed = allowedMergeKeysForWorkflow(workflowKind);
-    const existing = parseMappingJson(template.mapping_json);
-    const analysis = existing.contract_analysis || {};
-    const placeholders =
-      (Array.isArray(analysis.all_placeholders) && analysis.all_placeholders.length && analysis.all_placeholders) ||
-      Object.keys(existing.contract_field_map || {});
-    if (!placeholders.length) {
-      return res.status(400).json({
-        error: 'No field names to map yet. Upload a template or run “Detect” so placeholders are saved, then try again.'
-      });
-    }
-
-    const orgRow = db
-      .prepare('SELECT openai_api_key, openai_model, openai_base_url FROM organisations WHERE id = ?')
-      .get(profile.organisation_id);
-    const orgKey = orgRow?.openai_api_key?.trim();
-    const orgModel = orgRow?.openai_model?.trim() || 'gpt-4o-mini';
-    const orgBase = orgRow?.openai_base_url?.trim() || null;
-
-    const excerpt =
-      (analysis.text_excerpt && String(analysis.text_excerpt)) ||
-      (analysis.text_preview && String(analysis.text_preview)) ||
-      '';
-    const prompt = buildSuggestMappingPrompt(workflowKind, {
-      placeholders,
-      pdfFormFields: analysis.pdf_form_fields,
-      textExcerpt: excerpt
-    });
-
-    let parsed = null;
-    let source = null;
-
-    if (orgKey) {
-      try {
-        parsed = await chatCompletionsJson({
-          apiKey: orgKey,
-          model: orgModel,
-          baseUrl: orgBase,
-          prompt,
-          maxTokens: 4000
-        });
-        source = 'openai_org';
-      } catch (e) {
-        const status = e?.status >= 400 && e?.status < 600 ? e.status : 502;
-        const hint =
-          'Check your API key and billing in the OpenAI dashboard. You can still edit mappings manually on the Forms page.';
-        return res.status(status).json({
-          error: [e?.message || 'OpenAI request failed', hint].filter(Boolean).join(' ')
-        });
-      }
-    } else {
-      const ext = externalLlmFromEnv();
-      if (ext) {
-        try {
-          parsed = await chatCompletionsJson({
-            apiKey: ext.apiKey,
-            model: ext.model,
-            baseUrl: ext.baseUrl,
-            prompt,
-            maxTokens: 4000
-          });
-          source = 'external_llm_env';
-        } catch (e) {
-          const status = e?.status >= 400 && e?.status < 600 ? e.status : 502;
-          return res.status(status).json({ error: e?.message || 'External LLM request failed' });
-        }
-      } else if (await isServerLlmAllowed(profile.organisation_id)) {
-        parsed = await completeJsonForOrg(profile.organisation_id, prompt, { maxTokens: 4096, temperature: 0.1 });
-        source = 'ollama_server';
-      }
-    }
-
-    if (!parsed) {
-      return res.status(400).json({
-        error:
-          'No AI configured for mapping. Add an OpenAI API key under Settings → OpenAI (custom forms), set EXTERNAL_LLM_* on the server, or enable server Ollama.'
-      });
-    }
-
-    const ollamaMap = normalizeAiMergeMap(parsed, allowed);
-    if (!Object.keys(ollamaMap).length) {
-      return res.status(422).json({
-        error: 'The model did not return a usable merge_map. Try again, adjust the document, or map fields manually.',
-        source
-      });
-    }
-
-    const prevMap = existing.contract_field_map || {};
-    const mergedMap = { ...prevMap, ...ollamaMap };
-    const mapping_json = {
-      ...existing,
-      contract_field_map: mergedMap,
-      ai_suggest_mapping: {
-        at: new Date().toISOString(),
-        source,
-        keys: Object.keys(ollamaMap)
-      }
-    };
-    db.prepare(`UPDATE form_templates SET mapping_json = ?, updated_at = datetime('now') WHERE id = ?`).run(JSON.stringify(mapping_json), template.id);
-    const updated = db.prepare('SELECT * FROM form_templates WHERE id = ?').get(template.id);
-    res.json({
-      ok: true,
-      source,
-      mapped_keys: Object.keys(ollamaMap).length,
-      contract_field_map: mergedMap,
-      template: updated
-    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -364,22 +242,32 @@ ROUTER.post('/templates/:id/contract-upload-analyze', memoryUpload.single('file'
     if (ext === 'image') {
       const analysis = await analyzeContractTemplateBuffer(req.file.buffer, orig);
       const suggested = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
-      const contract_field_map = { ...(existing.contract_field_map || {}), ...suggested };
+      const contract_field_map = mergeContractFieldMapSuggestions(suggested, existing.contract_field_map);
+      const dir = getCustomTemplateDir();
+      mkdirSync(dir, { recursive: true });
+      const saveExt = lower.endsWith('.png') ? 'png' : lower.endsWith('.webp') ? 'webp' : 'jpg';
+      const saveName = `${template.id}.${saveExt}`;
+      unlinkOtherCustomTemplateFiles(dir, template.id, saveName);
+      writeFileSync(join(dir, saveName), req.file.buffer);
+      db.prepare(`UPDATE form_templates SET template_filename = ?, updated_at = datetime('now') WHERE id = ?`).run(saveName, template.id);
       const mapping_json = {
         ...existing,
         contract_field_map,
         contract_analysis: {
           ...analysis,
           analyzed_at: new Date().toISOString(),
-          template_file_updated: false
+          template_file_updated: true
         }
       };
       db.prepare(`UPDATE form_templates SET mapping_json = ?, updated_at = datetime('now') WHERE id = ?`).run(JSON.stringify(mapping_json), template.id);
       return res.json({
         ok: true,
         image_only: true,
-        message: 'Field map updated from the scan. Upload a fillable PDF as the merge template (employment contracts fill PDF form fields).',
+        message:
+          'Scan saved and field map updated. Flat images have no PDF form fields — merge pre-fills only when you also map to a fillable PDF, or use this file as the visual master attached to onboarding mail.',
         contract_field_map,
+        template_id: template.id,
+        filename: saveName,
         ...analysis
       });
     }
@@ -387,7 +275,7 @@ ROUTER.post('/templates/:id/contract-upload-analyze', memoryUpload.single('file'
     if (ext === 'docx') {
       const analysis = await analyzeContractTemplateBuffer(req.file.buffer, orig);
       const suggested = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
-      const contract_field_map = { ...(existing.contract_field_map || {}), ...suggested };
+      const contract_field_map = mergeContractFieldMapSuggestions(suggested, existing.contract_field_map);
       const mapping_json = {
         ...existing,
         contract_field_map,
@@ -412,14 +300,16 @@ ROUTER.post('/templates/:id/contract-upload-analyze', memoryUpload.single('file'
     const dir = getCustomTemplateDir();
     mkdirSync(dir, { recursive: true });
     const saveName = `${template.id}.${saveExt}`;
+    unlinkOtherCustomTemplateFiles(dir, template.id, saveName);
     writeFileSync(join(dir, saveName), req.file.buffer);
     db.prepare(`UPDATE form_templates SET template_filename = ?, updated_at = datetime(\'now\') WHERE id = ?`).run(saveName, template.id);
 
     const analysis = await analyzeContractTemplateBuffer(req.file.buffer, orig);
     const suggested = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
+    const contract_field_map = mergeContractFieldMapSuggestions(suggested, existing.contract_field_map);
     const mapping_json = {
       ...existing,
-      contract_field_map: suggested,
+      contract_field_map,
       contract_analysis: {
         ...analysis,
         analyzed_at: new Date().toISOString(),
@@ -432,7 +322,7 @@ ROUTER.post('/templates/:id/contract-upload-analyze', memoryUpload.single('file'
       ok: true,
       template_id: template.id,
       filename: saveName,
-      contract_field_map: suggested,
+      contract_field_map,
       ...analysis
     });
   } catch (err) {
@@ -450,36 +340,35 @@ ROUTER.post('/templates/upload', memoryUpload.single('file'), async (req, res) =
       return res.status(400).json({ error: 'No file uploaded.' });
     }
     const lowerName = (req.file.originalname || '').toLowerCase();
-    const ext = lowerName.endsWith('.docx') ? 'docx' : lowerName.endsWith('.pdf') ? 'pdf' : '';
+    const ext = lowerName.endsWith('.docx')
+      ? 'docx'
+      : lowerName.endsWith('.pdf')
+        ? 'pdf'
+        : /\.(png|jpe?g|webp)$/i.test(lowerName)
+          ? 'image'
+          : '';
 
     if (templateId) {
       const { profile } = getProviderProfileForUser(req.session.user.id);
       if (!profile) return res.status(400).json({ error: 'No organisation set.' });
-      if (ext !== 'pdf' && ext !== 'docx') {
-        return res.status(400).json({ error: 'Custom form templates must be a .pdf or .docx file.' });
+      if (!ext) {
+        return res.status(400).json({ error: 'Custom form templates must be a .pdf, .docx, or image (.jpg, .png, .webp).' });
       }
       const template = db.prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(templateId, profile.id);
       if (!template) return res.status(404).json({ error: 'Custom form template not found.' });
       const dir = getCustomTemplateDir();
       mkdirSync(dir, { recursive: true });
-      const saveName = `${template.id}.${ext}`;
+      const saveExt = ext === 'image' ? (/\.webp$/i.test(lowerName) ? 'webp' : lowerName.endsWith('.png') ? 'png' : 'jpg') : ext;
+      const saveName = `${template.id}.${saveExt}`;
+      unlinkOtherCustomTemplateFiles(dir, template.id, saveName);
       const filePath = join(dir, saveName);
       writeFileSync(filePath, req.file.buffer);
-      const otherExt = ext === 'pdf' ? 'docx' : 'pdf';
-      const otherPath = join(dir, `${template.id}.${otherExt}`);
-      if (existsSync(otherPath)) {
-        try {
-          unlinkSync(otherPath);
-        } catch {
-          /* ignore */
-        }
-      }
 
       const workflowKind = template.workflow === 'staff_onboarding' ? 'staff' : 'participant';
       const existing = parseMappingJson(template.mapping_json);
-      const analysis = await analyzeContractTemplateBuffer(req.file.buffer, req.file.originalname || `template.${ext}`);
+      const analysis = await analyzeContractTemplateBuffer(req.file.buffer, req.file.originalname || `template.${saveExt}`);
       const suggested = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
-      const contract_field_map = { ...(existing.contract_field_map || {}), ...suggested };
+      const contract_field_map = mergeContractFieldMapSuggestions(suggested, existing.contract_field_map);
       const mapping_json = {
         ...existing,
         contract_field_map,
@@ -503,6 +392,7 @@ ROUTER.post('/templates/upload', memoryUpload.single('file'), async (req, res) =
         docx_placeholders: analysis.docx_placeholders,
         pdf_form_fields: analysis.pdf_form_fields,
         ocr_labels: analysis.ocr_labels,
+        detected_fields: analysis.detected_fields,
         ocr_used: analysis.ocr_used,
         text_preview: analysis.text_preview,
         all_placeholders: analysis.all_placeholders,
@@ -597,21 +487,31 @@ ROUTER.get('/onboarding-document-packs', (req, res) => {
   try {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
     const { profile } = getProviderProfileForUser(req.session.user.id);
-    if (!profile) return res.json({ packs: [], policy_files: [], defaults: {} });
+    if (!profile) return res.json({ packs: [], policy_files: [], custom_form_templates: [], defaults: {} });
     const packs = listPacks(profile.id).map((p) => ({
       ...p,
       items: getPackItemsDetailed(p.id).map((row) => ({
         policy_file_id: row.id,
         display_name: row.display_name
+      })),
+      form_template_items: getPackFormTemplateItemsDetailed(p.id).map((row) => ({
+        form_template_id: row.id,
+        display_name: row.display_name,
+        workflow: row.workflow
       }))
     }));
     const policy_files = db
       .prepare(`SELECT id, display_name FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`)
       .all(profile.id);
+    const custom_form_templates = db
+      .prepare(
+        `SELECT id, display_name, workflow FROM form_templates WHERE provider_profile_id = ? AND form_type = 'custom' AND is_active = 1 ORDER BY display_name COLLATE NOCASE`
+      )
+      .all(profile.id);
     const defaults = db
       .prepare(`SELECT default_staff_onboarding_pack_id, default_participant_onboarding_pack_id FROM provider_profiles WHERE id = ?`)
       .get(profile.id);
-    res.json({ packs, policy_files, defaults: defaults || {} });
+    res.json({ packs, policy_files, custom_form_templates, defaults: defaults || {} });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -660,9 +560,10 @@ ROUTER.put('/onboarding-document-packs/:packId/items', (req, res) => {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
     const { profile } = getProviderProfileForUser(req.session.user.id);
     if (!profile) return res.status(400).json({ error: 'No organisation set.' });
-    const ids = req.body?.policy_file_ids;
-    const items = setPackItems(profile.id, req.params.packId, ids);
-    res.json({ items });
+    const policyIds = req.body?.policy_file_ids;
+    const formTemplateIds = req.body?.form_template_ids;
+    const items = setPackItems(profile.id, req.params.packId, policyIds, formTemplateIds);
+    res.json({ items: items.items, form_template_items: items.form_template_items });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

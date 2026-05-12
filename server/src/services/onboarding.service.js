@@ -1,11 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
-import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync, readdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { getConsentFormPath, fillConsentForm, convertDocxToPdf, renderDocxTemplateBuffer } from './consentForm.service.js';
-import { getCustomTemplatePath } from './formTemplatePath.service.js';
+import { getCustomTemplatePath, getCustomTemplateDir } from './formTemplatePath.service.js';
 import { applyContractPlaceholderMap, buildParticipantCustomMergeData, fillStaffContractPdfBuffer } from './staffContractFill.service.js';
+import { embedRasterImageAsSinglePagePdf } from './imageToPdf.service.js';
 import { ensurePlanManagerOrg, buildOrgLookupMaps } from './organisations.service.js';
 import { fillServiceAgreement, fillSupportPlan, getServiceAgreementTemplatePath, getSupportPlanTemplatePath } from './formFill.service.js';
 import { composeParticipantLegalName, participantPrefillFieldPaths } from '../../../shared/onboardingFieldRegistry.js';
@@ -625,6 +626,11 @@ export async function generateFormPack({
         const pdfBytes = readFileSync(resolved.path);
         const filled = await fillStaffContractPdfBuffer(pdfBytes, data);
         draftPath = persistFilledDocument(participantId, template.form_type, version, filled, 'pdf');
+      } else if (resolved.type === 'image') {
+        const imgBytes = readFileSync(resolved.path);
+        const pdfBytes = await embedRasterImageAsSinglePagePdf(imgBytes, resolved.path);
+        const filled = await fillStaffContractPdfBuffer(pdfBytes, data);
+        draftPath = persistFilledDocument(participantId, template.form_type, version, filled, 'pdf');
       } else {
         const templateBuf = readFileSync(resolved.path);
         const docx = renderDocxTemplateBuffer(templateBuf, data);
@@ -1059,16 +1065,26 @@ export function createFormTemplate(providerProfileId, { display_name, workflow =
   return db.prepare('SELECT * FROM form_templates WHERE id = ?').get(id);
 }
 
-/** Delete a custom template row and its file on disk. */
+/** Delete a custom template row and its file(s) on disk. */
 export function deleteCustomFormTemplate(templateId, providerProfileId) {
   const t = db.prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(templateId, providerProfileId);
   if (!t || t.form_type !== 'custom') return false;
-  const resolved = getCustomTemplatePath(t.id, t.template_filename);
-  if (resolved?.path && existsSync(resolved.path)) {
+  const dir = getCustomTemplateDir();
+  if (existsSync(dir)) {
+    let names;
     try {
-      unlinkSync(resolved.path);
+      names = readdirSync(dir);
     } catch {
-      /* ignore */
+      names = [];
+    }
+    const prefix = `${templateId}.`;
+    for (const name of names) {
+      if (!name.startsWith(prefix)) continue;
+      try {
+        unlinkSync(join(dir, name));
+      } catch {
+        /* ignore */
+      }
     }
   }
   db.prepare('DELETE FROM form_templates WHERE id = ? AND provider_profile_id = ?').run(templateId, providerProfileId);

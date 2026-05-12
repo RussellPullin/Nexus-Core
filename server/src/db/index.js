@@ -1491,6 +1491,19 @@ try {
     if (!poCols.some((c) => c.name === 'document_pack_id')) {
       db.exec('ALTER TABLE participant_onboarding ADD COLUMN document_pack_id TEXT');
     }
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS onboarding_document_pack_form_items (
+        id TEXT PRIMARY KEY,
+        pack_id TEXT NOT NULL,
+        form_template_id TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (pack_id) REFERENCES onboarding_document_packs(id) ON DELETE CASCADE,
+        FOREIGN KEY (form_template_id) REFERENCES form_templates(id) ON DELETE CASCADE,
+        UNIQUE(pack_id, form_template_id)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pack_form_items_pack ON onboarding_document_pack_form_items(pack_id)');
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('onboarding_document_packs migration:', e.message);
   }

@@ -1,11 +1,13 @@
 /**
- * Named collections of company_policy_files PDFs for staff / participant onboarding emails and acknowledgement flows.
+ * Named collections of company policy PDFs and optional custom form templates
+ * for staff / participant onboarding emails and acknowledgement flows.
  */
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
+import { getCustomTemplatePath } from './formTemplatePath.service.js';
 
 const WORKFLOWS = new Set(['staff_onboarding', 'participant_onboarding', 'both']);
 
@@ -21,12 +23,21 @@ export function packMatchesWorkflow(packWorkflow, target) {
   return pw === target;
 }
 
+/** Pack workflow must accept the template's workflow (templates are staff or participant only). */
+export function templateAllowedInPack(packWorkflow, templateWorkflow) {
+  const pw = packWorkflow || 'both';
+  const tw = templateWorkflow || 'participant_onboarding';
+  if (pw === 'both') return true;
+  return pw === tw;
+}
+
 export function listPacks(providerProfileId) {
   return db
     .prepare(
       `
     SELECT p.*,
-      (SELECT COUNT(*) FROM onboarding_document_pack_items i WHERE i.pack_id = p.id) AS item_count
+      (SELECT COUNT(*) FROM onboarding_document_pack_items i WHERE i.pack_id = p.id)
+      + (SELECT COUNT(*) FROM onboarding_document_pack_form_items f WHERE f.pack_id = p.id) AS item_count
     FROM onboarding_document_packs p
     WHERE p.provider_profile_id = ?
     ORDER BY p.display_name COLLATE NOCASE
@@ -90,27 +101,81 @@ export function getPackItemsDetailed(packId) {
     .all(packId);
 }
 
-export function setPackItems(providerProfileId, packId, policyFileIds) {
+export function getPackFormTemplateItemsDetailed(packId) {
+  return db
+    .prepare(
+      `
+    SELECT pi.form_template_id AS id, pi.sort_order, ft.display_name, ft.template_filename, ft.provider_profile_id, ft.workflow
+    FROM onboarding_document_pack_form_items pi
+    JOIN form_templates ft ON ft.id = pi.form_template_id
+    WHERE pi.pack_id = ?
+    ORDER BY pi.sort_order ASC, pi.form_template_id ASC
+  `
+    )
+    .all(packId);
+}
+
+/**
+ * @param {string} providerProfileId
+ * @param {string} packId
+ * @param {string[]|null|undefined} policyFileIds
+ * @param {string[]|null|undefined} formTemplateIds
+ */
+export function setPackItems(providerProfileId, packId, policyFileIds, formTemplateIds) {
   const pack = getPack(providerProfileId, packId);
   if (!pack) throw new Error('Pack not found');
-  const ids = Array.isArray(policyFileIds) ? policyFileIds.map((x) => String(x || '').trim()).filter(Boolean) : [];
-  db.prepare(`DELETE FROM onboarding_document_pack_items WHERE pack_id = ?`).run(packId);
-  const insert = db.prepare(`
+
+  const policyIds = Array.isArray(policyFileIds) ? policyFileIds.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  const formIds = Array.isArray(formTemplateIds) ? formTemplateIds.map((x) => String(x || '').trim()).filter(Boolean) : [];
+
+  const run = db.transaction(() => {
+    db.prepare(`DELETE FROM onboarding_document_pack_items WHERE pack_id = ?`).run(packId);
+    db.prepare(`DELETE FROM onboarding_document_pack_form_items WHERE pack_id = ?`).run(packId);
+
+    const insertPol = db.prepare(`
     INSERT INTO onboarding_document_pack_items (id, pack_id, policy_file_id, sort_order)
     VALUES (?, ?, ?, ?)
   `);
-  let order = 0;
-  const seen = new Set();
-  for (const pid of ids) {
-    if (seen.has(pid)) continue;
-    seen.add(pid);
-    const pol = db
-      .prepare(`SELECT id FROM company_policy_files WHERE id = ? AND provider_profile_id = ?`)
-      .get(pid, providerProfileId);
-    if (!pol) throw new Error(`Policy file not in this organisation: ${pid}`);
-    insert.run(uuidv4(), packId, pid, order++);
-  }
-  return getPackItemsDetailed(packId);
+    let order = 0;
+    const seenP = new Set();
+    for (const pid of policyIds) {
+      if (seenP.has(pid)) continue;
+      seenP.add(pid);
+      const pol = db
+        .prepare(`SELECT id FROM company_policy_files WHERE id = ? AND provider_profile_id = ?`)
+        .get(pid, providerProfileId);
+      if (!pol) throw new Error(`Policy file not in this organisation: ${pid}`);
+      insertPol.run(uuidv4(), packId, pid, order++);
+    }
+
+    const insertForm = db.prepare(`
+    INSERT INTO onboarding_document_pack_form_items (id, pack_id, form_template_id, sort_order)
+    VALUES (?, ?, ?, ?)
+  `);
+    let ordF = 0;
+    const seenF = new Set();
+    for (const fid of formIds) {
+      if (seenF.has(fid)) continue;
+      seenF.add(fid);
+      const row = db
+        .prepare(
+          `SELECT id, workflow, form_type FROM form_templates WHERE id = ? AND provider_profile_id = ? AND form_type = 'custom'`
+        )
+        .get(fid, providerProfileId);
+      if (!row) throw new Error(`Custom form template not in this organisation: ${fid}`);
+      if (!templateAllowedInPack(pack.workflow, row.workflow)) {
+        throw new Error(`Template “${fid}” workflow does not match this pack’s audience.`);
+      }
+      insertForm.run(uuidv4(), packId, fid, ordF++);
+    }
+  });
+
+  run();
+
+  return {
+    items: getPackItemsDetailed(packId),
+    form_template_items: getPackFormTemplateItemsDetailed(packId)
+  };
 }
 
 /**
@@ -141,8 +206,13 @@ export function listPoliciesForStaffOnboarding(providerProfileId, documentPackId
     .all(providerProfileId);
 }
 
+function safeAttachmentFilename(name, ext) {
+  const base = (name || 'attachment').replace(/[/\\?%*:|"<>]/g, '_').trim() || 'attachment';
+  return `${base}.${ext}`;
+}
+
 /**
- * Build email attachments from pack or legacy “all policies”.
+ * Build email attachments from pack or legacy “all policies”, plus optional form template files.
  * @param {'staff_onboarding'|'participant_onboarding'} targetWorkflow
  * @returns {{ attachments: Array<{ filename: string, content: Buffer, contentType: string }>, resolvedPackId: string|null }}
  */
@@ -159,6 +229,7 @@ export function buildPolicyAttachmentsForEmail(providerProfileId, explicitPackId
   }
 
   let policies = [];
+  let formRows = [];
   let resolvedPackId = null;
 
   if (packId) {
@@ -166,15 +237,17 @@ export function buildPolicyAttachmentsForEmail(providerProfileId, explicitPackId
     if (pack && packMatchesWorkflow(pack.workflow, targetWorkflow)) {
       const rows = getPackItemsDetailed(pack.id);
       policies = rows.filter((r) => r.provider_profile_id === providerProfileId);
-      resolvedPackId = policies.length ? pack.id : null;
+      formRows = getPackFormTemplateItemsDetailed(pack.id).filter((r) => r.provider_profile_id === providerProfileId);
+      resolvedPackId = policies.length || formRows.length ? pack.id : null;
     }
   }
 
-  if (!policies.length) {
+  if (!policies.length && !formRows.length) {
     policies = db
       .prepare(`SELECT id, display_name, file_path FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`)
       .all(providerProfileId);
     resolvedPackId = null;
+    formRows = [];
   }
 
   const attachments = [];
@@ -183,12 +256,41 @@ export function buildPolicyAttachmentsForEmail(providerProfileId, explicitPackId
     if (!existsSync(fullPath)) continue;
     try {
       const content = readFileSync(fullPath);
-      const filename = `${(pf.display_name || 'policy').replace(/[/\\?%*:|"<>]/g, '_')}.pdf`;
+      const filename = safeAttachmentFilename(pf.display_name || 'policy', 'pdf');
       attachments.push({ filename, content, contentType: 'application/pdf' });
     } catch {
       /* skip */
     }
   }
+
+  for (const fr of formRows) {
+    const resolved = getCustomTemplatePath(fr.id, fr.template_filename);
+    if (!resolved?.path || !existsSync(resolved.path)) continue;
+    try {
+      const content = readFileSync(resolved.path);
+      const lower = resolved.path.toLowerCase();
+      let ext = 'pdf';
+      let mime = 'application/pdf';
+      if (lower.endsWith('.docx')) {
+        ext = 'docx';
+        mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      } else if (/\.jpe?g$/i.test(lower)) {
+        ext = lower.endsWith('.jpeg') ? 'jpeg' : 'jpg';
+        mime = 'image/jpeg';
+      } else if (lower.endsWith('.png')) {
+        ext = 'png';
+        mime = 'image/png';
+      } else if (lower.endsWith('.webp')) {
+        ext = 'webp';
+        mime = 'image/webp';
+      }
+      const filename = safeAttachmentFilename(fr.display_name || 'form', ext);
+      attachments.push({ filename, content, contentType: mime });
+    } catch {
+      /* skip */
+    }
+  }
+
   return { attachments, resolvedPackId };
 }
 

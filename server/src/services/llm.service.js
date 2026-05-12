@@ -1,16 +1,12 @@
 /**
- * Central LLM service - Ollama only (privacy by design).
- * All AI features in the CRM use this service.
- * Uses OLLAMA_MODEL if set; otherwise auto-detects first available model from Ollama.
- *
- * When an org has ai_staff_local_ollama, interactive staff flows must use Ollama on the
- * staff PC (browser). Server-side Ollama is skipped unless automationAllowServerLlm (cron/API key).
+ * Central LLM service (Ollama). Off by default — set AI_ENABLED=true to opt in.
+ * When disabled, all callers receive null / unavailable and should use heuristics or manual flows.
  */
 
 import { fetchFlagsForOrg } from './orgFeatures.service.js';
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
-const AI_ENABLED = process.env.AI_ENABLED !== 'false';
+const AI_ENABLED = process.env.AI_ENABLED === 'true';
 
 function ollamaBaseLooksLikeLocalhost() {
   try {
@@ -91,8 +87,8 @@ export async function completeForOrg(orgId, prompt, options = {}, orgOpts = {}) 
  * @returns {Promise<{ available: boolean, error?: string, warning?: string }>}
  */
 export async function getConnectionStatus() {
-  if (!AI_ENABLED) return { available: false, error: 'AI is disabled (AI_ENABLED=false)' };
-  // Cloud (e.g. Fly): default OLLAMA_URL is localhost — probing wastes a request and up to several seconds per /api/ai/status.
+  if (!AI_ENABLED) return { available: false, error: 'LLM is disabled. Set AI_ENABLED=true on the server only if you intentionally use Ollama.' };
+  // Cloud (e.g. Fly): default OLLAMA_URL is localhost — probing wastes time; skip unless AI_PROBE_SERVER_OLLAMA is true.
   if (
     process.env.NODE_ENV === 'production' &&
     ollamaBaseLooksLikeLocalhost() &&
@@ -101,7 +97,7 @@ export async function getConnectionStatus() {
     return {
       available: false,
       error:
-        'Server-side Ollama is not used on this host (localhost). Use per-computer Ollama in Settings if enabled, or set OLLAMA_BASE_URL to an Ollama the API can reach. Set AI_PROBE_SERVER_OLLAMA=true to force a probe.'
+        'Server-side Ollama is not used on this host (localhost). Set OLLAMA_BASE_URL to an Ollama the API can reach, or set AI_PROBE_SERVER_OLLAMA=true to force a probe.'
     };
   }
   const url = `${OLLAMA_BASE_URL}/api/tags`;

@@ -15,7 +15,7 @@ import {
   composeParticipantLegalName,
   splitParticipantNameFromFull
 } from '../../../shared/onboardingFieldRegistry.js';
-import { mergeStaffIntakeForProfile } from './staffOnboardingSync.service.js';
+import { embedRasterImageAsSinglePagePdf } from './imageToPdf.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -113,7 +113,7 @@ export function getStaffContractTemplate(providerProfileId) {
     .get(providerProfileId);
   if (!row) return null;
   const resolved = getCustomTemplatePath(row.id, row.template_filename);
-  if (!resolved || (resolved.type !== 'docx' && resolved.type !== 'pdf')) return null;
+  if (!resolved || !['docx', 'pdf', 'image'].includes(resolved.type)) return null;
   if (!existsSync(resolved.path)) return null;
   const mapping = parseTemplateMappingJson(row.mapping_json);
   return {
@@ -261,6 +261,13 @@ export async function generateStaffContractBuffers(staffRow, intakeMap, provider
 
   if (tpl.type === 'pdf') {
     const pdfBytes = readFileSync(tpl.path);
+    const pdf = await fillStaffContractPdfBuffer(pdfBytes, data);
+    return { docx: null, pdf, templateMeta };
+  }
+
+  if (tpl.type === 'image') {
+    const imgBytes = readFileSync(tpl.path);
+    const pdfBytes = await embedRasterImageAsSinglePagePdf(imgBytes, tpl.path);
     const pdf = await fillStaffContractPdfBuffer(pdfBytes, data);
     return { docx: null, pdf, templateMeta };
   }

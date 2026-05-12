@@ -5,8 +5,6 @@ const API = '/api';
 export const settings = {
   getBusiness: () => fetchApi('/settings/business'),
   updateBusiness: (data) => fetchApi('/settings/business', { method: 'PUT', body: JSON.stringify(data) }),
-  getOpenaiForms: () => fetchApi('/settings/openai-forms'),
-  updateOpenaiForms: (data) => fetchApi('/settings/openai-forms', { method: 'PUT', body: JSON.stringify(data || {}) }),
   getOrgTimezone: () => fetchApi('/settings/org-timezone'),
   /** Requires server env XERO_CLIENT_ID, XERO_CLIENT_SECRET, XERO_REDIRECT_URI */
   xeroConnect: () => fetchApi('/settings/xero/connect', { method: 'POST' }),
@@ -78,10 +76,6 @@ export const orgFeatures = {
       method: 'PUT',
       body: JSON.stringify({ org_id, feature_key, enabled })
     })
-};
-
-export const ai = {
-  status: () => fetchApi('/ai/status')
 };
 
 /** Per-org Microsoft OneDrive document archive (admin OAuth). */
@@ -883,9 +877,6 @@ export const forms = {
     }
     return text ? JSON.parse(text) : null;
   },
-  /** Server-side suggest (OpenAI per org, EXTERNAL_LLM_*, or Ollama). Updates template mapping_json. */
-  aiSuggestMapping: (templateId) =>
-    fetchApi(`/forms/templates/${templateId}/ai-suggest-mapping`, { method: 'POST', body: JSON.stringify({}) }),
   policyFilesList: () => fetchApi('/forms/policy-files'),
   policyFilesUpload: async (file, displayName) => {
     const form = new FormData();
@@ -905,8 +896,8 @@ export const forms = {
   updateOnboardingDocumentPack: (packId, data) =>
     fetchApi(`/forms/onboarding-document-packs/${packId}`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
   deleteOnboardingDocumentPack: (packId) => fetchApi(`/forms/onboarding-document-packs/${packId}`, { method: 'DELETE' }),
-  setOnboardingDocumentPackItems: (packId, policy_file_ids) =>
-    fetchApi(`/forms/onboarding-document-packs/${packId}/items`, { method: 'PUT', body: JSON.stringify({ policy_file_ids }) }),
+  setOnboardingDocumentPackItems: (packId, data) =>
+    fetchApi(`/forms/onboarding-document-packs/${packId}/items`, { method: 'PUT', body: JSON.stringify(data || {}) }),
   patchOnboardingDocumentPackDefaults: (data) =>
     fetchApi('/forms/onboarding-document-packs-defaults', { method: 'PATCH', body: JSON.stringify(data || {}) })
 };

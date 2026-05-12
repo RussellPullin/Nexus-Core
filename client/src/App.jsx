@@ -4,8 +4,7 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, Outlet, useParam
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FeatureFlagProvider } from './context/FeatureFlagContext';
 import { PRODUCT_AGENCY, PRODUCT_COORDINATION, isValidActiveProduct } from '@nexus-shared/tenantProduct.js';
-import { ai, auth as authApi } from './lib/api';
-import { probeLocalOllama, resolveLocalOllamaBaseUrl } from './lib/localOllama.js';
+import { auth as authApi } from './lib/api';
 import { writePreferredProductSurface } from './lib/nexusPreferredProduct.js';
 import ParticipantsPage from './pages/ParticipantsPage';
 import ParticipantProfile from './pages/ParticipantProfile';
@@ -62,40 +61,11 @@ function ProductLayout() {
 
 function Layout({ productSurface, children }) {
   const { user, logout, canManageUsers, canAccessCaseTasks } = useAuth();
-  const [aiReachable, setAiReachable] = useState({ server: null, local: null, staffLocalAiMode: false });
   const [emailBannerDismissed, setEmailBannerDismissed] = useState(() =>
     typeof sessionStorage !== 'undefined' && sessionStorage.getItem(EMAIL_BANNER_KEY) === '1'
   );
   const prefix = productSurface ? `/${productSurface}` : '';
   const isAgency = productSurface === PRODUCT_AGENCY;
-
-  useEffect(() => {
-    if (!user) {
-      setAiReachable({ server: null, local: null, staffLocalAiMode: false });
-      return;
-    }
-    let cancel = false;
-    (async () => {
-      try {
-        const s = await ai.status();
-        if (cancel) return;
-        const staffLocalAiMode = Boolean(s?.orgAllowsLocalOllama || s?.server?.staffLocalAiMode);
-        const serverOk = Boolean(s?.server?.available);
-        let localOk = null;
-        if (s?.orgAllowsLocalOllama) {
-          const base = s.userOllamaLocalBaseUrl || resolveLocalOllamaBaseUrl(user);
-          const p = await probeLocalOllama(base);
-          localOk = Boolean(p.ok && (p.models?.length ?? 0) > 0);
-        } else {
-          localOk = null;
-        }
-        setAiReachable({ server: serverOk, local: localOk, staffLocalAiMode });
-      } catch {
-        if (!cancel) setAiReachable({ server: false, local: false, staffLocalAiMode: false });
-      }
-    })();
-    return () => { cancel = true; };
-  }, [user?.id, user?.ollama_local_base_url]);
 
   const needsEmailOauth =
     Boolean(user) && (user.email_reconnect_required || !user.email_connected_address);
@@ -190,47 +160,6 @@ function Layout({ productSurface, children }) {
           <NavLink to={`${prefix}/settings`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             Settings
           </NavLink>
-          <span
-            className="nav-ai-status"
-            title={(() => {
-              const { server, local, staffLocalAiMode } = aiReachable;
-              if (server === null && local === null) return 'Checking AI…';
-              const bits = [];
-              if (staffLocalAiMode) {
-                bits.push('Your org uses AI on each staff computer (Ollama). Green means Ollama is running here.');
-              }
-              if (server) bits.push('Server AI: Ollama reachable from API (used for scheduled sync / API key jobs, not staff browser AI when per-device mode is on)');
-              else if (server === false && !staffLocalAiMode) bits.push('Server AI: not available');
-              else if (server === false && staffLocalAiMode) bits.push('Server AI: not used for your signed-in session in per-device mode');
-              if (local === true) bits.push('This computer: Ollama OK');
-              if (local === false) bits.push('This computer: Ollama not linked (Settings → Ollama)');
-              if (local === null && server !== null && !staffLocalAiMode) bits.push('This computer: staff Ollama off for org');
-              if (bits.length === 0) return 'No AI path ready';
-              return bits.join(' · ');
-            })()}
-          >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: (() => {
-                  const { server, local, staffLocalAiMode } = aiReachable;
-                  if (staffLocalAiMode) {
-                    if (local === true) return '#22c55e';
-                    if (local === false) return '#94a3b8';
-                    return 'transparent';
-                  }
-                  if (server === true || local === true) return '#22c55e';
-                  if (server === false || local === false) return '#94a3b8';
-                  return 'transparent';
-                })(),
-                display: 'inline-block',
-                marginRight: 4
-              }}
-            />
-            AI
-          </span>
           <span className="nav-user">{user?.email}</span>
           <button type="button" className="nav-logout" onClick={logout}>Sign out</button>
         </div>
