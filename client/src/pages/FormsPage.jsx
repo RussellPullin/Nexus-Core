@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
-import { Link, useParams } from 'react-router-dom';
 import {
   participantContractMergeKeyOptions,
   staffContractMergeKeyOptions,
@@ -40,9 +39,6 @@ function placeholdersFromTemplate(t) {
 }
 
 export default function FormsPage() {
-  const { productSurface } = useParams();
-  const settingsFormTemplatesHref = productSurface ? `/${productSurface}/settings?expand=form-templates` : '/settings?expand=form-templates';
-
   const [context, setContext] = useState(null);
   const [templatesAll, setTemplatesAll] = useState([]);
   const [templateFiles, setTemplateFiles] = useState({});
@@ -60,6 +56,11 @@ export default function FormsPage() {
   const [extraMappingKeys, setExtraMappingKeys] = useState([]);
   const [newMappingKeyInput, setNewMappingKeyInput] = useState('');
   const [verifiedDraft, setVerifiedDraft] = useState({});
+
+  const [recipientPreviewId, setRecipientPreviewId] = useState(null);
+  const [recipientPreviewRows, setRecipientPreviewRows] = useState(null);
+  const [recipientPreviewLoading, setRecipientPreviewLoading] = useState(false);
+  const [recipientPreviewErr, setRecipientPreviewErr] = useState('');
 
   const [docPackData, setDocPackData] = useState(null);
   const [packWorking, setPackWorking] = useState(false);
@@ -87,6 +88,21 @@ export default function FormsPage() {
         setTemplateFiles({});
       })
       .finally(() => setLoading(false));
+  }, []);
+
+  const openRecipientPreview = useCallback(async (templateId) => {
+    setRecipientPreviewErr('');
+    setRecipientPreviewLoading(true);
+    setRecipientPreviewId(templateId);
+    setRecipientPreviewRows(null);
+    try {
+      const d = await forms.mergePreviewRows(templateId);
+      setRecipientPreviewRows(d);
+    } catch (e) {
+      setRecipientPreviewErr(e.message || 'Could not load preview');
+    } finally {
+      setRecipientPreviewLoading(false);
+    }
   }, []);
 
   const reloadDocPacks = useCallback(() => {
@@ -463,6 +479,14 @@ export default function FormsPage() {
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => openFieldLinkEditor(t)}>
                           {mappingEditorId === t.id ? 'Close field links' : 'Edit field links'}
                         </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={!hasFile}
+                          onClick={() => openRecipientPreview(t.id)}
+                        >
+                          Preview for recipient
+                        </button>
                         <button type="button" className="btn btn-secondary btn-sm" style={{ color: '#b91c1c' }} onClick={() => handleDeleteTemplate(t.id)}>
                           Delete
                         </button>
@@ -633,9 +657,8 @@ export default function FormsPage() {
       {context?.message && <p className="forms-muted">{context.message}</p>}
 
       <p className="forms-lede" style={{ marginBottom: '1.25rem' }}>
-        The <strong>service agreement</strong> you configure under{' '}
-        <Link to={settingsFormTemplatesHref}>Settings → Form templates</Link> uses a structured template: variables are filled from the participant profile and intake when packs are generated. On this page, a{' '}
-        <strong>custom participant or staff PDF, Word, or image</strong> works the same way in one step: choose <strong>Upload &amp; map from intake</strong> and Nexus saves the file, runs deterministic field detection (PDF names, Word tags, on-device OCR), and links fields to intake/profile data. Use <strong>Edit field links</strong> to adjust any mapping, or <strong>Detect only</strong> under Advanced to refresh placeholders from another file.
+        The <strong>service agreement</strong> and other core onboarding PDFs still use the template files assigned to your organisation (privacy consent, support plan, and the agreement itself). On this page, add{' '}
+        <strong>custom participant or staff PDF, Word, or image</strong> documents: choose <strong>Upload &amp; map from intake</strong> and Nexus saves the file, runs field detection (PDF form names, Word tags, OCR when needed), and links fields to intake and profile data. Use <strong>Edit field links</strong> to adjust any mapping, or <strong>Detect only</strong> under Advanced to refresh placeholders from another file.
       </p>
 
       {message && (
@@ -837,6 +860,126 @@ export default function FormsPage() {
             </div>
           </section>
         </>
+      )}
+
+      {recipientPreviewId && (
+        <div
+          role="presentation"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.45)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem'
+          }}
+          onClick={() => setRecipientPreviewId(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="forms-recipient-preview-title"
+            style={{
+              background: '#fff',
+              borderRadius: 10,
+              maxWidth: 1120,
+              width: '100%',
+              maxHeight: '92vh',
+              overflow: 'auto',
+              padding: '1.1rem 1.25rem',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.2)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+              <h3 id="forms-recipient-preview-title" style={{ margin: 0, fontSize: '1.1rem' }}>
+                Recipient preview (sample data)
+              </h3>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setRecipientPreviewId(null)}>
+                Close
+              </button>
+            </div>
+            <p className="forms-muted" style={{ fontSize: '0.85rem', margin: '0.5rem 0 0' }}>
+              Uses fictitious Jamie / Taylor-style values and your organisation name from Settings. PDFs with AcroForm fields show filled values on the
+              original pages; flat PDFs add an appendix listing each mapped value. Real packs use the participant or staff you run onboarding for.
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+                gap: '1rem',
+                marginTop: '0.85rem'
+              }}
+            >
+              <div>
+                <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '0.95rem' }}>Document layout</h4>
+                {recipientPreviewRows?.file_type === 'docx' ? (
+                  <p className="forms-muted" style={{ fontSize: '0.85rem' }}>
+                    Word does not preview inline here. Open <strong>Sample-filled PDF</strong> on the right to see merged output, or open the .docx file from
+                    your machine.
+                  </p>
+                ) : (
+                  <iframe
+                    title="Template document preview"
+                    src={forms.templateDocumentUrl(recipientPreviewId)}
+                    style={{ width: '100%', height: 380, border: '1px solid #e2e8f0', borderRadius: 6, background: '#f8fafc' }}
+                  />
+                )}
+              </div>
+              <div>
+                <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '0.95rem' }}>What merges where</h4>
+                {recipientPreviewLoading && <p className="forms-muted">Loading…</p>}
+                {recipientPreviewErr && (
+                  <p style={{ fontSize: '0.85rem', color: '#b91c1c', margin: '0.25rem 0' }}>{recipientPreviewErr}</p>
+                )}
+                {recipientPreviewRows?.acro_field_count != null && (
+                  <p className="forms-muted" style={{ fontSize: '0.78rem', margin: '0 0 0.35rem 0' }}>
+                    PDF form fields detected: {recipientPreviewRows.acro_field_count}
+                  </p>
+                )}
+                <div className="table-wrap" style={{ maxHeight: 360, overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                  <table className="table-condensed forms-data-table" style={{ margin: 0 }}>
+                    <thead>
+                      <tr>
+                        <th>Placeholder</th>
+                        <th>Merge key</th>
+                        <th>Sample value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(recipientPreviewRows?.rows || []).length === 0 && !recipientPreviewLoading ? (
+                        <tr>
+                          <td colSpan={3} className="forms-muted" style={{ fontSize: '0.85rem' }}>
+                            No field links yet — use Upload &amp; map or Edit field links first.
+                          </td>
+                        </tr>
+                      ) : (
+                        (recipientPreviewRows?.rows || []).map((r) => (
+                          <tr key={`${r.placeholder}-${r.merge_key}`}>
+                            <td style={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>{r.placeholder}</td>
+                            <td style={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>{r.merge_key}</td>
+                            <td style={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>{r.sample_value || '—'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <a
+                  className="btn btn-primary btn-sm"
+                  style={{ marginTop: '0.75rem', display: 'inline-block' }}
+                  href={forms.recipientPreviewPdfUrl(recipientPreviewId)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open sample-filled PDF (new tab)
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

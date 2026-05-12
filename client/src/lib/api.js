@@ -899,5 +899,10 @@ export const forms = {
   setOnboardingDocumentPackItems: (packId, data) =>
     fetchApi(`/forms/onboarding-document-packs/${packId}/items`, { method: 'PUT', body: JSON.stringify(data || {}) }),
   patchOnboardingDocumentPackDefaults: (data) =>
-    fetchApi('/forms/onboarding-document-packs-defaults', { method: 'PATCH', body: JSON.stringify(data || {}) })
+    fetchApi('/forms/onboarding-document-packs-defaults', { method: 'PATCH', body: JSON.stringify(data || {}) }),
+  templateDocumentUrl: (templateId) =>
+    `${API}/forms/templates/${encodeURIComponent(templateId)}/document`,
+  recipientPreviewPdfUrl: (templateId) =>
+    `${API}/forms/templates/${encodeURIComponent(templateId)}/recipient-preview.pdf`,
+  mergePreviewRows: (templateId) => fetchApi(`/forms/templates/${encodeURIComponent(templateId)}/merge-preview-rows`)
 };

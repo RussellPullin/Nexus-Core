@@ -236,10 +236,12 @@ export default function ParticipantProfile() {
         if (fix.anchor_id) setSaScrollTarget(fix.anchor_id);
         return;
       }
+      if (fix.kind === 'forms') {
+        navigate(`${pathPrefix}/forms`);
+        return;
+      }
       if (fix.kind === 'settings') {
-        const sec = fix.section === 'company' ? 'company' : 'form-templates';
-        const q = new URLSearchParams({ expand: sec });
-        if (fix.template_instance_id) q.set('templateInstance', fix.template_instance_id);
+        const q = new URLSearchParams({ expand: fix.section || 'company' });
         navigate(`${pathPrefix}/settings?${q.toString()}`);
         return;
       }

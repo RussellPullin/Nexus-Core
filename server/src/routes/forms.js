@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import { writeFileSync, mkdirSync, existsSync, unlinkSync, readdirSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, unlinkSync, readdirSync, readFileSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
@@ -19,7 +19,17 @@ import {
   deleteCustomFormTemplate
 } from '../services/onboarding.service.js';
 import { getTemplatePath, getTemplateDir, getCustomTemplatePath, getCustomTemplateDir } from '../services/formTemplatePath.service.js';
-import { analyzeContractTemplateBuffer, suggestContractFieldMap, mergeContractFieldMapSuggestions } from '../services/contractTemplateAnalyze.service.js';
+import {
+  analyzeContractTemplateBuffer,
+  suggestContractFieldMap,
+  mergeContractFieldMapSuggestions,
+  extractPdfAcroFieldNames
+} from '../services/contractTemplateAnalyze.service.js';
+import {
+  buildMergePreviewRows,
+  buildRecipientPreviewPdfBuffer,
+  buildSampleRenderData
+} from '../services/formTemplateRecipientPreview.service.js';
 import {
   listPacks,
   createPack,
@@ -131,6 +141,104 @@ ROUTER.get('/templates', (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+function mimeForTemplatePath(filePath) {
+  const lower = String(filePath || '').toLowerCase();
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (/\.jpe?g$/i.test(lower)) return 'image/jpeg';
+  return 'application/octet-stream';
+}
+
+// GET /api/forms/templates/:id/document — inline template file for preview (custom templates only)
+ROUTER.get('/templates/:id/document', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const row = db
+      .prepare('SELECT id, template_filename, form_type FROM form_templates WHERE id = ? AND provider_profile_id = ?')
+      .get(req.params.id, profile.id);
+    if (!row || row.form_type !== 'custom') {
+      return res.status(404).json({ error: 'Custom form template not found.' });
+    }
+    const resolved = getCustomTemplatePath(row.id, row.template_filename);
+    if (!resolved) return res.status(404).json({ error: 'No template file uploaded yet.' });
+    const buf = readFileSync(resolved.path);
+    const base = String(row.template_filename || resolved.path.split(/[/\\]/).pop() || 'template').replace(/[/\\]/g, '_');
+    const safeName = base.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'template';
+    res.setHeader('Content-Type', mimeForTemplatePath(resolved.path));
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/forms/templates/:id/merge-preview-rows — sample merged values per placeholder (JSON)
+ROUTER.get('/templates/:id/merge-preview-rows', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const row = db.prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(req.params.id, profile.id);
+    if (!row || row.form_type !== 'custom') {
+      return res.status(404).json({ error: 'Custom form template not found.' });
+    }
+    const mapping = parseMappingJson(row.mapping_json);
+    const orgRow =
+      profile.organisation_id &&
+      db.prepare('SELECT name, abn, address, email, phone FROM organisations WHERE id = ?').get(profile.organisation_id);
+    const renderData = buildSampleRenderData(row.workflow, mapping.contract_field_map, orgRow || null);
+    const rows = buildMergePreviewRows(mapping.contract_field_map || {}, renderData);
+    const resolved = getCustomTemplatePath(row.id, row.template_filename);
+    let acro_field_count = null;
+    let file_type = null;
+    if (resolved) {
+      file_type = resolved.type;
+      if (resolved.type === 'pdf') {
+        const buf = readFileSync(resolved.path);
+        acro_field_count = (await extractPdfAcroFieldNames(buf)).length;
+      }
+    }
+    res.json({ rows, acro_field_count, file_type });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/forms/templates/:id/recipient-preview.pdf — template + appendix with fictitious merge values
+ROUTER.get('/templates/:id/recipient-preview.pdf', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const row = db.prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(req.params.id, profile.id);
+    if (!row || row.form_type !== 'custom') {
+      return res.status(404).json({ error: 'Custom form template not found.' });
+    }
+    const resolved = getCustomTemplatePath(row.id, row.template_filename);
+    if (!resolved) return res.status(404).json({ error: 'No template file uploaded yet.' });
+    const mapping = parseMappingJson(row.mapping_json);
+    const orgRow =
+      profile.organisation_id &&
+      db.prepare('SELECT name, abn, address, email, phone FROM organisations WHERE id = ?').get(profile.organisation_id);
+    const { pdfBuffer, note } = await buildRecipientPreviewPdfBuffer(
+      resolved,
+      row.workflow,
+      mapping.contract_field_map,
+      orgRow || null
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="recipient-preview-sample.pdf"');
+    if (note) res.setHeader('X-Preview-Note', encodeURIComponent(note.slice(0, 400)));
+    res.send(pdfBuffer);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Preview failed' });
   }
 });
 

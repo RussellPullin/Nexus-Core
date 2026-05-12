@@ -113,12 +113,7 @@ export function computeServiceAgreementGaps(params) {
       title: 'Principal names (definitions)',
       description: 'Clause 1 definitions reference responsible persons — currently blank in your template.',
       section: 'Section 4 — Clause 1',
-      fix: {
-        kind: 'settings',
-        section: 'form-templates',
-        anchor_id: 'settings-section-form-templates',
-        template_instance_id: params.orgTemplateRow?.id || null
-      }
+      fix: { kind: 'forms' }
     });
   }
 
@@ -129,12 +124,7 @@ export function computeServiceAgreementGaps(params) {
       title: 'Complaints contact details',
       description: 'Clause 12 contact lines may all be empty if org profile and template variables are blank.',
       section: 'Section 4 — Clause 12',
-      fix: {
-        kind: 'settings',
-        section: 'form-templates',
-        anchor_id: 'settings-section-form-templates',
-        template_instance_id: params.orgTemplateRow?.id || null
-      }
+      fix: { kind: 'forms' }
     });
   }
 

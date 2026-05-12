@@ -4,7 +4,6 @@ import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { useAuth } from '../context/AuthContext';
 import { staff, learning, settings, auth, microsoftDrive } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
-import FormTemplatesSettings from '../components/FormTemplatesSettings';
 import { formatDate } from '../lib/dateUtils';
 
 const SIGNATURE_WIDTH = 300;
@@ -88,13 +87,6 @@ export default function SettingsPage() {
     const expand = searchParams.get('expand');
     if (!expand) return;
     const t = window.setTimeout(() => {
-      if (expand === 'form-templates') {
-        const el = document.getElementById('settings-section-form-templates');
-        if (el) {
-          el.open = true;
-          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }
       if (expand === 'company') {
         const el = document.getElementById('settings-section-company');
         if (el) {
@@ -448,20 +440,6 @@ export default function SettingsPage() {
       </form>
         </div>
       </details>
-
-      {isAdmin && (
-        <details id="settings-section-form-templates" className="card settings-collapsible">
-          <summary className="settings-collapsible-summary">
-            <span className="settings-collapsible-summary-main">
-              <span className="settings-collapsible-title">Form templates</span>
-              <span className="settings-collapsible-hint">Service Agreement variables &amp; branding</span>
-            </span>
-          </summary>
-          <div className="settings-collapsible-body">
-            <FormTemplatesSettings />
-          </div>
-        </details>
-      )}
 
       {isAdmin && (
         <details className="card settings-collapsible">
