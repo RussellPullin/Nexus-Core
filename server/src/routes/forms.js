@@ -384,21 +384,28 @@ ROUTER.post('/templates/:id/contract-upload-analyze', memoryUpload.single('file'
       const analysis = await analyzeContractTemplateBuffer(req.file.buffer, orig);
       const suggested = suggestContractFieldMap(analysis.all_placeholders, workflowKind);
       const contract_field_map = mergeContractFieldMapSuggestions(suggested, existing.contract_field_map);
+      const dir = getCustomTemplateDir();
+      mkdirSync(dir, { recursive: true });
+      const saveName = `${template.id}.docx`;
+      unlinkOtherCustomTemplateFiles(dir, template.id, saveName);
+      writeFileSync(join(dir, saveName), req.file.buffer);
+      db.prepare(`UPDATE form_templates SET template_filename = ?, updated_at = datetime('now') WHERE id = ?`).run(saveName, template.id);
       const mapping_json = {
         ...existing,
         contract_field_map,
         contract_analysis: {
           ...analysis,
           analyzed_at: new Date().toISOString(),
-          template_file_updated: false
+          template_file_updated: true
         }
       };
       db.prepare(`UPDATE form_templates SET mapping_json = ?, updated_at = datetime('now') WHERE id = ?`).run(JSON.stringify(mapping_json), template.id);
       return res.json({
         ok: true,
-        analysis_only: true,
+        template_id: template.id,
+        filename: saveName,
         message:
-          'Word placeholder mapping saved. Upload a fillable PDF with “Upload PDF” — Nexus merges staff contracts from PDF form fields only.',
+          'Word template saved and field map updated. Onboarding merge uses Word placeholders; PDF preview in the browser may be limited — use “Preview for recipient” or generate a pack to verify output.',
         contract_field_map,
         ...analysis
       });

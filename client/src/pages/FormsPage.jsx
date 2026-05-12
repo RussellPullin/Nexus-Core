@@ -202,9 +202,7 @@ export default function FormsPage() {
       const data = await forms.contractUploadAnalyze(templateId, file);
       setAnalyzeByTemplateId((prev) => ({ ...prev, [templateId]: data }));
       const n = data.all_placeholders?.length ?? 0;
-      let msg = `Field detection finished (${n} reference(s)). Mapping saved.`;
-      if (data.image_only) msg = data.message || msg;
-      else if (data.analysis_only) msg = data.message || msg;
+      let msg = data.message || `Field detection finished (${n} reference(s)). Mapping saved.`;
       if (data.analysis_note) msg += ` ${data.analysis_note}`;
       setMessage(msg);
       setUploadFile((prev) => ({ ...prev, [key]: null }));
