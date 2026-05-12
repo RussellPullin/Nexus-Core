@@ -51,6 +51,7 @@ export const PARTICIPANT_INTAKE_FIELD_DEFS = [
   { key: 'plan_managed_services', label: 'Plan-managed categories', section: 'ndis', type: 'json' },
   { key: 'plan_start_date', label: 'Plan start date', section: 'ndis', type: 'date' },
   { key: 'plan_end_date', label: 'Plan end date', section: 'ndis', type: 'date' },
+  { key: 'scheduled_review_date', label: 'Scheduled review date', section: 'ndis', type: 'date' },
   { key: 'plan_manager_id', label: 'Plan manager', section: 'ndis', type: 'text' },
   { key: 'plan_manager_company_name', label: 'Plan manager company', section: 'ndis', type: 'text' },
   { key: 'plan_manager_invoice_email', label: 'Plan manager invoice email', section: 'ndis', type: 'text' },

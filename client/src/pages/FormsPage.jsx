@@ -159,9 +159,9 @@ export default function FormsPage() {
       setUploadFile((prev) => ({ ...prev, [templateId]: null }));
       const mapped = data?.mapped_field_count ?? 0;
       const found = data?.placeholders_found ?? 0;
-      setMessage(
-        `Template saved. Linked ${mapped} field(s) to profile/intake data from ${found} detected reference(s). When you generate the onboarding pack, this document will merge like the service agreement.`
-      );
+      let msg = `Template saved. Linked ${mapped} field(s) to profile/intake data from ${found} detected reference(s). When you generate the onboarding pack, this document will merge like the service agreement.`;
+      if (data?.analysis_note) msg += ` Note: ${data.analysis_note}`;
+      setMessage(msg);
       if (data && typeof data === 'object') {
         setAnalyzeByTemplateId((prev) => ({ ...prev, [templateId]: data }));
       }
@@ -189,6 +189,7 @@ export default function FormsPage() {
       let msg = `Field detection finished (${n} reference(s)). Mapping saved.`;
       if (data.image_only) msg = data.message || msg;
       else if (data.analysis_only) msg = data.message || msg;
+      if (data.analysis_note) msg += ` ${data.analysis_note}`;
       setMessage(msg);
       setUploadFile((prev) => ({ ...prev, [key]: null }));
       loadTemplates();

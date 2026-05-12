@@ -94,7 +94,8 @@ export async function extractContractPdfText(buffer, options = {}) {
   const native = String(data?.text || '');
   const nativeStripped = strippedLen(native);
 
-  const minNative = numFromEnv('CONTRACT_PDF_OCR_MIN_NATIVE_CHARS', 'NDIS_PDF_OCR_MIN_NATIVE_CHARS', 200);
+  /* Low default: many scanned PDFs still have a fat bogus "text" layer from pdf-parse; we want OCR to run for forms. */
+  const minNative = numFromEnv('CONTRACT_PDF_OCR_MIN_NATIVE_CHARS', 'NDIS_PDF_OCR_MIN_NATIVE_CHARS', 60);
   const disabled =
     process.env.CONTRACT_PDF_OCR_DISABLED === '1' || (process.env.CONTRACT_PDF_OCR_DISABLED !== '0' && NDIS_DISABLED);
 

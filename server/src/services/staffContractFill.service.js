@@ -64,8 +64,9 @@ export function applyContractPlaceholderMap(baseData, contractFieldMap) {
  * @param {object} participant - participants row
  * @param {object|null} plan - current plan or null
  * @param {Record<string, string>} intake - participant_intake_fields map
+ * @param {Record<string, string>|null} [providerOrg] - provider organisation row (name, abn, address, email, phone) for agreement headers
  */
-export function buildParticipantCustomMergeData(participant, plan, intake) {
+export function buildParticipantCustomMergeData(participant, plan, intake, providerOrg = null) {
   const i = intake || {};
   const p = participant || {};
   const today = new Date().toISOString().slice(0, 10);
@@ -87,8 +88,23 @@ export function buildParticipantCustomMergeData(participant, plan, intake) {
     address: (addrFromIntake || p.address || '').trim(),
     date_of_birth: String(i.date_of_birth || p.date_of_birth || '').trim().slice(0, 10),
     plan_start_date: plan?.start_date ? String(plan.start_date).slice(0, 10) : '',
-    plan_end_date: plan?.end_date ? String(plan.end_date).slice(0, 10) : ''
+    plan_end_date: plan?.end_date ? String(plan.end_date).slice(0, 10) : '',
+    organisation_name: '',
+    abn: '',
+    organisation_address: '',
+    organisation_email: '',
+    organisation_phone: '',
+    organisation_contact_name: ''
   };
+  const po = providerOrg && typeof providerOrg === 'object' ? providerOrg : null;
+  if (po) {
+    if (po.organisation_name != null) data.organisation_name = toSafeString(po.organisation_name);
+    if (po.abn != null) data.abn = toSafeString(po.abn);
+    if (po.organisation_address != null) data.organisation_address = toSafeString(po.organisation_address);
+    if (po.organisation_email != null) data.organisation_email = toSafeString(po.organisation_email);
+    if (po.organisation_phone != null) data.organisation_phone = toSafeString(po.organisation_phone);
+    if (po.organisation_contact_name != null) data.organisation_contact_name = toSafeString(po.organisation_contact_name);
+  }
   if (intake && typeof intake === 'object') {
     for (const [key, value] of Object.entries(intake)) {
       if (!key) continue;

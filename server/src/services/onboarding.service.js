@@ -620,7 +620,21 @@ export async function generateFormPack({
         continue;
       }
       const mapping = parseJson(template.mapping_json, {});
-      const baseMerge = buildParticipantCustomMergeData(participant, plan, intake);
+      let providerOrgMerge = null;
+      if (organisationId) {
+        const org = db.prepare('SELECT name, abn, address, email, phone FROM organisations WHERE id = ?').get(organisationId);
+        if (org) {
+          providerOrgMerge = {
+            organisation_name: org.name || '',
+            abn: org.abn || '',
+            organisation_address: org.address || '',
+            organisation_email: org.email || '',
+            organisation_phone: org.phone || '',
+            organisation_contact_name: ''
+          };
+        }
+      }
+      const baseMerge = buildParticipantCustomMergeData(participant, plan, intake, providerOrgMerge);
       const data = applyContractPlaceholderMap(baseMerge, mapping.contract_field_map || {});
       if (resolved.type === 'pdf') {
         const pdfBytes = readFileSync(resolved.path);

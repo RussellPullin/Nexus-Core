@@ -14,11 +14,22 @@ export const PARTICIPANT_CONTRACT_MERGE_KEYS = [
   'email',
   'phone',
   'address',
+  'street_address',
+  'suburb_city',
+  'state',
+  'postcode',
   'date_of_birth',
   'plan_start_date',
   'plan_end_date',
+  'scheduled_review_date',
   'today',
-  'date'
+  'date',
+  'organisation_name',
+  'abn',
+  'organisation_address',
+  'organisation_email',
+  'organisation_phone',
+  'organisation_contact_name'
 ];
 
 export const STAFF_CONTRACT_MERGE_KEYS = [
