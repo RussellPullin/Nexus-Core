@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { compliance, bulkOps } from '../lib/api';
+import { compliance, bulkOps, documentLibrary } from '../lib/api';
+import DocumentPreviewModal from '../components/DocumentPreviewModal';
 
 /**
  * Phase 7: Compliance dashboard.
@@ -14,6 +15,7 @@ export default function CompliancePage() {
   const [state, setState] = useState({ loading: true, error: '', data: null });
   const [savingId, setSavingId] = useState(null);
   const [bulk, setBulk] = useState({ participants: '', staff: '', busy: false, result: null, error: '' });
+  const [preview, setPreview] = useState({ open: false, src: null, title: '' });
 
   const refresh = () => {
     setState((s) => ({ ...s, loading: true }));
@@ -105,10 +107,33 @@ export default function CompliancePage() {
                   <td style={{ padding: '0.5rem' }}>
                     {s.evidence.length === 0 && <em style={{ color: '#94a3b8' }}>—</em>}
                     {s.evidence.map((e) => (
-                      <div key={e.slug} style={{ fontSize: '0.75rem' }}>
-                        <span style={{ color: e.missing ? '#dc2626' : !e.clone_id ? '#ca8a04' : '#16a34a' }}>●</span>{' '}
+                      <div key={e.slug} style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ color: e.missing ? '#dc2626' : !e.clone_id ? '#ca8a04' : '#16a34a' }}>●</span>
                         <code>{e.slug}</code>
-                        {e.display_name && <span style={{ marginLeft: 4, color: '#475569' }}>— {e.display_name}</span>}
+                        {e.display_name && <span style={{ color: '#475569' }}>— {e.display_name}</span>}
+                        {e.master_id && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreview({
+                                open: true,
+                                src: documentLibrary.previewMasterUrl(e.master_id),
+                                title: `${e.display_name || e.slug} — preview`
+                              })
+                            }
+                            style={{
+                              marginLeft: 4,
+                              padding: '0 .35rem',
+                              border: '1px solid #cbd5e1',
+                              background: '#f8fafc',
+                              borderRadius: 4,
+                              fontSize: '0.7rem',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            preview
+                          </button>
+                        )}
                       </div>
                     ))}
                   </td>
@@ -179,6 +204,13 @@ export default function CompliancePage() {
           </div>
         )}
       </div>
+
+      <DocumentPreviewModal
+        open={preview.open}
+        src={preview.src}
+        title={preview.title}
+        onClose={() => setPreview({ open: false, src: null, title: '' })}
+      />
     </div>
   );
 }

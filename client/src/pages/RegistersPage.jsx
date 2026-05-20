@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { registers, documentLibrary } from '../lib/api.js';
+import DocumentPreviewModal from '../components/DocumentPreviewModal';
 import '../App.css';
 
 export default function RegistersPage() {
@@ -12,6 +13,7 @@ export default function RegistersPage() {
   const [libraryRegisters, setLibraryRegisters] = useState([]);
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [libraryMessage, setLibraryMessage] = useState('');
+  const [preview, setPreview] = useState({ open: false, src: null, title: '' });
 
   useEffect(() => {
     let cancelled = false;
@@ -45,31 +47,12 @@ export default function RegistersPage() {
     };
   }, []);
 
-  const handleRenderRegister = async (master) => {
-    setLibraryBusy(true);
-    setLibraryMessage('');
-    try {
-      const res = await fetch(`/api/document-library/masters/${master.id}/render`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      if (!res.ok) throw new Error(`Render failed (${res.status})`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${master.slug}.html`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setLibraryMessage(`Downloaded ${master.display_name}.`);
-    } catch (e) {
-      setLibraryMessage(e.message || 'Render failed');
-    } finally {
-      setLibraryBusy(false);
-    }
+  const handlePreviewRegister = (master) => {
+    setPreview({
+      open: true,
+      src: documentLibrary.previewMasterUrl(master.id),
+      title: `${master.display_name} — preview`
+    });
   };
 
   const handleCloneAll = async () => {
@@ -263,10 +246,10 @@ export default function RegistersPage() {
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      onClick={() => handleRenderRegister(m)}
+                      onClick={() => handlePreviewRegister(m)}
                       disabled={libraryBusy}
                     >
-                      Render now
+                      Preview
                     </button>
                   </td>
                 </tr>
@@ -275,6 +258,13 @@ export default function RegistersPage() {
           </table>
         )}
       </div>
+
+      <DocumentPreviewModal
+        open={preview.open}
+        src={preview.src}
+        title={preview.title}
+        onClose={() => setPreview({ open: false, src: null, title: '' })}
+      />
     </div>
   );
 }

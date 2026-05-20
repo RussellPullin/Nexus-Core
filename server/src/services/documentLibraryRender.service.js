@@ -106,10 +106,7 @@ export function renderLibraryDocument({ masterId, orgId, participant = null, sta
     }
     case 'html': {
       const raw = readFileSync(master.template_file_path, 'utf8');
-      const html = raw.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => {
-        const v = tokens[key];
-        return v === undefined || v === null ? '' : String(v);
-      });
+      const html = renderMustacheLite(raw, tokens);
       return {
         buffer: null,
         html,
@@ -134,4 +131,40 @@ export function renderLibraryDocument({ masterId, orgId, participant = null, sta
     default:
       throw new Error(`Unsupported engine: ${master.engine}`);
   }
+}
+
+/**
+ * Tiny Mustache-style renderer. Supports:
+ *   {{variable}}           — interpolation (HTML-escaped)
+ *   {{{variable}}}         — interpolation (raw, no escaping)
+ *   {{#variable}}...{{/variable}}    — section: rendered if truthy
+ *   {{^variable}}...{{/variable}}    — inverted section: rendered if falsy
+ *
+ * Designed to match what the seed templates use without pulling in a heavy dependency.
+ */
+function renderMustacheLite(template, tokens) {
+  const truthy = (key) => {
+    const v = tokens[key];
+    return v !== undefined && v !== null && v !== '' && v !== false && v !== 0 && v !== '0';
+  };
+  const sectionRe = /\{\{([#^])\s*([\w.]+)\s*\}\}([\s\S]*?)\{\{\/\s*\2\s*\}\}/g;
+  let out = template;
+  for (let i = 0; i < 4; i += 1) {
+    const before = out;
+    out = out.replace(sectionRe, (_, kind, key, body) => {
+      const include = kind === '#' ? truthy(key) : !truthy(key);
+      return include ? body : '';
+    });
+    if (out === before) break;
+  }
+  out = out.replace(/\{\{\{\s*([\w.]+)\s*\}\}\}/g, (_, key) => {
+    const v = tokens[key];
+    return v === undefined || v === null ? '' : String(v);
+  });
+  out = out.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => {
+    const v = tokens[key];
+    if (v === undefined || v === null) return '';
+    return String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  });
+  return out;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { documentLibrary } from '../lib/api';
+import DocumentPreviewModal from '../components/DocumentPreviewModal';
 
 /**
  * Phase 1: Master document library admin page (system-admin only).
@@ -16,6 +17,7 @@ export default function DocumentLibraryAdminPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [preview, setPreview] = useState({ open: false, src: null, title: '' });
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -147,9 +149,21 @@ export default function DocumentLibraryAdminPage() {
                       <span style={{ color: '#b91c1c' }}>Not yet</span>
                     )}
                   </td>
-                  <td style={{ padding: '.4rem' }}>
+                  <td style={{ padding: '.4rem', display: 'flex', gap: '.35rem', flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() =>
+                        setPreview({
+                          open: true,
+                          src: documentLibrary.previewMasterUrl(m.id),
+                          title: `${m.display_name} — preview`
+                        })
+                      }
+                    >
+                      Preview
+                    </button>
                     {!m.clone_id && (
-                      <button className="btn btn-secondary" disabled={busy} onClick={() => handleCloneOne(m.id)}>
+                      <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => handleCloneOne(m.id)}>
                         Clone to my org
                       </button>
                     )}
@@ -160,6 +174,13 @@ export default function DocumentLibraryAdminPage() {
           </table>
         </div>
       ))}
+
+      <DocumentPreviewModal
+        open={preview.open}
+        src={preview.src}
+        title={preview.title}
+        onClose={() => setPreview({ open: false, src: null, title: '' })}
+      />
     </div>
   );
 }

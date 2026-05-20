@@ -142,7 +142,7 @@ export function getOrgPracticeStandards(orgId) {
   );
   const libraryRows = db
     .prepare(
-      `SELECT m.slug, m.display_name, m.category, c.id as clone_id, c.is_active as clone_active
+      `SELECT m.id as master_id, m.slug, m.display_name, m.category, c.id as clone_id, c.is_active as clone_active
        FROM document_library_masters m
        LEFT JOIN document_library_org_clones c ON c.master_id = m.id AND c.org_id = ?`
     )

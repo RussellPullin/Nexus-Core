@@ -520,6 +520,14 @@ export const documentLibrary = {
   sync: () => fetchApi('/document-library/sync', { method: 'POST' }),
   cloneAllToOrg: () => fetchApi('/document-library/clone-all-to-org', { method: 'POST' }),
   cloneMaster: (masterId) => fetchApi(`/document-library/masters/${masterId}/clone-to-org`, { method: 'POST' }),
+  // Returns a URL safe to embed in <iframe src="…">.
+  previewMasterUrl: (masterId, { participantId, staffId } = {}) => {
+    const qs = new URLSearchParams();
+    if (participantId) qs.set('participant_id', participantId);
+    if (staffId) qs.set('staff_id', staffId);
+    const q = qs.toString();
+    return `${API}/document-library/masters/${encodeURIComponent(masterId)}/preview${q ? `?${q}` : ''}`;
+  },
   renderMaster: (masterId, body = {}) => fetchApi(`/document-library/masters/${masterId}/render`, {
     method: 'POST',
     body: JSON.stringify(body)
