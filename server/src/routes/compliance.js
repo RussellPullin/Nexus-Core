@@ -5,7 +5,8 @@
  *   PUT  /api/compliance/practice-standards/:id      — record review status / notes / evidence
  */
 import { Router } from 'express';
-import { requireAuth, requireAdminOrDelegate } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
+import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { db } from '../db/index.js';
 import { getOrgPracticeStandards, upsertOrgStandardStatus } from '../services/practiceStandards.service.js';
 
