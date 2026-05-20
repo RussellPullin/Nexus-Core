@@ -9,7 +9,8 @@
  * per-target report so the UI can highlight rows that failed readiness.
  */
 import { Router } from 'express';
-import { requireAuth, requireAdminOrDelegate } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
+import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { db } from '../db/index.js';
 import { orchestrateParticipantOnboarding } from '../services/participantOnboardingOrchestrator.service.js';
 import { orchestrateStaffOnboarding } from '../services/staffOnboardingOrchestrator.service.js';
