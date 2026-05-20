@@ -189,6 +189,15 @@ export default function ParticipantProfile() {
   const [showBudgetConfigModal, setShowBudgetConfigModal] = useState(false);
   const [budgetConfigForm, setBudgetConfigForm] = useState({ source: null, budgetIndex: null, budgetId: null, planId: null, category: '', categoryName: '', totalAmount: 0 });
   const [onboardingState, setOnboardingState] = useState(null);
+  // Phase 2 — one-click orchestrator UI state.
+  const [onboardingReadiness, setOnboardingReadiness] = useState(null);
+  const [orchestratorBusy, setOrchestratorBusy] = useState(false);
+  const [orchestratorResult, setOrchestratorResult] = useState(null);
+  const [orchestratorError, setOrchestratorError] = useState('');
+  // Phase 4 — intake-link UI state.
+  const [intakeIssuing, setIntakeIssuing] = useState(false);
+  const [intakeLinkResult, setIntakeLinkResult] = useState(null);
+  const [intakeLinkError, setIntakeLinkError] = useState('');
   const [expandedBudgetCards, setExpandedBudgetCards] = useState({});
   const [allNdisItems, setAllNdisItems] = useState([]);
   const [copiedGoalKey, setCopiedGoalKey] = useState(null);
@@ -338,6 +347,10 @@ export default function ParticipantProfile() {
       const d = await participants.get(id);
       setData(d);
       onboarding.status(id).then(setOnboardingState).catch(() => setOnboardingState(null));
+      onboarding
+        .runStatus(id)
+        .then((r) => setOnboardingReadiness(r?.readiness || null))
+        .catch(() => setOnboardingReadiness(null));
       participants.budgetUtilization(id).then(setBudgetUtilization).catch(() => setBudgetUtilization(null));
       // Don't set editForm here - only set when user clicks Edit
     } catch (e) {
@@ -1031,6 +1044,49 @@ export default function ParticipantProfile() {
     }
   };
 
+  // Phase 4: issue a public self-service intake link and (when configured) email it.
+  const handleSendIntakeLink = async () => {
+    setIntakeIssuing(true);
+    setIntakeLinkError('');
+    setIntakeLinkResult(null);
+    try {
+      const res = await onboarding.issueIntakeToken(id);
+      setIntakeLinkResult(res);
+    } catch (err) {
+      setIntakeLinkError(err.message || 'Failed to issue intake link');
+    } finally {
+      setIntakeIssuing(false);
+    }
+  };
+
+  // Phase 2: one-click orchestrator handler. Calls the new /onboarding/run endpoint and
+  // refreshes the inline state so the user sees per-step results without a page reload.
+  const handleRunOnboarding = async () => {
+    setOrchestratorBusy(true);
+    setOrchestratorError('');
+    try {
+      const result = await onboarding.run(id);
+      setOrchestratorResult(result);
+      try {
+        const fresh = await onboarding.status(id);
+        setOnboardingState(fresh);
+      } catch {
+        /* keep previous state */
+      }
+      try {
+        const rs = await onboarding.runStatus(id);
+        setOnboardingReadiness(rs?.readiness || null);
+      } catch {
+        /* keep previous readiness */
+      }
+    } catch (err) {
+      // 409 responses include structured payload via fetchApi error message.
+      setOrchestratorError(err?.message || 'Onboarding run failed');
+    } finally {
+      setOrchestratorBusy(false);
+    }
+  };
+
   const handleAddContact = async (contactId, relationship) => {
     try {
       await participants.addContact(id, { contact_id: contactId, relationship });
@@ -1465,8 +1521,90 @@ export default function ParticipantProfile() {
             <div className="profile-card profile-card-full">
               <div className="profile-card-header">
                 <h3 className="profile-card-title">Onboarding</h3>
-                <Link to={`${pathPrefix}/onboarding/${id}`} className="btn btn-secondary">Open onboarding</Link>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleRunOnboarding}
+                    disabled={orchestratorBusy || onboardingReadiness?.ready === false}
+                    title={
+                      onboardingReadiness?.ready === false
+                        ? onboardingReadiness?.reason
+                        : 'Initialise onboarding, ensure templates are cloned, and generate every required form'
+                    }
+                  >
+                    {orchestratorBusy ? 'Running…' : 'Run onboarding'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleSendIntakeLink}
+                    disabled={intakeIssuing}
+                    title="Send the participant a private link so they can fill in their own intake details"
+                  >
+                    {intakeIssuing ? 'Sending…' : 'Send self-intake link'}
+                  </button>
+                  <Link to={`${pathPrefix}/onboarding/${id}`} className="btn btn-secondary">Open onboarding</Link>
+                </div>
               </div>
+              {intakeLinkResult && (
+                <div style={{ padding: '0.5rem 0.75rem', border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#166534', borderRadius: 6, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                  {intakeLinkResult.email_sent
+                    ? <>Intake link emailed. Expires {new Date(intakeLinkResult.expires_at).toLocaleDateString('en-AU')}. </>
+                    : <>Intake link generated (email not sent). Expires {new Date(intakeLinkResult.expires_at).toLocaleDateString('en-AU')}. </>}
+                  <a href={intakeLinkResult.url} target="_blank" rel="noreferrer">Copy / open link</a>
+                  {intakeLinkResult.email_error && (
+                    <div style={{ marginTop: '.25rem', color: '#991b1b' }}>Email failed: {intakeLinkResult.email_error}</div>
+                  )}
+                </div>
+              )}
+              {intakeLinkError && (
+                <div style={{ padding: '0.5rem 0.75rem', border: '1px solid #fecaca', background: '#fee2e2', color: '#991b1b', borderRadius: 6, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                  {intakeLinkError}
+                </div>
+              )}
+              {onboardingReadiness?.ready === false && (
+                <div
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    border: '1px solid #fcd34d',
+                    background: '#fef3c7',
+                    color: '#78350f',
+                    borderRadius: 6,
+                    marginBottom: '0.5rem',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <strong>Not ready:</strong> {onboardingReadiness.reason}
+                  {onboardingReadiness.code === 'NO_POLICY_PDFS' || onboardingReadiness.code === 'NO_DOCUMENT_PACK' ? (
+                    <>
+                      {' '}
+                      <Link to={`${pathPrefix}/forms`}>Open Forms to fix</Link>.
+                    </>
+                  ) : null}
+                </div>
+              )}
+              {orchestratorError && (
+                <div style={{ padding: '0.5rem 0.75rem', border: '1px solid #fecaca', background: '#fee2e2', color: '#991b1b', borderRadius: 6, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                  {orchestratorError}
+                </div>
+              )}
+              {orchestratorResult?.steps?.length > 0 && (
+                <details style={{ marginBottom: '0.5rem' }}>
+                  <summary style={{ cursor: 'pointer', fontSize: '0.88rem', color: '#334155' }}>
+                    Last run — {orchestratorResult.completed_steps}/{orchestratorResult.total_steps} steps OK · next: {orchestratorResult.next_action}
+                  </summary>
+                  <ul style={{ margin: '0.4rem 0 0', paddingLeft: '1.1rem', fontSize: '0.85rem' }}>
+                    {orchestratorResult.steps.map((s) => (
+                      <li key={s.name} style={{ color: s.ok ? '#15803d' : '#b91c1c' }}>
+                        {s.ok ? '✓' : '✗'} {s.name}
+                        {s.skipped ? ' (skipped)' : ''}
+                        {s.error ? ` — ${s.error}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               {onboardingState ? (
                 <div style={{ display: 'grid', gap: '0.35rem' }}>
                   <div><strong>Status:</strong> {onboardingState.status}</div>
@@ -1477,7 +1615,7 @@ export default function ParticipantProfile() {
                   </div>
                 </div>
               ) : (
-                <p style={{ color: '#64748b' }}>Onboarding has not been initialized yet.</p>
+                <p style={{ color: '#64748b' }}>Onboarding has not been initialised yet — click "Run onboarding" to do it in one step.</p>
               )}
             </div>
           </div>
@@ -2622,7 +2760,7 @@ export default function ParticipantProfile() {
           <h3>Service Agreement</h3>
           <p style={{ color: '#64748b', fontSize: '0.92rem', marginBottom: '1rem' }}>
             Generate a PDF from your organisation’s cloned template. Data is snapshotted at generation time. Ensure your org admin has set up the template under{' '}
-            <Link to="/settings">Settings → Form templates</Link>.
+            <Link to={`${pathPrefix}/forms`}>Forms → Services Agreement template</Link>.
           </p>
           {saMessage && (
             <div

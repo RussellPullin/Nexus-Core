@@ -5,11 +5,32 @@ import { getAssignedParticipantIds, canAccessParticipant } from '../middleware/r
 import { tenantParticipantClause } from '../lib/orgScopeSql.js';
 import {
   getSupportCoordLineItem,
-  roundToBillableUnits
+  roundToBillableUnits,
+  resolveCoordinatorTaskUnitPrice
 } from '../services/coordinatorTasks.service.js';
+import { createAuditEvent } from '../services/onboarding.service.js';
 
 const router = Router();
 const TASK_TYPES = ['email', 'meeting_f2f', 'meeting_non_f2f', 'phone', 'other'];
+
+function auditCaseEvent(req, { participantId, eventType, entityType, entityId, oldValue = null, newValue = null }) {
+  try {
+    createAuditEvent({
+      participantId: participantId || null,
+      actorType: 'user',
+      actorId: req.session?.user?.id || null,
+      eventType,
+      entityType,
+      entityId,
+      oldValue,
+      newValue,
+      sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
+      userAgent: req.headers['user-agent'] || null
+    });
+  } catch (e) {
+    console.warn('[coordinator-cases] audit event failed:', e?.message);
+  }
+}
 
 function getBillingIntervalForUser(userId) {
   const u = db.prepare('SELECT billing_interval_minutes FROM users WHERE id = ?').get(userId);
@@ -83,6 +104,14 @@ router.post('/', (req, res) => {
       JOIN participants p ON p.id = cc.participant_id
       WHERE cc.id = ?
     `).get(id);
+
+    auditCaseEvent(req, {
+      participantId: participant_id,
+      eventType: 'coordinator_case_created',
+      entityType: 'coordinator_case',
+      entityId: id,
+      newValue: { title: created.title, status: created.status, due_date: created.due_date }
+    });
 
     res.status(201).json(created);
   } catch (err) {
@@ -194,7 +223,8 @@ router.post('/:id/billable-tasks', (req, res) => {
       travel_km,
       travel_time_min,
       ndis_line_item_id,
-      case_task_id
+      case_task_id,
+      unit_price: bodyUnitPrice
     } = req.body;
 
     if (!staff_id || !task_type || !activity_date || duration_minutes == null) {
@@ -217,7 +247,9 @@ router.post('/:id/billable-tasks', (req, res) => {
     const interval = userId ? getBillingIntervalForUser(userId) : 15;
 
     const lineItem = ndis_line_item_id
-      ? db.prepare('SELECT id, rate FROM ndis_line_items WHERE id = ?').get(ndis_line_item_id)
+      ? db
+          .prepare('SELECT id, rate, rate_remote, rate_very_remote FROM ndis_line_items WHERE id = ?')
+          .get(ndis_line_item_id)
       : getSupportCoordLineItem(c.participant_id, activity_date);
 
     if (!lineItem) {
@@ -225,7 +257,7 @@ router.post('/:id/billable-tasks', (req, res) => {
     }
 
     const quantity = roundToBillableUnits(Number(duration_minutes) || 0, interval);
-    const unitPrice = lineItem.rate;
+    const unitPrice = resolveCoordinatorTaskUnitPrice(c.participant_id, lineItem, bodyUnitPrice);
 
     const taskId = uuidv4();
     db.prepare(`
@@ -263,6 +295,22 @@ router.post('/:id/billable-tasks', (req, res) => {
       LEFT JOIN ndis_line_items nli ON nli.id = ct.ndis_line_item_id
       WHERE ct.id = ?
     `).get(taskId);
+
+    auditCaseEvent(req, {
+      participantId: c.participant_id,
+      eventType: 'coordinator_billable_task_created',
+      entityType: 'coordinator_task',
+      entityId: taskId,
+      newValue: {
+        case_id: req.params.id,
+        case_task_id: case_task_id || null,
+        task_type: task.task_type,
+        activity_date: task.activity_date,
+        duration_minutes: task.duration_minutes,
+        unit_price: task.unit_price,
+        quantity: task.quantity
+      }
+    });
 
     res.status(201).json(task);
   } catch (err) {
@@ -307,6 +355,15 @@ router.put('/:id', (req, res) => {
       WHERE cc.id = ?
     `).get(req.params.id);
 
+    auditCaseEvent(req, {
+      participantId: c.participant_id,
+      eventType: 'coordinator_case_updated',
+      entityType: 'coordinator_case',
+      entityId: req.params.id,
+      oldValue: { title: c.title, status: c.status, due_date: c.due_date },
+      newValue: { title: updated.title, status: updated.status, due_date: updated.due_date }
+    });
+
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -326,6 +383,14 @@ router.delete('/:id', (req, res) => {
 
     db.prepare('DELETE FROM coordinator_case_tasks WHERE case_id = ?').run(req.params.id);
     db.prepare('DELETE FROM coordinator_cases WHERE id = ?').run(req.params.id);
+
+    auditCaseEvent(req, {
+      participantId: c.participant_id,
+      eventType: 'coordinator_case_deleted',
+      entityType: 'coordinator_case',
+      entityId: req.params.id,
+      oldValue: { title: c.title, status: c.status }
+    });
 
     res.status(204).send();
   } catch (err) {
@@ -382,7 +447,7 @@ router.post('/:id/tasks', (req, res) => {
         return res.status(400).json({ error: 'No NDIS line items found. Import the NDIS pricing catalogue in NDIS Pricing first.' });
       }
       const quantity = roundToBillableUnits(Number(billable_minutes) || 0, interval);
-      const unitPrice = lineItem.rate;
+      const unitPrice = resolveCoordinatorTaskUnitPrice(c.participant_id, lineItem);
       const includesTravel = (Number(travel_km) > 0 || Number(travel_time_min) > 0);
       const coordTaskId = uuidv4();
       db.prepare(`
@@ -413,6 +478,15 @@ router.post('/:id/tasks', (req, res) => {
     }
 
     const task = db.prepare('SELECT * FROM coordinator_case_tasks WHERE id = ?').get(taskId);
+
+    auditCaseEvent(req, {
+      participantId: c.participant_id,
+      eventType: 'coordinator_case_task_created',
+      entityType: 'coordinator_case_task',
+      entityId: taskId,
+      newValue: { case_id: req.params.id, title: task.title, status: task.status, due_date: task.due_date, billable_minutes: hasBillable ? Number(billable_minutes) : 0 }
+    });
+
     res.status(201).json(task);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -467,6 +541,16 @@ router.put('/:id/tasks/:taskId', (req, res) => {
     db.prepare('UPDATE coordinator_cases SET updated_at = datetime(\'now\') WHERE id = ?').run(req.params.id);
 
     const updated = db.prepare('SELECT * FROM coordinator_case_tasks WHERE id = ?').get(req.params.taskId);
+
+    auditCaseEvent(req, {
+      participantId: c.participant_id,
+      eventType: 'coordinator_case_task_updated',
+      entityType: 'coordinator_case_task',
+      entityId: req.params.taskId,
+      oldValue: { title: task.title, status: task.status, due_date: task.due_date },
+      newValue: { title: updated.title, status: updated.status, due_date: updated.due_date }
+    });
+
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -496,6 +580,16 @@ router.put('/:id/tasks/:taskId/complete', (req, res) => {
     db.prepare('UPDATE coordinator_cases SET updated_at = datetime(\'now\') WHERE id = ?').run(req.params.id);
 
     const updated = db.prepare('SELECT * FROM coordinator_case_tasks WHERE id = ?').get(req.params.taskId);
+
+    auditCaseEvent(req, {
+      participantId: c.participant_id,
+      eventType: 'coordinator_case_task_completed',
+      entityType: 'coordinator_case_task',
+      entityId: req.params.taskId,
+      oldValue: { status: task.status },
+      newValue: { status: 'completed', completed_at: now }
+    });
+
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -518,6 +612,14 @@ router.delete('/:id/tasks/:taskId', (req, res) => {
 
     db.prepare('DELETE FROM coordinator_case_tasks WHERE id = ? AND case_id = ?').run(req.params.taskId, req.params.id);
     db.prepare('UPDATE coordinator_cases SET updated_at = datetime(\'now\') WHERE id = ?').run(req.params.id);
+
+    auditCaseEvent(req, {
+      participantId: c.participant_id,
+      eventType: 'coordinator_case_task_deleted',
+      entityType: 'coordinator_case_task',
+      entityId: req.params.taskId,
+      oldValue: { title: task.title, status: task.status }
+    });
 
     res.status(204).send();
   } catch (err) {

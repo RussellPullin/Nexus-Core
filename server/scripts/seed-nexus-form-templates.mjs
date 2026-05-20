@@ -16,5 +16,7 @@ const db = new Database(dbPath);
 const { seedNexusFormTemplateMastersIfNeeded } = await import('../src/services/nexusFormTemplateSeed.service.js');
 
 const r = seedNexusFormTemplateMastersIfNeeded(db);
-console.log(r.seeded ? `Seeded master: ${r.master_id}` : `Skip (exists): ${r.master_id}`);
+if (r.seeded) console.log(`Seeded master: ${r.master_id}`);
+else if (r.refreshed) console.log(`Refreshed master definition: ${r.master_id}`);
+else console.log(`Up to date: ${r.master_id}`);
 db.close();

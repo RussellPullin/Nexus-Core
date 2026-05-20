@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useParams } from 'react-router-dom';
 import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { useAuth } from '../context/AuthContext';
-import { staff, learning, settings, auth, microsoftDrive } from '../lib/api';
+import { staff, learning, settings, auth, microsoftDrive, organisations } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
 import { formatDate } from '../lib/dateUtils';
 
@@ -507,6 +507,7 @@ export default function SettingsPage() {
         productSurface === PRODUCT_AGENCY &&
         Boolean(user?.can_use_agency) &&
         Boolean(user?.agency_enabled) && <ShifterIntegrationCard />}
+      {canManageUsers && <OrgProfileCard />}
       {canManageUsers && <BusinessSetup />}
       <LearningSettings />
       </div>
@@ -884,7 +885,7 @@ function BusinessSetup() {
 
   useEffect(() => {
     const xero = searchParams.get('xero');
-    const adobe = searchParams.get('adobe_sign');
+    const dropbox = searchParams.get('dropbox_sign');
     const message = searchParams.get('message');
     if (xero === 'linked') {
       setMsg('Successfully linked to Xero.');
@@ -893,12 +894,12 @@ function BusinessSetup() {
     } else if (xero === 'error') {
       setMsg('Xero connection failed: ' + (message || 'Unknown error'));
       setSearchParams({}, { replace: true });
-    } else if (adobe === 'linked') {
-      setMsg('Successfully linked to Adobe Acrobat Sign.');
+    } else if (dropbox === 'linked') {
+      setMsg('Successfully linked to Dropbox Sign.');
       setSearchParams({}, { replace: true });
       settings.getBusiness().then(setBiz).catch(() => {});
-    } else if (adobe === 'error') {
-      setMsg('Adobe Sign connection failed: ' + (message || 'Unknown error'));
+    } else if (dropbox === 'error') {
+      setMsg('Dropbox Sign connection failed: ' + (message || 'Unknown error'));
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -979,7 +980,7 @@ function BusinessSetup() {
       <summary className="settings-collapsible-summary">
         <span className="settings-collapsible-summary-main">
           <span className="settings-collapsible-title">Business setup</span>
-          <span className="settings-collapsible-hint">Company details, logo, bank details, Xero, Adobe Sign</span>
+          <span className="settings-collapsible-hint">Company details, logo, bank details, Xero, Dropbox Sign</span>
         </span>
       </summary>
       <div className="settings-collapsible-body">
@@ -1240,57 +1241,46 @@ function BusinessSetup() {
         </div>
       )}
 
-      <h4 className="settings-subsection-title">Signatures – Adobe Acrobat Sign</h4>
-      <p className="settings-desc">
-        Connect once per Nexus organisation. An admin or delegate signs in to Acrobat Sign and approves access so participant onboarding agreements are sent from{' '}
-        <strong>your</strong> Adobe account (API calls use the correct regional host for that account). This replaces past setups that used a single access token in server env
-        only—both still work if your host sets{' '}
-        <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>ADOBE_SIGN_ACCESS_TOKEN</code>.
+      <h4 className=”settings-subsection-title”>Signatures – Dropbox Sign</h4>
+      <p className=”settings-desc”>
+        Connect your Dropbox Sign account so participant onboarding agreements are sent for e-signature automatically.
+        Use an API key for simple setup, or OAuth to connect a specific Dropbox Sign account per organisation.
       </p>
-      {biz.adobe_sign_linked ? (
-        <div style={{ padding: '1rem', background: '#f0f9ff', border: '1px solid #7dd3fc', borderRadius: 8, marginBottom: '1rem' }}>
-          <strong style={{ color: '#0369a1' }}>Adobe Sign is connected</strong>
-          {biz.adobe_sign_web_access_point ? (
-            <span style={{ marginLeft: '0.5rem', color: '#0c4a6e', fontSize: '0.9rem' }}>({biz.adobe_sign_web_access_point})</span>
-          ) : null}
-          <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', color: '#0369a1' }}>
-            {biz.adobe_sign_oauth_linked
-              ? 'OAuth tokens for this organisation are stored on the server and refreshed automatically.'
-              : 'Using access token from server environment (hosting configuration).'}
+      {biz.dropbox_sign_linked ? (
+        <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: '1rem' }}>
+          <strong style={{ color: '#166534' }}>Dropbox Sign is connected</strong>
+          <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', color: '#166534' }}>
+            {biz.dropbox_sign_oauth_linked
+              ? 'OAuth tokens for this organisation are stored and refreshed automatically.'
+              : 'Using API key from server environment.'}
           </p>
-          {biz.adobe_sign_oauth_linked ? (
+          {biz.dropbox_sign_oauth_linked ? (
             <div style={{ marginTop: '0.5rem' }}>
               <button
-                type="button"
-                className="btn btn-secondary"
+                type=”button”
+                className=”btn btn-secondary”
                 onClick={async () => {
                   setMsg('');
                   try {
-                    await settings.adobeSignDisconnect();
+                    await settings.dropboxSignDisconnect();
                     const fresh = await settings.getBusiness();
                     setBiz(fresh);
-                    setMsg('Disconnected from Adobe Sign.');
+                    setMsg('Disconnected from Dropbox Sign.');
                   } catch (err) {
                     setMsg(err?.message || 'Failed to disconnect');
                   }
                 }}
               >
-                Disconnect Adobe Sign
+                Disconnect Dropbox Sign
               </button>
             </div>
-          ) : biz.adobe_sign_via_host_token_only ? (
-            <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', color: '#0c4a6e' }}>
-              To switch to “Connect to Adobe Sign” for this org, remove{' '}
-              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>ADOBE_SIGN_ACCESS_TOKEN</code> from the
-              server and use the button below, or keep using the host token.
-            </p>
           ) : null}
         </div>
       ) : (
         <div style={{ marginBottom: '1rem' }}>
-          {!biz.adobe_sign_oauth_via_env && (
+          {!biz.dropbox_sign_oauth_via_env && (
             <p
-              className="settings-desc"
+              className=”settings-desc”
               style={{
                 marginBottom: '0.75rem',
                 color: '#b45309',
@@ -1300,20 +1290,22 @@ function BusinessSetup() {
                 borderRadius: 8,
               }}
             >
-              One-click Adobe Sign is not enabled on this server yet. Your administrator adds{' '}
-              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>ADOBE_SIGN_CLIENT_ID</code> and{' '}
-              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>ADOBE_SIGN_CLIENT_SECRET</code> to the API
-              host, registers the callback URL in the Acrobat Sign API application, and restarts the server.
+              To enable one-click connect, add{' '}
+              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>DROPBOX_SIGN_CLIENT_ID</code> and{' '}
+              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>DROPBOX_SIGN_CLIENT_SECRET</code> to the
+              server. Alternatively, set{' '}
+              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>DROPBOX_SIGN_API_KEY</code> for simple
+              API key auth (no OAuth needed).
             </p>
           )}
           <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!biz.adobe_sign_oauth_via_env}
+            type=”button”
+            className=”btn btn-primary”
+            disabled={!biz.dropbox_sign_oauth_via_env}
             onClick={async () => {
               setMsg('');
               try {
-                const { redirectUrl } = await settings.adobeSignConnect();
+                const { redirectUrl } = await settings.dropboxSignConnect();
                 if (redirectUrl) window.location.href = redirectUrl;
                 else setMsg('No redirect URL returned.');
               } catch (err) {
@@ -1321,7 +1313,7 @@ function BusinessSetup() {
               }
             }}
           >
-            Connect to Adobe Sign
+            Connect to Dropbox Sign
           </button>
         </div>
       )}
@@ -1333,10 +1325,10 @@ function BusinessSetup() {
             msg.includes('uploaded') ||
             msg.includes('removed') ||
             msg.includes('Disconnected') ||
-            msg.includes('Disconnected from Adobe') ||
+            msg.includes('Disconnected from Dropbox') ||
             msg.includes('created in Xero') ||
             msg.includes('Invoice #') ||
-            msg.includes('Successfully linked to Adobe') ||
+            msg.includes('Successfully linked to Dropbox') ||
             msg.includes('Successfully linked to Xero')
               ? 'settings-success'
               : 'settings-error'
@@ -1511,5 +1503,231 @@ function LearningSettings() {
       )}
       </div>
     </details>
+  );
+}
+
+/**
+ * Phase 1: Org profile re-edit card.
+ * Lets admins update the same fields collected by the setup wizard and re-upload a new logo.
+ * Saves push to `/api/organisations/me/profile`, the canonical source for every document renderer.
+ */
+function OrgProfileCard() {
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [data, setData] = useState({
+    legal_name: '',
+    trading_name: '',
+    abn: '',
+    acn: '',
+    ndis_reg_number: '',
+    email: '',
+    phone: '',
+    website: '',
+    street_address: '',
+    postal_address: '',
+    primary_contact_name: '',
+    primary_contact_role: '',
+    primary_contact_email: '',
+    primary_contact_phone: '',
+    default_signatory_name: '',
+    default_signatory_role: '',
+    default_signatory_email: '',
+    bank_name: '',
+    bsb: '',
+    account_name: '',
+    account_number: '',
+    xero_short_code: '',
+    brand_primary_color: '#1d4ed8',
+    brand_accent_color: '#0ea5e9',
+    letterhead_footer_text: ''
+  });
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPath, setLogoPath] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    organisations
+      .getMyProfile()
+      .then((res) => {
+        if (cancelled) return;
+        const o = res?.org || {};
+        const b = res?.branding || {};
+        const s = res?.signatory || {};
+        const k = res?.bank || {};
+        const pc = o?.primaryContact || {};
+        setData({
+          legal_name: o.legalName || '',
+          trading_name: o.tradingName || o.name || '',
+          abn: o.abn || '',
+          acn: o.acn || '',
+          ndis_reg_number: o.ndisProviderNumber || '',
+          email: o.email || '',
+          phone: o.phone || '',
+          website: o.website || '',
+          street_address: o.streetAddress || '',
+          postal_address: o.postalAddress || '',
+          primary_contact_name: pc.name || '',
+          primary_contact_role: pc.role || '',
+          primary_contact_email: pc.email || '',
+          primary_contact_phone: pc.phone || '',
+          default_signatory_name: s.name || '',
+          default_signatory_role: s.role || '',
+          default_signatory_email: s.email || '',
+          bank_name: k.name || '',
+          bsb: k.bsb || '',
+          account_name: k.accountName || '',
+          account_number: k.accountNumber || '',
+          xero_short_code: k.xeroShortCode || '',
+          brand_primary_color: b.primaryColor || '#1d4ed8',
+          brand_accent_color: b.accentColor || '#0ea5e9',
+          letterhead_footer_text: b.letterheadFooterText || ''
+        });
+        setLogoPath(b.logoPath || '');
+      })
+      .catch((e) => setError(e.message || 'Could not load org profile'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const set = (key, value) => setData((d) => ({ ...d, [key]: value }));
+
+  const handleSave = async (e) => {
+    e?.preventDefault();
+    setError('');
+    setMessage('');
+    setBusy(true);
+    try {
+      if (logoFile) {
+        const up = await organisations.uploadMyLogo(logoFile);
+        if (up?.logo_path) setLogoPath(up.logo_path);
+        setLogoFile(null);
+      }
+      await organisations.updateMyProfile(data);
+      setMessage('Saved — branding will appear on the next document you generate.');
+    } catch (err) {
+      setError(err.message || 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReseed = async () => {
+    setError('');
+    setMessage('');
+    setBusy(true);
+    try {
+      const res = await organisations.seedTemplates();
+      setMessage(`Re-synced templates — ${res.nexus_masters_cloned} structured + ${res.library_masters_cloned} library masters now cloned for this org.`);
+    } catch (err) {
+      setError(err.message || 'Re-seed failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <details className="card settings-collapsible">
+        <summary className="settings-collapsible-summary">
+          <span className="settings-collapsible-summary-main">
+            <span className="settings-collapsible-title">Organisation profile</span>
+            <span className="settings-collapsible-hint">Loading…</span>
+          </span>
+        </summary>
+      </details>
+    );
+  }
+
+  return (
+    <details className="card settings-collapsible">
+      <summary className="settings-collapsible-summary">
+        <span className="settings-collapsible-summary-main">
+          <span className="settings-collapsible-title">Organisation profile &amp; branding</span>
+          <span className="settings-collapsible-hint">
+            ABN, NDIS number, logo, signatory, banking — used on every document Nexus generates
+          </span>
+        </span>
+      </summary>
+      <div className="settings-collapsible-body">
+        {error && <div className="settings-error">{error}</div>}
+        {message && <div className="settings-success">{message}</div>}
+        <form onSubmit={handleSave} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.5rem .8rem' }}>
+          <OrgField label="Trading name" value={data.trading_name} onChange={(v) => set('trading_name', v)} />
+          <OrgField label="Legal name" value={data.legal_name} onChange={(v) => set('legal_name', v)} />
+          <OrgField label="ABN" value={data.abn} onChange={(v) => set('abn', v)} />
+          <OrgField label="ACN" value={data.acn} onChange={(v) => set('acn', v)} />
+          <OrgField label="NDIS provider number" value={data.ndis_reg_number} onChange={(v) => set('ndis_reg_number', v)} />
+          <OrgField label="Org email" value={data.email} onChange={(v) => set('email', v)} type="email" />
+          <OrgField label="Phone" value={data.phone} onChange={(v) => set('phone', v)} />
+          <OrgField label="Website" value={data.website} onChange={(v) => set('website', v)} />
+          <OrgField label="Street address" value={data.street_address} onChange={(v) => set('street_address', v)} />
+          <OrgField label="Postal address" value={data.postal_address} onChange={(v) => set('postal_address', v)} />
+
+          <SectionTitle text="Primary contact" />
+          <OrgField label="Name" value={data.primary_contact_name} onChange={(v) => set('primary_contact_name', v)} />
+          <OrgField label="Role" value={data.primary_contact_role} onChange={(v) => set('primary_contact_role', v)} />
+          <OrgField label="Email" value={data.primary_contact_email} onChange={(v) => set('primary_contact_email', v)} type="email" />
+          <OrgField label="Phone" value={data.primary_contact_phone} onChange={(v) => set('primary_contact_phone', v)} />
+
+          <SectionTitle text="Default signatory (used on signed documents)" />
+          <OrgField label="Name" value={data.default_signatory_name} onChange={(v) => set('default_signatory_name', v)} />
+          <OrgField label="Role" value={data.default_signatory_role} onChange={(v) => set('default_signatory_role', v)} />
+          <OrgField label="Email" value={data.default_signatory_email} onChange={(v) => set('default_signatory_email', v)} type="email" />
+
+          <SectionTitle text="Branding" />
+          <div style={{ gridColumn: '1 / span 2' }}>
+            <label style={{ display: 'block', fontSize: '.8rem', color: '#475569', marginBottom: '.25rem' }}>
+              Logo {logoPath ? <span style={{ color: '#64748b' }}>(current: {logoPath.split('/').pop()})</span> : ''}
+            </label>
+            <input type="file" accept="image/*" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} />
+          </div>
+          <OrgField label="Primary colour" value={data.brand_primary_color} onChange={(v) => set('brand_primary_color', v)} type="color" />
+          <OrgField label="Accent colour" value={data.brand_accent_color} onChange={(v) => set('brand_accent_color', v)} type="color" />
+          <div style={{ gridColumn: '1 / span 2' }}>
+            <OrgField label="Letterhead footer text" value={data.letterhead_footer_text} onChange={(v) => set('letterhead_footer_text', v)} />
+          </div>
+
+          <SectionTitle text="Banking (invoices)" />
+          <OrgField label="Bank name" value={data.bank_name} onChange={(v) => set('bank_name', v)} />
+          <OrgField label="BSB" value={data.bsb} onChange={(v) => set('bsb', v)} />
+          <OrgField label="Account name" value={data.account_name} onChange={(v) => set('account_name', v)} />
+          <OrgField label="Account number" value={data.account_number} onChange={(v) => set('account_number', v)} />
+          <OrgField label="Xero short code" value={data.xero_short_code} onChange={(v) => set('xero_short_code', v)} />
+
+          <div style={{ gridColumn: '1 / span 2', display: 'flex', gap: '.5rem', marginTop: '.75rem' }}>
+            <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+            <button type="button" className="btn btn-secondary" onClick={handleReseed} disabled={busy}>
+              Re-sync master templates
+            </button>
+          </div>
+        </form>
+      </div>
+    </details>
+  );
+}
+
+function OrgField({ label, value, onChange, type = 'text' }) {
+  return (
+    <label style={{ display: 'block', fontSize: '.8rem', color: '#475569' }}>
+      <div style={{ marginBottom: '.2rem' }}>{label}</div>
+      <input
+        type={type}
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ width: '100%', padding: '.4rem .55rem', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '.9rem' }}
+      />
+    </label>
+  );
+}
+
+function SectionTitle({ text }) {
+  return (
+    <div style={{ gridColumn: '1 / span 2', fontSize: '.75rem', fontWeight: 700, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '.04em', marginTop: '.5rem' }}>
+      {text}
+    </div>
   );
 }

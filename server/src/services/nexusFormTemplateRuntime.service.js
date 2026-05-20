@@ -38,16 +38,34 @@ export function enrichVariablesFromOrgProfile(variableMap, organisationRow, busi
   const org = organisationRow || {};
   const biz = businessSettingsRow || {};
 
-  const trading = String(biz.company_name || '').trim() || String(org.name || '').trim();
-  const legal = String(org.name || '').trim() || trading;
+  // Phase 1: prefer the canonical organisations.* fields populated by the org setup wizard,
+  // then fall back to legacy business_settings rows for back-compat with older deployments.
+  const trading = String(org.trading_name || org.name || biz.company_name || '').trim();
+  const legal = String(org.legal_name || org.name || biz.company_name || '').trim() || trading;
 
-  out.org_legal_name = legal;
-  out.org_trading_name = trading;
-  out.org_abn = String(biz.company_abn || org.abn || '').trim();
-  out.org_address = String(biz.company_address || org.address || '').trim();
-  out.org_email = String(biz.company_email || org.email || '').trim();
-  out.org_phone = String(biz.company_phone || org.phone || '').trim();
-  out.org_contact_person = String(contactPersonName || '').trim();
+  if (!String(out.org_legal_name || '').trim()) out.org_legal_name = legal;
+  if (!String(out.org_trading_name || '').trim()) out.org_trading_name = trading;
+  if (!String(out.org_abn || '').trim()) out.org_abn = String(org.abn || biz.company_abn || '').trim();
+  if (!String(out.org_acn || '').trim()) out.org_acn = String(org.acn || '').trim();
+  if (!String(out.org_ndis_provider_number || '').trim())
+    out.org_ndis_provider_number = String(org.ndis_reg_number || '').trim();
+  if (!String(out.org_address || '').trim())
+    out.org_address = String(org.address || org.street_address || biz.company_address || '').trim();
+  if (!String(out.org_postal_address || '').trim())
+    out.org_postal_address = String(org.postal_address || org.address || '').trim();
+  if (!String(out.org_email || '').trim()) out.org_email = String(org.email || biz.company_email || '').trim();
+  if (!String(out.org_phone || '').trim()) out.org_phone = String(org.phone || biz.company_phone || '').trim();
+  if (!String(out.org_website || '').trim()) out.org_website = String(org.website || '').trim();
+  if (!String(out.org_contact_person || '').trim())
+    out.org_contact_person = String(org.primary_contact_name || contactPersonName || '').trim();
+  if (!String(out.org_signatory_name || '').trim())
+    out.org_signatory_name = String(org.default_signatory_name || org.primary_contact_name || '').trim();
+  if (!String(out.org_signatory_role || '').trim())
+    out.org_signatory_role = String(org.default_signatory_role || org.primary_contact_role || '').trim();
+  if (!String(out.org_bank_name || '').trim()) out.org_bank_name = String(org.bank_name || '').trim();
+  if (!String(out.org_bsb || '').trim()) out.org_bsb = String(org.bsb || '').trim();
+  if (!String(out.org_account_name || '').trim()) out.org_account_name = String(org.account_name || '').trim();
+  if (!String(out.org_account_number || '').trim()) out.org_account_number = String(org.account_number || '').trim();
 
   if (!String(out.complaints_email || '').trim()) {
     out.complaints_email = out.org_email;

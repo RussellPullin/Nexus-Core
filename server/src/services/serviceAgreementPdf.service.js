@@ -19,7 +19,12 @@ function hexToRgb(hex) {
   };
 }
 
-function resolveLogoFullPath(branding) {
+function resolveLogoFullPath(branding, org) {
+  // Phase 1: prefer the org-level logo uploaded via the setup wizard.
+  if (org?.logo_path) {
+    const direct = String(org.logo_path);
+    if (existsSync(direct)) return direct;
+  }
   const rel = branding?.logo_relative_path;
   if (!rel) return null;
   const trimmed = String(rel).trim();
@@ -107,17 +112,27 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
       doc.fontSize(9).text(ver, margin, 38, { width: pageWidth - 2 * margin, align: 'center' });
     }
 
-    const logoPath = resolveLogoFullPath(branding);
+    const logoPath = resolveLogoFullPath(branding, snapshot.org);
     if (logoPath) {
       try {
         doc.image(logoPath, margin, 8, { height: 40 });
       } catch {
         /* skip corrupt logo */
       }
+    } else {
+      doc.strokeColor('#cbd5e1').lineWidth(0.75);
+      doc.rect(margin, 8, 88, 40).stroke();
+      doc.fillColor('#94a3b8').fontSize(7).text('Logo', margin + 4, 26, { width: 80, align: 'center' });
     }
     doc.restore();
 
     y = 68;
+    const orgSubtitle = [snapshot.org?.trading_name, snapshot.org?.legal_name].filter(Boolean).join(' · ');
+    if (orgSubtitle) {
+      doc.fillColor('#475569').font(font).fontSize(9);
+      doc.text(orgSubtitle, margin, y, { width: pageWidth - 2 * margin, align: 'center' });
+      y += 16;
+    }
 
     const sectionBar = (label) => {
       y = ensureSpace(doc, y, 36, margin, pageMaxY());
@@ -148,38 +163,46 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
     sectionBar(snapshot.section_titles?.s1 || 'Section 1 — Parties to this Agreement');
     const pl = snapshot.parties_labels || {};
     bodyPara(`${pl.service_provider || 'Service Provider'}`, { size: 10 });
-    rowLine('Legal name', snapshot.org?.legal_name);
+    rowLine('Organisation', snapshot.org?.legal_name);
     rowLine('ABN', snapshot.org?.abn);
     rowLine('Address', snapshot.org?.address);
     rowLine('Email', snapshot.org?.email);
+    rowLine('Contact', snapshot.org?.contact_person);
     rowLine('Phone', snapshot.org?.phone);
-    rowLine('Contact person', snapshot.org?.contact_person);
 
     y += 4;
     bodyPara(`${pl.client_details || 'Client Details'}`, { size: 10 });
     const p = snapshot.participant || {};
-    rowLine('Name', p.name);
+    rowLine('First name', p.first_name);
+    rowLine('Last name', p.last_name);
     rowLine('Phone', p.phone);
     rowLine('Mobile', p.mobile);
     rowLine('Email', p.email);
     rowLine('Date of birth', p.date_of_birth_display);
     rowLine('NDIS number', p.ndis_number);
-    rowLine('Address', p.address);
-    rowLine('Plan start', p.plan_start);
-    rowLine('Plan expiry', p.plan_expiry);
+    rowLine('Street address', p.street_address);
+    rowLine('Suburb', p.suburb);
+    rowLine('State', p.state);
+    rowLine('Postal code', p.postcode);
+    rowLine('Plan start date', p.plan_start);
+    rowLine('Plan expiry date', p.plan_expiry);
 
     const rep = snapshot.representative;
-    if (rep && (rep.name || rep.phone || rep.email)) {
+    if (rep && (rep.name || rep.first_name || rep.last_name || rep.phone || rep.email)) {
       y += 4;
       bodyPara(`${pl.representative || 'Representative / Advocate'}`, { size: 10 });
-      rowLine('Name', rep.name);
-      rowLine('Relationship', rep.relationship);
+      rowLine('First name', rep.first_name);
+      rowLine('Last name', rep.last_name);
       rowLine('Phone', rep.phone);
+      rowLine('Mobile', rep.mobile);
       rowLine('Email', rep.email);
+      rowLine('Relationship to client', rep.relationship);
     }
 
     y += 4;
     bodyPara(`${pl.invoicing_funding || 'Invoicing / Funding Management'}`, { size: 10 });
+    const invOrg = snapshot.org?.trading_name || snapshot.org?.legal_name || 'The provider';
+    bodyPara(`${invOrg} will invoice:`, { size: 9 });
     rowLine('Arrangement', snapshot.funding?.label);
 
     const fm = snapshot.funding?.plan_manager;
@@ -213,22 +236,27 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
       const tableTop = y;
       doc.fontSize(8).font('Helvetica-Bold');
       doc.fillColor('#0f172a');
-      const col = [margin, margin + 180, margin + 310, margin + 380, margin + 450];
-      doc.text('Description', col[0], tableTop, { width: 170 });
-      doc.text('Hours', col[1], tableTop, { width: 60 });
-      doc.text('Rate', col[2], tableTop, { width: 60 });
-      doc.text('Budget', col[3], tableTop, { width: 60 });
-      doc.text('Notes', col[4], tableTop, { width: margin + pageWidth - col[4] - margin });
+      const col = [margin, margin + 155, margin + 230, margin + 330, margin + 410];
+      doc.text('Support / Service', col[0], tableTop, { width: 145 });
+      doc.text('Price', col[1], tableTop, { width: 68 });
+      doc.text('Appointment times', col[2], tableTop, { width: 92 });
+      doc.text('Duration', col[3], tableTop, { width: 72 });
+      doc.text('Total', col[4], tableTop, { width: pageWidth - col[4] - margin });
       y = tableTop + 14;
       doc.font(font).fontSize(8);
       rows.forEach((r) => {
         const desc = r.description || '';
-        const h = Math.max(14, doc.heightOfString(desc, { width: 170 }));
+        const h = Math.max(
+          14,
+          doc.heightOfString(desc, { width: 145 }),
+          doc.heightOfString(r.appointment_times || '', { width: 92 })
+        );
         y = ensureSpace(doc, y, h + 4, margin, pageMaxY());
-        doc.text(desc, col[0], y, { width: 170 });
-        doc.text(r.hours || '', col[1], y, { width: 60 });
-        doc.text(r.rate || '', col[2], y, { width: 60 });
-        doc.text(r.budget || '', col[3], y, { width: 60 });
+        doc.text(desc, col[0], y, { width: 145 });
+        doc.text(r.price || r.rate || '', col[1], y, { width: 68 });
+        doc.text(r.appointment_times || '', col[2], y, { width: 92 });
+        doc.text(r.duration || r.hours || '', col[3], y, { width: 72 });
+        doc.text(r.budget || r.line_total_display || '', col[4], y, { width: pageWidth - col[4] - margin });
         y += h + 4;
       });
       y += 4;

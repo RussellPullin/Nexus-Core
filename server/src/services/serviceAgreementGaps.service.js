@@ -29,14 +29,9 @@ export function computeServiceAgreementGaps(params) {
       id: 'participant_name',
       severity: 'blocking',
       title: 'Participant full name',
-      description: 'The agreement cannot list a client without a name.',
-      section: 'Section 1 — Client details',
-      fix: {
-        kind: 'participant_profile',
-        tab: 'overview',
-        anchor_id: 'sa-gap-edit-name',
-        open_edit: true
-      }
+      description: 'The agreement cannot list a participant without a name.',
+      section: 'Section 1 — Participant details',
+      fix: { kind: 'onboarding_intake', field: 'first_name' }
     });
   }
 
@@ -133,9 +128,9 @@ export function computeServiceAgreementGaps(params) {
       id: 'participant_ndis',
       severity: 'warning',
       title: 'NDIS number',
-      description: 'NDIS number will be blank for the client.',
-      section: 'Section 1 — Client details',
-      fix: { kind: 'participant_profile', tab: 'overview', anchor_id: 'sa-gap-key-information', open_edit: true }
+      description: 'NDIS number will be blank for the participant.',
+      section: 'Section 1 — Participant details',
+      fix: { kind: 'onboarding_intake', field: 'ndis_number' }
     });
   }
 
@@ -145,8 +140,8 @@ export function computeServiceAgreementGaps(params) {
       severity: 'warning',
       title: 'Participant address',
       description: 'Address will be blank (add in profile or intake).',
-      section: 'Section 1 — Client details',
-      fix: { kind: 'participant_profile', tab: 'overview', anchor_id: 'sa-gap-address', open_edit: true }
+      section: 'Section 1 — Participant details',
+      fix: { kind: 'onboarding_intake', field: 'street_address' }
     });
   }
 
@@ -156,8 +151,8 @@ export function computeServiceAgreementGaps(params) {
       severity: 'warning',
       title: 'Participant phone',
       description: 'Phone will be blank.',
-      section: 'Section 1 — Client details',
-      fix: { kind: 'participant_profile', tab: 'overview', anchor_id: 'sa-gap-participant-details', open_edit: true }
+      section: 'Section 1 — Participant details',
+      fix: { kind: 'onboarding_intake', field: 'phone' }
     });
   }
 
@@ -167,8 +162,8 @@ export function computeServiceAgreementGaps(params) {
       severity: 'warning',
       title: 'Participant email',
       description: 'Email will be blank.',
-      section: 'Section 1 — Client details',
-      fix: { kind: 'participant_profile', tab: 'overview', anchor_id: 'sa-gap-participant-details', open_edit: true }
+      section: 'Section 1 — Participant details',
+      fix: { kind: 'onboarding_intake', field: 'email' }
     });
   }
 

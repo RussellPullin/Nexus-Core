@@ -1243,7 +1243,9 @@ try {
       'xero_tenant_name',
       'adobe_sign_refresh_token',
       'adobe_sign_api_access_point',
-      'adobe_sign_web_access_point'
+      'adobe_sign_web_access_point',
+      'dropbox_sign_access_token',
+      'dropbox_sign_refresh_token'
     ]) {
       businessCols = db.prepare("PRAGMA table_info(business_settings)").all();
       if (!businessCols.some((c) => c.name === col)) {
@@ -1778,6 +1780,156 @@ try {
     `);
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('organization_onedrive_link migration:', e.message);
+  }
+
+  // Phase 1: Universal org profile fields used by every document/register renderer.
+  // Stored on `organisations` so getOrgRenderContext can build one canonical object.
+  try {
+    const orgProfileCols = [
+      ['legal_name', 'TEXT'],
+      ['trading_name', 'TEXT'],
+      ['acn', 'TEXT'],
+      ['postal_address', 'TEXT'],
+      ['street_address', 'TEXT'],
+      ['logo_path', 'TEXT'],
+      ['primary_contact_name', 'TEXT'],
+      ['primary_contact_role', 'TEXT'],
+      ['primary_contact_email', 'TEXT'],
+      ['primary_contact_phone', 'TEXT'],
+      ['default_signatory_name', 'TEXT'],
+      ['default_signatory_role', 'TEXT'],
+      ['default_signatory_email', 'TEXT'],
+      ['bank_name', 'TEXT'],
+      ['bsb', 'TEXT'],
+      ['account_name', 'TEXT'],
+      ['account_number', 'TEXT'],
+      ['xero_short_code', 'TEXT'],
+      ['brand_primary_color', 'TEXT'],
+      ['brand_accent_color', 'TEXT'],
+      ['letterhead_footer_text', 'TEXT'],
+      ['setup_completed_at', 'TEXT']
+    ];
+    const existing = db.prepare('PRAGMA table_info(organisations)').all();
+    const existingNames = new Set(existing.map((c) => c.name));
+    for (const [name, type] of orgProfileCols) {
+      if (!existingNames.has(name)) {
+        db.exec(`ALTER TABLE organisations ADD COLUMN ${name} ${type}`);
+      }
+    }
+  } catch (e) {
+    if (!e.message?.includes('duplicate column')) console.warn('organisations profile fields migration:', e.message);
+  }
+
+  // Phase 7: NDIS Practice Standards mapping. Pre-seeded reference of each standard +
+  // sub-element, with a join row per (org, standard) so the compliance dashboard can
+  // surface evidence pointers (policy slug + register slug + last review date).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ndis_practice_standards (
+        id TEXT PRIMARY KEY,
+        module TEXT NOT NULL,
+        standard_code TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        intent TEXT,
+        evidence_required_json TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_ndis_practice_standards_module ON ndis_practice_standards(module);
+
+      CREATE TABLE IF NOT EXISTS org_practice_standard_status (
+        id TEXT PRIMARY KEY,
+        organisation_id TEXT NOT NULL,
+        standard_id TEXT NOT NULL,
+        evidence_policy_slug TEXT,
+        evidence_register_slug TEXT,
+        last_reviewed_at TEXT,
+        review_due_at TEXT,
+        status TEXT DEFAULT 'unreviewed',
+        notes TEXT,
+        updated_by_user_id TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(organisation_id, standard_id),
+        FOREIGN KEY (organisation_id) REFERENCES organisations(id) ON DELETE CASCADE,
+        FOREIGN KEY (standard_id) REFERENCES ndis_practice_standards(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_org_practice_status_org ON org_practice_standard_status(organisation_id);
+    `);
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('practice standards migration:', e.message);
+  }
+
+  // Phase 4: Public participant self-service intake tokens. Each row issues a unique URL
+  // that the participant follows to fill in their own details before a coordinator runs
+  // onboarding. Tokens are single-use and expire; we store a hash, never the raw value.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS participant_intake_tokens (
+        id TEXT PRIMARY KEY,
+        participant_id TEXT NOT NULL,
+        organisation_id TEXT,
+        token_hash TEXT NOT NULL UNIQUE,
+        issued_by_user_id TEXT,
+        issued_at TEXT DEFAULT (datetime('now')),
+        expires_at TEXT NOT NULL,
+        last_used_at TEXT,
+        completed_at TEXT,
+        status TEXT DEFAULT 'active',
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
+        FOREIGN KEY (organisation_id) REFERENCES organisations(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_participant_intake_tokens_participant ON participant_intake_tokens(participant_id);
+      CREATE INDEX IF NOT EXISTS idx_participant_intake_tokens_status ON participant_intake_tokens(status, expires_at);
+    `);
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('participant_intake_tokens migration:', e.message);
+  }
+
+  // Phase 1: Document library master registry — tracks file-based templates dropped into
+  // data/forms/templates/library/<slug>/ so each org gets a per-org clone with branding.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS document_library_masters (
+        id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        category TEXT,
+        form_type TEXT NOT NULL,
+        engine TEXT NOT NULL,
+        version TEXT NOT NULL,
+        template_file_path TEXT NOT NULL,
+        placeholders_json TEXT,
+        manifest_json TEXT,
+        required_signer_role TEXT,
+        renewal_days INTEGER,
+        is_active INTEGER DEFAULT 1,
+        last_synced_at TEXT DEFAULT (datetime('now')),
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_document_library_masters_slug ON document_library_masters(slug);
+      CREATE INDEX IF NOT EXISTS idx_document_library_masters_form_type ON document_library_masters(form_type);
+
+      CREATE TABLE IF NOT EXISTS document_library_org_clones (
+        id TEXT PRIMARY KEY,
+        master_id TEXT NOT NULL,
+        org_id TEXT NOT NULL,
+        provider_profile_id TEXT,
+        form_template_id TEXT,
+        variable_overrides_json TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(master_id, org_id),
+        FOREIGN KEY (master_id) REFERENCES document_library_masters(id) ON DELETE CASCADE,
+        FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_document_library_org_clones_org ON document_library_org_clones(org_id);
+    `);
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('document library migration:', e.message);
   }
 
   // Nexus structured form templates (masters + org clones + generated PDF snapshots)

@@ -10,7 +10,8 @@ import {
   composeParticipantLegalName,
   splitParticipantNameFromFull
 } from '@nexus-shared/onboardingFieldRegistry.js';
-import { NEXUS_CORE_ADOBE_SIGN_ENABLED, NEXUS_CORE_SIGN_COMING_SOON_TITLE } from '../lib/featureFlags.js';
+import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useAdobeSignEnabled } from '../lib/featureFlags.js';
+import ServiceAgreementOnboardingBlock from '../components/ServiceAgreementOnboardingBlock.jsx';
 
 const PARTICIPANT_LABELS = participantFieldLabels();
 
@@ -119,6 +120,7 @@ export default function OnboardingPage() {
   const { id } = useParams();
   const idRef = useRef(id);
   idRef.current = id;
+  const adobeSignEnabled = useAdobeSignEnabled();
   const [participant, setParticipant] = useState(null);
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -141,6 +143,7 @@ export default function OnboardingPage() {
   });
   const [docPackMeta, setDocPackMeta] = useState(null);
   const [participantPackChoice, setParticipantPackChoice] = useState('');
+  const [intakeSavedAt, setIntakeSavedAt] = useState(0);
 
   const participantPackOptions = useMemo(
     () => (docPackMeta?.packs || []).filter((p) => p.workflow === 'participant_onboarding' || p.workflow === 'both'),
@@ -513,6 +516,7 @@ export default function OnboardingPage() {
         contacts: contactsData
       });
       await refresh();
+      setIntakeSavedAt(Date.now());
       alert('Intake form saved. Participant profile updated.');
     } catch (err) {
       alert(err.message);
@@ -545,7 +549,7 @@ export default function OnboardingPage() {
     try {
       await onboarding.generateFormPack(id);
       await refresh();
-      alert('Service Agreement and Support Plan generated from intake data.');
+      alert('Support Plan and Privacy Consent generated from intake data. Use the Service Agreement section below for the participant agreement PDF.');
     } catch (err) {
       alert(err.message);
     } finally {
@@ -631,9 +635,9 @@ export default function OnboardingPage() {
       await onboarding.uploadFormDocument(id, formInstanceId, file);
       await refresh();
       alert(
-        NEXUS_CORE_ADOBE_SIGN_ENABLED
+        adobeSignEnabled
           ? 'Document updated. Download to sign or use Sign with Nexus Core when ready.'
-          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once Adobe is enabled (see client/.env).'
+          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once Adobe Sign is enabled in Forms → Onboarding settings.'
       );
     } catch (err) {
       alert(err.message);
@@ -1341,7 +1345,7 @@ export default function OnboardingPage() {
               <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '1rem' }}>Company policy PDFs</h4>
               <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: '#78350f' }}>
                 Send your organisation&apos;s policy documents from your email (same library as staff onboarding). Configure packs under{' '}
-                <strong>Forms → Form development</strong>. Participant must have an email; connect yours in Settings.
+                <strong>Forms</strong>. Participant must have an email; connect yours in Settings.
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>
@@ -1370,12 +1374,22 @@ export default function OnboardingPage() {
             {/* Step 2: Service Agreement & Support Plan */}
             <h4 style={{ marginTop: '2rem' }}>2. Service Agreement, Support Plan & Privacy Consent</h4>
             <p style={{ color: '#64748b', marginBottom: '1rem' }}>
-              Service Agreement and Support Plan are auto-filled from intake data. Privacy Consent uses the NDIS form template (filled with participant details). After generating, use{' '}
-              <strong>Download to sign</strong> for offline or your own signing tool, or <strong>Sign with Nexus Core</strong> when Adobe Sign is enabled for your organisation.
+              Save the intake form first. The <strong>participant</strong> is the client on the service agreement. Support Plan and Privacy Consent use your legacy templates; the service agreement PDF uses your organisation template from{' '}
+              <Link to={`${pathPrefix}/forms`}>Forms</Link>.
             </p>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-              <button className="btn btn-primary" onClick={handleGenerateForms} disabled={working || !hasIntakeData}>
-                Generate forms from intake
+
+            <ServiceAgreementOnboardingBlock
+              participantId={id}
+              intake={intake}
+              pathPrefix={pathPrefix}
+              working={working}
+              setWorking={setWorking}
+              intakeSavedAt={intakeSavedAt}
+            />
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', marginTop: '1rem' }}>
+              <button className="btn btn-secondary" onClick={handleGenerateForms} disabled={working || !hasIntakeData}>
+                Generate support plan & privacy consent
               </button>
             </div>
 
@@ -1417,9 +1431,9 @@ export default function OnboardingPage() {
                               className="btn btn-primary"
                               style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
                               onClick={() => handleSendForm(f.id)}
-                              disabled={working || !NEXUS_CORE_ADOBE_SIGN_ENABLED}
+                              disabled={working || !adobeSignEnabled}
                               title={
-                                NEXUS_CORE_ADOBE_SIGN_ENABLED
+                                adobeSignEnabled
                                   ? 'Send for signature via Nexus Core (Adobe Sign)'
                                   : NEXUS_CORE_SIGN_COMING_SOON_TITLE
                               }

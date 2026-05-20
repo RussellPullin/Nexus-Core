@@ -11,7 +11,8 @@ import { requireAgencyShell } from '../middleware/agencyShell.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from '../services/notification.service.js';
 import { pullSummaryFromExcel } from '../services/excelPull.service.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
-import { ensureProviderProfile } from '../services/onboarding.service.js';
+import { ensureProviderProfile, assertStaffOnboardingReady } from '../services/onboarding.service.js';
+import { orchestrateStaffOnboarding } from '../services/staffOnboardingOrchestrator.service.js';
 import { generateStaffContractBuffers } from '../services/staffContractFill.service.js';
 import { buildPolicyAttachmentsForEmail } from '../services/onboardingDocumentPacks.service.js';
 import { getStaffIntakeFieldMap, mergeStaffIntakeForProfile } from '../services/staffOnboardingSync.service.js';
@@ -743,6 +744,79 @@ router.post('/send-test-email', async (req, res) => {
   }
 });
 
+/**
+ * Phase 3: One-click staff onboarding orchestrator.
+ *
+ * Idempotent — runs the readiness gate, clones master library templates, and ensures the
+ * staff_onboarding row exists. Does NOT send the invite email or generate any signed
+ * documents (those remain owned by /start-onboarding and the signing layer respectively).
+ * Returns a per-step status array so the UI can show progress and disable itself with a
+ * clear reason when a prerequisite is missing.
+ */
+router.post('/:id/onboarding/run', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const staffId = req.params.id;
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(staffId, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+    const result = await orchestrateStaffOnboarding({
+      staffId,
+      providerOrganisationId: req.body?.provider_organisation_id || s.org_id || orgId || null,
+      userId: req.session?.user?.id || null,
+      actorType: 'user',
+      actorId: req.session?.user?.id || null,
+      sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
+      userAgent: req.headers['user-agent'] || null,
+      projectRoot
+    });
+    const code = result.ready ? 200 : 409;
+    res.status(code).json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Phase 3: Lightweight readiness check used by StaffProfile to drive the "Run staff
+ * onboarding" button state. Returns reason+code when blocked so the UI can deep-link
+ * the user into the right Forms screen to fix it.
+ */
+router.get('/:id/onboarding/status', requireAdminOrDelegate, (req, res) => {
+  try {
+    const staffId = req.params.id;
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(staffId, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+
+    const providerOrgId = s.org_id || orgId || null;
+    /** @type {{ ready: boolean, reason?: string, code?: string }} */
+    let readiness = { ready: false };
+    if (providerOrgId) {
+      try {
+        assertStaffOnboardingReady(providerOrgId);
+        readiness = { ready: true };
+      } catch (err) {
+        readiness = { ready: false, reason: err.message, code: err.code || 'NOT_READY' };
+      }
+    } else {
+      readiness = { ready: false, reason: 'Staff has no organisation linked.', code: 'PROVIDER_ORG_MISSING' };
+    }
+
+    const onboarding = db
+      .prepare(`SELECT id, status, current_step, started_at, completed_at, last_activity_at, document_pack_id FROM staff_onboarding WHERE staff_id = ?`)
+      .get(staffId);
+
+    res.json({
+      staff: { id: s.id, name: s.name, email: s.email, onboarding_status: s.onboarding_status },
+      provider_organisation_id: providerOrgId,
+      readiness,
+      staff_onboarding: onboarding || null
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Start staff onboarding: create record, set token, send welcome email with form link and policy PDFs
 router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) => {
   try {
@@ -837,7 +911,7 @@ router.get('/:id/employment-contract', requireAdminOrDelegate, async (req, res) 
     const { docx, pdf, templateMeta } = await generateStaffContractBuffers(staffFull, merged, providerProfileId);
     if (!pdf?.length && !docx?.length) {
       return res.status(404).json({
-        error: 'No employment contract template. In Forms → Form development, add a staff custom form and upload a fillable PDF template.'
+        error: 'No employment contract template. Organisation form templates are being rebuilt — configure a staff contract template when available.'
       });
     }
     const base = (templateMeta?.displayName || 'employment-contract').replace(/[^a-zA-Z0-9-_]+/g, '_');

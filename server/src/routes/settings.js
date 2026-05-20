@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { frontendBaseUrl } from '../lib/frontendBaseUrl.js';
 import { oauthPublicApiOriginFromEnv } from '../lib/oauthPublicOrigin.js';
-import { exchangeAdobeAuthorizationCode } from '../services/adobeSign.service.js';
+import { exchangeDropboxAuthorizationCode } from '../services/dropboxSign.service.js';
 import { getShifterOrgTimezoneSpecForNexusOrg } from '../services/supabaseStaffShifter.service.js';
 import { normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
 
@@ -87,21 +87,16 @@ function mergeWithEnv(row, options = {}) {
     xero_linked: noOrgRowYet ? false : !!(row?.xero_refresh_token && row?.xero_tenant_id),
     /** When true, Settings shows one-click Xero connect (credentials from server env). */
     xero_oauth_via_env: xeroOauthConfiguredViaEnv(),
-    adobe_sign_linked:
+    dropbox_sign_linked:
       noOrgRowYet
         ? false
-        : !!(row?.adobe_sign_refresh_token && row?.adobe_sign_api_access_point) ||
-          !!process.env.ADOBE_SIGN_ACCESS_TOKEN?.trim(),
-    adobe_sign_oauth_linked: noOrgRowYet ? false : !!(row?.adobe_sign_refresh_token && row?.adobe_sign_api_access_point),
-    /** Server has Acrobat Sign OAuth app + callback URL (Fly secrets). */
-    adobe_sign_oauth_via_env: adobeOauthConfiguredViaEnv(),
-    /** Only ADOBE_SIGN_ACCESS_TOKEN on host; no org OAuth row. */
-    adobe_sign_via_host_token_only:
+        : !!(row?.dropbox_sign_access_token) || !!process.env.DROPBOX_SIGN_API_KEY?.trim(),
+    dropbox_sign_oauth_linked: noOrgRowYet ? false : !!(row?.dropbox_sign_access_token),
+    dropbox_sign_oauth_via_env: dropboxOauthConfiguredViaEnv(),
+    dropbox_sign_via_api_key_only:
       noOrgRowYet
         ? false
-        : !!process.env.ADOBE_SIGN_ACCESS_TOKEN?.trim() &&
-          !(row?.adobe_sign_refresh_token && row?.adobe_sign_api_access_point),
-    adobe_sign_web_access_point: noOrgRowYet ? null : (row?.adobe_sign_web_access_point ?? null)
+        : !!process.env.DROPBOX_SIGN_API_KEY?.trim() && !row?.dropbox_sign_access_token
   };
 }
 
@@ -146,23 +141,19 @@ function isAllowedAdobeRedirectUri(redirectUri) {
   return isAllowedXeroRedirectUri(redirectUri);
 }
 
-/** One Acrobat Sign OAuth app for the deployment (Fly secrets); each org authorizes its own account. */
-function adobeOauthConfiguredViaEnv() {
-  const id = process.env.ADOBE_SIGN_CLIENT_ID?.trim();
-  const secret = process.env.ADOBE_SIGN_CLIENT_SECRET?.trim();
-  const redirect = getEffectiveAdobeRedirectUri();
+function dropboxOauthConfiguredViaEnv() {
+  const id = process.env.DROPBOX_SIGN_CLIENT_ID?.trim();
+  const secret = process.env.DROPBOX_SIGN_CLIENT_SECRET?.trim();
+  const redirect = getEffectiveDropboxRedirectUri();
   return !!(id && secret && redirect);
 }
 
-function getAdobeOAuthAuthorizeBase() {
-  return process.env.ADOBE_SIGN_OAUTH_AUTHORIZE_BASE?.trim() || 'https://secure.echosign.com/public/oauth';
-}
-
-function getAdobeOAuthScopes() {
-  return (
-    process.env.ADOBE_SIGN_OAUTH_SCOPES?.trim() ||
-    'user_login:self agreement_read:self agreement_write:self agreement_send:self'
-  );
+function getEffectiveDropboxRedirectUri() {
+  const explicit = process.env.DROPBOX_SIGN_REDIRECT_URI?.trim();
+  if (explicit) return explicit;
+  const origin = oauthPublicApiOriginFromEnv();
+  if (origin) return `${origin}/api/settings/dropbox-sign-callback`;
+  return '';
 }
 
 /**
@@ -795,24 +786,24 @@ router.post('/xero/disconnect', requireAdminOrDelegate, (req, res) => {
   }
 });
 
-// ── Adobe Acrobat Sign OAuth (one app on the server; each org authorizes its own account) ──
+// ── Dropbox Sign OAuth ────────────────────────────────────────────────────
+// Each org connects their own Dropbox Sign account. Credentials (client_id/secret) live in Fly secrets.
 
-// POST /api/settings/adobe-sign/connect
-router.post('/adobe-sign/connect', requireAdminOrDelegate, (req, res) => {
+// POST /api/settings/dropbox-sign/connect
+router.post('/dropbox-sign/connect', requireAdminOrDelegate, (req, res) => {
   try {
     const orgId = resolveTargetOrgId(req);
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
-    if (!adobeOauthConfiguredViaEnv()) {
+    if (!dropboxOauthConfiguredViaEnv()) {
       return res.status(400).json({
         error:
-          'Adobe Sign OAuth is not configured on this server. Set ADOBE_SIGN_CLIENT_ID, ADOBE_SIGN_CLIENT_SECRET, and OAUTH_PUBLIC_URL (callback URL is OAUTH_PUBLIC_URL + /api/settings/adobe-sign-callback). Register that redirect URL on your Acrobat Sign API application.',
+          'Dropbox Sign OAuth is not configured on this server. Set DROPBOX_SIGN_CLIENT_ID, DROPBOX_SIGN_CLIENT_SECRET, and OAUTH_PUBLIC_URL in your environment.'
       });
     }
-    const redirectUri = getEffectiveAdobeRedirectUri();
-    if (!isAllowedAdobeRedirectUri(redirectUri)) {
+    const redirectUri = getEffectiveDropboxRedirectUri();
+    if (!isAllowedXeroRedirectUri(redirectUri)) {
       return res.status(400).json({
-        error:
-          'Adobe redirect URI must use HTTPS, or http://localhost / http://127.0.0.1 for local dev. Set ADOBE_SIGN_REDIRECT_URI or fix OAUTH_PUBLIC_URL.',
+        error: 'Redirect URI must use HTTPS, or http://localhost for local dev. Fix OAUTH_PUBLIC_URL.'
       });
     }
 
@@ -821,65 +812,51 @@ router.post('/adobe-sign/connect', requireAdminOrDelegate, (req, res) => {
     }
 
     const state = randomBytes(24).toString('hex');
-    req.session.adobe_sign_oauth_state = state;
-    req.session.adobe_sign_oauth_org_id = orgId;
+    req.session.dropbox_sign_oauth_state = state;
+    req.session.dropbox_sign_oauth_org_id = orgId;
 
-    const base = getAdobeOAuthAuthorizeBase().replace(/\?+$/, '');
     const params = new URLSearchParams({
       response_type: 'code',
-      client_id: process.env.ADOBE_SIGN_CLIENT_ID.trim(),
+      client_id: process.env.DROPBOX_SIGN_CLIENT_ID.trim(),
       redirect_uri: redirectUri,
-      scope: getAdobeOAuthScopes(),
       state
     });
-    const redirectUrl = `${base}?${params.toString()}`;
+    const redirectUrl = `https://app.hellosign.com/oauth/authorize?${params.toString()}`;
     res.json({ redirectUrl });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /api/settings/adobe-sign-callback
-router.get('/adobe-sign-callback', requireAdminOrDelegate, async (req, res) => {
+// GET /api/settings/dropbox-sign-callback
+router.get('/dropbox-sign-callback', requireAdminOrDelegate, async (req, res) => {
   const base = frontendBaseUrl(req);
   const settingsUrl = base.replace(/\/api\/?$/, '').replace(/\/$/, '') + '/settings';
 
   try {
-    const { code, state, error, api_access_point: apiAccessPointQ } = req.query || {};
+    const { code, state, error } = req.query || {};
     if (error) {
-      return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent(String(error)));
+      return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent(String(error)));
     }
-    if (req.session.adobe_sign_oauth_state !== state) {
-      return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent('Invalid state'));
+    if (req.session.dropbox_sign_oauth_state !== state) {
+      return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent('Invalid state'));
     }
-    delete req.session.adobe_sign_oauth_state;
+    delete req.session.dropbox_sign_oauth_state;
 
     if (!code) {
-      return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent('No authorization code'));
+      return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent('No authorization code'));
     }
 
-    const orgId = req.session?.adobe_sign_oauth_org_id || resolveTargetOrgId(req);
+    const orgId = req.session?.dropbox_sign_oauth_org_id || resolveTargetOrgId(req);
     if (!orgId) {
-      return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent('No organisation on your account.'));
+      return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent('No organisation on your account.'));
     }
 
-    let apiAccessPoint = apiAccessPointQ != null ? String(apiAccessPointQ) : '';
-    try {
-      apiAccessPoint = decodeURIComponent(apiAccessPoint).trim();
-    } catch {
-      apiAccessPoint = String(apiAccessPointQ).trim();
-    }
-    if (!apiAccessPoint) {
-      return res.redirect(
-        settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent('Missing api_access_point from Adobe (check redirect URL and app configuration).')
-      );
-    }
-
-    const redirectUri = getEffectiveAdobeRedirectUri();
-    const tokens = await exchangeAdobeAuthorizationCode({
+    const redirectUri = getEffectiveDropboxRedirectUri();
+    const tokens = await exchangeDropboxAuthorizationCode({
       code: String(code),
       redirectUri,
-      apiAccessPoint
+      state: String(state)
     });
 
     if (!hasBusinessSettingsForOrg(orgId)) {
@@ -888,31 +865,29 @@ router.get('/adobe-sign-callback', requireAdminOrDelegate, async (req, res) => {
 
     db.prepare(
       `UPDATE business_settings SET
-        adobe_sign_refresh_token = ?,
-        adobe_sign_api_access_point = ?,
-        adobe_sign_web_access_point = ?,
+        dropbox_sign_access_token = ?,
+        dropbox_sign_refresh_token = ?,
         updated_at = datetime('now')
       WHERE org_id = ?`
-    ).run(tokens.refresh_token, tokens.api_access_point, tokens.web_access_point, orgId);
+    ).run(tokens.access_token, tokens.refresh_token, orgId);
 
-    if (req.session) delete req.session.adobe_sign_oauth_org_id;
+    if (req.session) delete req.session.dropbox_sign_oauth_org_id;
 
-    return res.redirect(settingsUrl + '?adobe_sign=linked');
+    return res.redirect(settingsUrl + '?dropbox_sign=linked');
   } catch (err) {
-    return res.redirect(settingsUrl + '?adobe_sign=error&message=' + encodeURIComponent(err.message || 'Unknown error'));
+    return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent(err.message || 'Unknown error'));
   }
 });
 
-// POST /api/settings/adobe-sign/disconnect
-router.post('/adobe-sign/disconnect', requireAdminOrDelegate, (req, res) => {
+// POST /api/settings/dropbox-sign/disconnect
+router.post('/dropbox-sign/disconnect', requireAdminOrDelegate, (req, res) => {
   try {
     const orgId = resolveTargetOrgId(req);
     if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
     db.prepare(
       `UPDATE business_settings SET
-        adobe_sign_refresh_token = NULL,
-        adobe_sign_api_access_point = NULL,
-        adobe_sign_web_access_point = NULL,
+        dropbox_sign_access_token = NULL,
+        dropbox_sign_refresh_token = NULL,
         updated_at = datetime('now')
       WHERE org_id = ?`
     ).run(orgId);

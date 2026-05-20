@@ -40,7 +40,9 @@ import {
   buildScDayDraftLineItems,
   buildBillingLinePayloadForScDayBucket,
   ALL_BUCKETS,
-  resolveSupportCoordProviderTravelKmItem
+  resolveSupportCoordProviderTravelKmItem,
+  applyDraftSelectionUnitPrice,
+  getSupportCoordLineItem
 } from '../services/coordinatorTasks.service.js';
 
 const router = Router();
@@ -184,6 +186,22 @@ router.get('/draft-batch', (req, res) => {
 
     const lineItems = [];
 
+    const recalcTaskRate = db.prepare(
+      `UPDATE coordinator_tasks SET unit_price = ?, ndis_line_item_id = ?, updated_at = datetime('now')
+       WHERE id = ? AND task_invoice_id IS NULL AND billing_invoice_id IS NULL`
+    );
+    for (const t of tasks) {
+      const scItem = getSupportCoordLineItem(t.participant_id, t.activity_date);
+      if (!scItem?.id) continue;
+      const expected = scItem.rate;
+      const stored = Number(t.unit_price) || 0;
+      if (Math.abs(stored - expected) > 0.01 || t.ndis_line_item_id !== scItem.id) {
+        recalcTaskRate.run(expected, scItem.id, t.id);
+        t.unit_price = expected;
+        t.ndis_line_item_id = scItem.id;
+      }
+    }
+
     /** Support coordination: up to four draft rows per participant per day (F2F, non-F2F, travel time, km). */
     const scByDay = {};
     tasks.forEach((t) => {
@@ -273,6 +291,42 @@ router.get('/draft-batch', (req, res) => {
   } catch (err) {
     console.error('[billing draft-batch]', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/** Adjust unit rate on unbilled support coordination tasks before batching (Financial draft). */
+router.post('/adjust-draft-task-rate', (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!getProviderOrgIdForUser(userId)) {
+      return res.status(403).json({ error: 'No organisation on your account.' });
+    }
+
+    const { selection_id, unit_price } = req.body;
+    if (!selection_id || unit_price == null) {
+      return res.status(400).json({ error: 'selection_id and unit_price required' });
+    }
+
+    const parsed = parseTaskScDaySelectionId(selection_id);
+    if (parsed?.participantId && !isParticipantInRequesterTenant(parsed.participantId, userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!parsed && selection_id.startsWith('task-')) {
+      const taskId = selection_id.slice('task-'.length);
+      if (!isCoordinatorTaskInRequesterTenant(taskId, userId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    const updated = applyDraftSelectionUnitPrice(selection_id, unit_price);
+    if (updated === 0) {
+      return res.status(404).json({ error: 'No unbilled tasks found for this line (or line is not editable support coordination hours)' });
+    }
+
+    res.json({ updated, unit_price: roundMoney(Number(unit_price)) });
+  } catch (err) {
+    console.error('[billing adjust-draft-task-rate]', err);
+    res.status(400).json({ error: err.message });
   }
 });
 

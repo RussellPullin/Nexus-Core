@@ -1,8 +1,67 @@
 /**
- * When true, participant onboarding “Sign with Nexus Core” uses the server send-for-signature (Adobe) flow.
- * Set in client/.env: VITE_NEXUS_CORE_ADOBE_SIGN_ENABLED=true
+ * Adobe Sign feature flag.
+ *
+ * Phase 0 moves this from a build-time env flag to a per-org runtime flag stored in
+ * provider_profiles.config_json.adobe_sign_enabled and surfaced via
+ * GET /api/onboarding/providers/:orgId/settings.
+ *
+ * The legacy VITE_NEXUS_CORE_ADOBE_SIGN_ENABLED env var still acts as a global
+ * fallback for development so existing .env files keep working.
  */
-export const NEXUS_CORE_ADOBE_SIGN_ENABLED = import.meta.env.VITE_NEXUS_CORE_ADOBE_SIGN_ENABLED === 'true';
+import { useEffect, useState } from 'react';
+import { onboarding } from './api';
+import { useAuth } from '../context/AuthContext';
+
+export const NEXUS_CORE_ADOBE_SIGN_ENV_FALLBACK =
+  import.meta.env.VITE_NEXUS_CORE_ADOBE_SIGN_ENABLED === 'true';
+
+/** @deprecated Use useAdobeSignEnabled() instead. Retained for backwards compatibility with code that hasn't been migrated yet. */
+export const NEXUS_CORE_ADOBE_SIGN_ENABLED = NEXUS_CORE_ADOBE_SIGN_ENV_FALLBACK;
 
 export const NEXUS_CORE_SIGN_COMING_SOON_TITLE =
-  'Nexus Core e-sign via Adobe is being finalised. Download the document to sign offline or with your own tools for now.';
+  'Sign with Nexus Core is not enabled for this organisation. Ask an admin to turn it on under Forms → Onboarding settings (requires Adobe Sign connected in Settings → Integrations).';
+
+let cachedAdobeSignEnabled = NEXUS_CORE_ADOBE_SIGN_ENV_FALLBACK;
+let inflightOrgId = null;
+
+/**
+ * React hook returning whether Sign with Nexus Core is enabled for the current org.
+ * Caches the result in module scope so multiple components share one fetch per session.
+ *
+ * Falls back to the legacy VITE_NEXUS_CORE_ADOBE_SIGN_ENABLED flag if the API is unavailable.
+ */
+export function useAdobeSignEnabled() {
+  const { user } = useAuth();
+  const orgId = user?.org_id || null;
+  const [enabled, setEnabled] = useState(cachedAdobeSignEnabled);
+
+  useEffect(() => {
+    if (!orgId) {
+      setEnabled(NEXUS_CORE_ADOBE_SIGN_ENV_FALLBACK);
+      return undefined;
+    }
+    let cancelled = false;
+    if (inflightOrgId === orgId) return undefined;
+    inflightOrgId = orgId;
+    onboarding
+      .getProviderSettings(orgId)
+      .then((data) => {
+        if (cancelled) return;
+        const next = Boolean(data?.config?.adobe_sign_enabled) || NEXUS_CORE_ADOBE_SIGN_ENV_FALLBACK;
+        cachedAdobeSignEnabled = next;
+        setEnabled(next);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setEnabled(NEXUS_CORE_ADOBE_SIGN_ENV_FALLBACK);
+      })
+      .finally(() => {
+        if (inflightOrgId === orgId) inflightOrgId = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
+
+  return enabled;
+}

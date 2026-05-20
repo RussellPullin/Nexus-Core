@@ -112,6 +112,11 @@ import supabaseAuthRouter from './routes/supabaseAuth.js';
 import emailOAuthRouter from './routes/emailOAuth.js';
 import participantsRouter from './routes/participants.js';
 import organisationsRouter from './routes/organisations.js';
+import documentLibraryRouter from './routes/documentLibrary.js';
+import intakePublicRouter from './routes/intakePublic.js';
+import automationRouter from './routes/automation.js';
+import complianceRouter from './routes/compliance.js';
+import bulkOnboardingRouter from './routes/bulkOnboarding.js';
 import staffRouter, { handleSetStaffShifterEnabled } from './routes/staff.js';
 import shiftsRouter from './routes/shifts.js';
 import ndisRouter from './routes/ndis.js';
@@ -208,6 +213,11 @@ app.use('/api/participants', requireAuth, participantsRouter);
 app.use('/api/form-templates', requireAuth, nexusFormTemplatesRouter);
 app.use('/api/generated-forms', requireAuth, nexusGeneratedFormsRouter);
 app.use('/api/organisations', requireAuth, organisationsRouter);
+app.use('/api/document-library', requireAuth, documentLibraryRouter);
+app.use('/api/intake', intakePublicRouter);
+app.use('/api/automation', automationRouter);
+app.use('/api/compliance', complianceRouter);
+app.use('/api/admin', bulkOnboardingRouter);
 
 // Also on the root app (in addition to staffRouter) so POST matches even if nested router fails to update.
 app.post('/api/staff/shifter-enabled', requireAuth, requireAdminOrDelegate, requireAgencyShell, handleSetStaffShifterEnabled);
@@ -245,6 +255,51 @@ function startServer(port) {
   const server = app.listen(port, '0.0.0.0');
   server.on('listening', async () => {
     console.log(`[nexus] Server listening on port ${port}`);
+    try {
+      const { seedPracticeStandardsIfNeeded } = await import('./services/practiceStandards.service.js');
+      const r = seedPracticeStandardsIfNeeded();
+      if (r?.seeded) console.log(`[practice-standards] seeded ${r.seeded} reference rows`);
+    } catch (e) {
+      console.warn('[practice-standards] seed failed:', e?.message);
+    }
+
+    try {
+      const { syncDocumentLibraryFromDisk } = await import('./services/documentLibrary.service.js');
+      const sync = syncDocumentLibraryFromDisk();
+      if (sync.registered || sync.skipped.length || sync.warnings.length) {
+        console.log(`[document-library] sync: registered=${sync.registered} scanned=${sync.scanned}` +
+          (sync.skipped.length ? `, skipped=${sync.skipped.length}` : '') +
+          (sync.warnings.length ? `, warnings=${sync.warnings.length}` : ''));
+        for (const w of sync.warnings.slice(0, 10)) console.warn('[document-library]', w);
+        for (const s of sync.skipped.slice(0, 10)) console.warn('[document-library] skipped', s);
+      }
+    } catch (e) {
+      console.warn('[document-library] boot sync failed:', e?.message);
+    }
+
+    // Phase 6: in-process daily automation. The external cron (POST /api/automation/tick)
+    // is still recommended for production, but this fallback ensures small/single-node
+    // installs do not silently skip renewal scans and intake-token cleanup.
+    if (process.env.AUTOMATION_DISABLE_INPROCESS !== '1') {
+      try {
+        const { runDailyAutomationTick } = await import('./services/dailyAutomation.service.js');
+        const intervalMs = Number(process.env.AUTOMATION_TICK_INTERVAL_MS || 6 * 60 * 60 * 1000);
+        const initialDelayMs = Number(process.env.AUTOMATION_TICK_INITIAL_DELAY_MS || 60 * 1000);
+        setTimeout(() => {
+          runDailyAutomationTick({ actorType: 'system' }).catch((e) =>
+            console.warn('[automation] initial tick failed:', e?.message)
+          );
+        }, initialDelayMs);
+        setInterval(() => {
+          runDailyAutomationTick({ actorType: 'system' }).catch((e) =>
+            console.warn('[automation] tick failed:', e?.message)
+          );
+        }, intervalMs).unref();
+        console.log(`[automation] in-process tick every ${(intervalMs / 3600000).toFixed(1)} h (disable via AUTOMATION_DISABLE_INPROCESS=1)`);
+      } catch (e) {
+        console.warn('[automation] could not start in-process scheduler:', e?.message);
+      }
+    }
   });
   server.on('error', (err) => {
     if (err?.code === 'EADDRINUSE') {

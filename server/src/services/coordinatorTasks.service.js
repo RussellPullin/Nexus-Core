@@ -7,6 +7,7 @@ import { getDefaultLineItemForParticipant } from './progressNoteMatcher.js';
 import { getShiftDayType } from '../lib/ndisDay.js';
 import { roundMoney } from '../lib/invoiceGst.js';
 import { parseRegistrationGroup } from '../lib/travel.js';
+import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 
 /**
  * Provider travel km (07_799_*) must match the participant's Support Coordination registration group
@@ -36,60 +37,199 @@ export function resolveSupportCoordProviderTravelKmItem(db, tasks) {
   return pick('07_799_0132%') || pick('07_799%');
 }
 
+/** NDIS 07_002_* — Support Coordination Level 2: Coordination of Supports (default for SC tasks). */
+export const SC_LEVEL2_ITEM_PATTERN = '07_002%';
+
+function isSupportCoordHourlyItem(nli) {
+  if (!nli) return false;
+  const sn = String(nli.support_item_number || '');
+  if (sn.includes('_799_')) return false;
+  return nli.support_category === '07' || sn.startsWith('07_');
+}
+
+function isSupportCoordLevel2Item(nli) {
+  if (!isSupportCoordHourlyItem(nli)) return false;
+  const sn = String(nli.support_item_number || '');
+  if (sn.startsWith('07_002')) return true;
+  return /level\s*2/i.test(String(nli.description || ''));
+}
+
+/** SQL fragment: prefer Level 2 SC line items when multiple 07 hourly items match. */
+const SC_LEVEL2_ORDER_SQL = `
+  (CASE WHEN nli.support_item_number LIKE '07_002%' THEN 0
+        WHEN nli.description LIKE '%Level 2%' THEN 1
+        ELSE 2 END),
+  nli.support_item_number`;
+
 /**
  * Get default support coordination line item for participant (category 07).
- * Falls back to getDefaultLineItemForParticipant if no 07 item in plan.
+ * Uses participant remoteness for rate (standard vs remote). Falls back to catalogue 07 hourly.
  */
 export function getSupportCoordLineItem(participantId, activityDate) {
   const dateStr = activityDate?.slice(0, 10) || new Date().toISOString().slice(0, 10);
   const dayType = getShiftDayType(`${dateStr}T09:00:00`);
+  const participant = db.prepare('SELECT default_ndis_line_item_id, remoteness FROM participants WHERE id = ?').get(participantId);
+  const remoteness = participant?.remoteness || 'standard';
+
+  const toResult = (row) => ({
+    id: row.ndis_line_item_id || row.id,
+    rate: Number(getEffectiveNdisRate(row, remoteness)) || 0,
+    unit: row.unit || 'hour',
+    support_item_number: row.support_item_number
+  });
+
+  if (participant?.default_ndis_line_item_id) {
+    const nli = db
+      .prepare(
+        `SELECT id, rate, rate_remote, rate_very_remote, unit, rate_type, support_item_number, support_category, description
+         FROM ndis_line_items WHERE id = ?`
+      )
+      .get(participant.default_ndis_line_item_id);
+    if (isSupportCoordLevel2Item(nli)) {
+      const itemRateType = nli.rate_type || 'weekday';
+      if (itemRateType === dayType || !nli.rate_type) return toResult(nli);
+    }
+  }
 
   const fromPlan = db.prepare(`
-    SELECT bli.ndis_line_item_id, nli.rate, nli.rate_remote, nli.rate_very_remote, nli.unit, nli.rate_type, nli.support_item_number
+    SELECT bli.ndis_line_item_id, nli.id, nli.rate, nli.rate_remote, nli.rate_very_remote, nli.unit, nli.rate_type, nli.support_item_number, nli.description
+    FROM plan_budgets pb
+    JOIN ndis_plans np ON np.id = pb.plan_id
+    JOIN budget_line_items bli ON bli.budget_id = pb.id
+    JOIN ndis_line_items nli ON nli.id = bli.ndis_line_item_id
+    WHERE np.participant_id = ? AND np.start_date <= ? AND np.end_date >= ?
+      AND pb.category = '07'
+      AND nli.support_item_number NOT LIKE '07_799%'
+      AND (nli.unit = 'hour' OR nli.unit = 'hr')
+    ORDER BY ${SC_LEVEL2_ORDER_SQL}
+    LIMIT 1
+  `).get(participantId, dateStr, dateStr);
+
+  if (fromPlan?.ndis_line_item_id) {
+    const itemRateType = fromPlan.rate_type || 'weekday';
+    if (itemRateType === dayType || !fromPlan.rate_type) return toResult(fromPlan);
+  }
+
+  const fromPlanBroad = db.prepare(`
+    SELECT bli.ndis_line_item_id, nli.id, nli.rate, nli.rate_remote, nli.rate_very_remote, nli.unit, nli.rate_type, nli.support_item_number, nli.description
     FROM plan_budgets pb
     JOIN ndis_plans np ON np.id = pb.plan_id
     JOIN budget_line_items bli ON bli.budget_id = pb.id
     JOIN ndis_line_items nli ON nli.id = bli.ndis_line_item_id
     WHERE np.participant_id = ? AND np.start_date <= ? AND np.end_date >= ?
       AND (nli.support_category = '07' OR nli.support_item_number LIKE '07_%')
-    ORDER BY pb.category
+      AND nli.support_item_number NOT LIKE '07_799%'
+      AND (nli.unit = 'hour' OR nli.unit = 'hr')
+    ORDER BY ${SC_LEVEL2_ORDER_SQL}
     LIMIT 1
   `).get(participantId, dateStr, dateStr);
 
-  if (fromPlan?.ndis_line_item_id) {
-    const rate = fromPlan.rate_remote ?? fromPlan.rate_very_remote ?? fromPlan.rate;
-    const itemRateType = fromPlan.rate_type || 'weekday';
-    if (itemRateType === dayType || !fromPlan.rate_type) {
-      return {
-        id: fromPlan.ndis_line_item_id,
-        rate: Number(rate) || 0,
-        unit: fromPlan.unit || 'hour'
-      };
-    }
+  if (fromPlanBroad?.ndis_line_item_id) {
+    const itemRateType = fromPlanBroad.rate_type || 'weekday';
+    if (itemRateType === dayType || !fromPlanBroad.rate_type) return toResult(fromPlanBroad);
   }
 
+  const level2Catalogue = db.prepare(`
+    SELECT id, rate, rate_remote, rate_very_remote, unit, rate_type, support_item_number, description
+    FROM ndis_line_items
+    WHERE support_item_number LIKE '07_002%'
+      AND support_item_number NOT LIKE '07_799%'
+      AND (rate_type = ? OR rate_type IS NULL OR rate_type = 'weekday')
+      AND (unit = 'hour' OR unit = 'hr')
+    ORDER BY rate_type = ? DESC, support_item_number
+    LIMIT 1
+  `).get(dayType, dayType);
+
+  if (level2Catalogue) return toResult(level2Catalogue);
+
   const fallback = db.prepare(`
-    SELECT id, rate, rate_remote, rate_very_remote, unit, rate_type
+    SELECT id, rate, rate_remote, rate_very_remote, unit, rate_type, support_item_number, description
     FROM ndis_line_items
     WHERE (support_category = '07' OR support_item_number LIKE '07_%')
       AND support_item_number NOT LIKE '07_799%'
       AND (rate_type = ? OR rate_type IS NULL OR rate_type = 'weekday')
-    ORDER BY rate_type = ? DESC
+      AND (unit = 'hour' OR unit = 'hr')
+    ORDER BY ${SC_LEVEL2_ORDER_SQL}, rate_type = ? DESC
     LIMIT 1
   `).get(dayType, dayType);
 
-  if (fallback) {
-    const rate = fallback.rate_remote ?? fallback.rate_very_remote ?? fallback.rate;
-    return { id: fallback.id, rate: Number(rate) || 0, unit: fallback.unit || 'hour' };
-  }
+  if (fallback) return toResult(fallback);
 
   const fromParticipant = getDefaultLineItemForParticipant(participantId, `${dateStr}T09:00:00`, dateStr);
   if (fromParticipant) return fromParticipant;
 
-  const anyHourly = db.prepare('SELECT id, rate, unit FROM ndis_line_items WHERE unit = ? AND rate > 0 LIMIT 1').get('hour');
-  if (anyHourly) return { id: anyHourly.id, rate: Number(anyHourly.rate) || 0, unit: 'hour' };
+  const anyHourly = db.prepare('SELECT id, rate, rate_remote, rate_very_remote, unit FROM ndis_line_items WHERE unit = ? AND rate > 0 LIMIT 1').get('hour');
+  if (anyHourly) return toResult(anyHourly);
 
   return null;
+}
+
+/**
+ * Resolve unit price for a coordinator task from catalogue row + participant remoteness.
+ * @param {string} participantId
+ * @param {{ id: string, rate?: number, rate_remote?: number, rate_very_remote?: number }} lineItemRow
+ * @param {number|null|undefined} [overrideUnitPrice]
+ */
+export function resolveCoordinatorTaskUnitPrice(participantId, lineItemRow, overrideUnitPrice) {
+  if (overrideUnitPrice != null && !Number.isNaN(Number(overrideUnitPrice))) {
+    return roundMoney(Number(overrideUnitPrice));
+  }
+  const participant = db.prepare('SELECT remoteness FROM participants WHERE id = ?').get(participantId);
+  return roundMoney(Number(getEffectiveNdisRate(lineItemRow, participant?.remoteness || 'standard')) || 0);
+}
+
+/**
+ * Update unit_price on coordinator tasks linked to a Financial draft selection id.
+ * @returns {number} tasks updated
+ */
+export function applyDraftSelectionUnitPrice(selectionId, unitPrice) {
+  const price = roundMoney(Number(unitPrice));
+  if (!(price >= 0)) throw new Error('Invalid unit_price');
+
+  const parsed = parseTaskScDaySelectionId(selectionId);
+  if (parsed) {
+    const dayTasks = db
+      .prepare(
+        `SELECT id, task_type FROM coordinator_tasks
+         WHERE participant_id = ? AND activity_date = ?
+           AND task_invoice_id IS NULL AND billing_invoice_id IS NULL`
+      )
+      .all(parsed.participantId, parsed.lineDate);
+    if (!dayTasks.length) return 0;
+
+    let ids = dayTasks.map((t) => t.id);
+    if (parsed.bucket === 'f2f') {
+      ids = dayTasks.filter((t) => taskIsF2fCoordinatorTask(t)).map((t) => t.id);
+    } else if (parsed.bucket === 'nonf2f') {
+      ids = dayTasks.filter((t) => !taskIsF2fCoordinatorTask(t)).map((t) => t.id);
+    } else if (parsed.bucket !== 'all') {
+      return 0;
+    }
+
+    const upd = db.prepare(
+      `UPDATE coordinator_tasks SET unit_price = ?, updated_at = datetime('now')
+       WHERE id = ? AND task_invoice_id IS NULL AND billing_invoice_id IS NULL`
+    );
+    let n = 0;
+    for (const id of ids) {
+      const r = upd.run(price, id);
+      n += r.changes;
+    }
+    return n;
+  }
+
+  if (selectionId.startsWith('task-') && !selectionId.startsWith('task-sc-day-') && !selectionId.startsWith('task-nf2f-')) {
+    const taskId = selectionId.slice('task-'.length);
+    const r = db
+      .prepare(
+        `UPDATE coordinator_tasks SET unit_price = ?, updated_at = datetime('now')
+         WHERE id = ? AND task_invoice_id IS NULL AND billing_invoice_id IS NULL`
+      )
+      .run(price, taskId);
+    return r.changes;
+  }
+
+  throw new Error('Not a support coordination task draft line');
 }
 
 /**

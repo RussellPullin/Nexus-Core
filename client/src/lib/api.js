@@ -10,8 +10,8 @@ export const settings = {
   xeroConnect: () => fetchApi('/settings/xero/connect', { method: 'POST' }),
   xeroDisconnect: () => fetchApi('/settings/xero/disconnect', { method: 'POST' }),
   xeroTestInvoice: () => fetchApi('/settings/xero/test-invoice', { method: 'POST' }),
-  adobeSignConnect: () => fetchApi('/settings/adobe-sign/connect', { method: 'POST' }),
-  adobeSignDisconnect: () => fetchApi('/settings/adobe-sign/disconnect', { method: 'POST' }),
+  dropboxSignConnect: () => fetchApi('/settings/dropbox-sign/connect', { method: 'POST' }),
+  dropboxSignDisconnect: () => fetchApi('/settings/dropbox-sign/disconnect', { method: 'POST' }),
   uploadLogo: async (file) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -418,7 +418,9 @@ export const formTemplates = {
     }
     return text ? JSON.parse(text) : null;
   },
-  generatedPdfUrl: (documentId) => `${API}/generated-forms/${documentId}/pdf`
+  generatedPdfUrl: (documentId) => `${API}/generated-forms/${documentId}/pdf`,
+  instanceLogoUrl: (instanceId) => `${API}/form-templates/instances/${encodeURIComponent(instanceId)}/logo`,
+  previewPdfUrl: (instanceId) => `${API}/form-templates/instances/${encodeURIComponent(instanceId)}/preview.pdf`
 };
 
 export const organisations = {
@@ -430,7 +432,98 @@ export const organisations = {
   addContact: (id, data) => fetchApi(`/organisations/${id}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
   updateContact: (id, cId, data) => fetchApi(`/organisations/${id}/contacts/${cId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteContact: (id, cId) => fetchApi(`/organisations/${id}/contacts/${cId}`, { method: 'DELETE' }),
-  allContacts: (search) => fetchApi(`/organisations/contacts/all?${search ? `search=${encodeURIComponent(search)}` : ''}`)
+  allContacts: (search) => fetchApi(`/organisations/contacts/all?${search ? `search=${encodeURIComponent(search)}` : ''}`),
+
+  // Phase 1: org profile + branding pipeline
+  getMyProfile: () => fetchApi('/organisations/me/profile'),
+  updateMyProfile: (data) => fetchApi('/organisations/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
+  uploadMyLogo: async (file) => {
+    const fd = new FormData();
+    fd.append('logo', file);
+    const res = await fetch(`${API}/organisations/me/logo`, {
+      method: 'POST',
+      credentials: 'include',
+      body: fd
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || res.statusText);
+    }
+    return text ? JSON.parse(text) : {};
+  },
+  seedTemplates: () => fetchApi('/organisations/me/seed-templates', { method: 'POST' })
+};
+
+export const compliance = {
+  practiceStandards: () => fetchApi('/compliance/practice-standards'),
+  updateStandard: (id, body) => fetchApi(`/compliance/practice-standards/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body || {})
+  })
+};
+
+export const bulkOps = {
+  onboarding: ({ participant_ids = [], staff_ids = [] } = {}) =>
+    fetchApi('/admin/bulk-onboarding', {
+      method: 'POST',
+      body: JSON.stringify({ participant_ids, staff_ids })
+    })
+};
+
+export const automation = {
+  tick: (orgId) => fetchApi('/automation/tick', { method: 'POST', body: JSON.stringify({ organisation_id: orgId || null }) }),
+  dailyDigest: () => fetchApi('/automation/daily-digest')
+};
+
+export const intakePublic = {
+  load: async (token) => {
+    const res = await fetch(`${API}/intake/${encodeURIComponent(token)}`);
+    const text = await res.text();
+    if (!res.ok) {
+      let err = null;
+      try { err = JSON.parse(text); } catch { /* ignore */ }
+      const e = new Error(err?.error || text || res.statusText);
+      e.code = err?.code || 'INTAKE_ERROR';
+      throw e;
+    }
+    return text ? JSON.parse(text) : {};
+  },
+  save: async (token, fields) => {
+    const res = await fetch(`${API}/intake/${encodeURIComponent(token)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || res.statusText);
+    }
+    return res.json();
+  },
+  submit: async (token, fields = {}) => {
+    const res = await fetch(`${API}/intake/${encodeURIComponent(token)}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || res.statusText);
+    }
+    return res.json();
+  }
+};
+
+export const documentLibrary = {
+  listMasters: () => fetchApi('/document-library/masters'),
+  sync: () => fetchApi('/document-library/sync', { method: 'POST' }),
+  cloneAllToOrg: () => fetchApi('/document-library/clone-all-to-org', { method: 'POST' }),
+  cloneMaster: (masterId) => fetchApi(`/document-library/masters/${masterId}/clone-to-org`, { method: 'POST' }),
+  renderMaster: (masterId, body = {}) => fetchApi(`/document-library/masters/${masterId}/render`, {
+    method: 'POST',
+    body: JSON.stringify(body)
+  })
 };
 
 export const staff = {
@@ -455,6 +548,12 @@ export const staff = {
   getExcelSummary: (staffId) => fetchApi(`/staff/${staffId}/excel-summary`),
   getShiftHoursSummary: (staffId) => fetchApi(`/staff/${staffId}/shift-hours-summary`),
   startOnboarding: (staffId, body) => fetchApi(`/staff/${staffId}/start-onboarding`, { method: 'POST', body: JSON.stringify(body || {}) }),
+  // Phase 3: one-click staff onboarding orchestrator (readiness + library clone + ensure row).
+  onboardingRun: (staffId, providerOrganisationId) => fetchApi(`/staff/${staffId}/onboarding/run`, {
+    method: 'POST',
+    body: JSON.stringify({ provider_organisation_id: providerOrganisationId || null })
+  }),
+  onboardingRunStatus: (staffId) => fetchApi(`/staff/${staffId}/onboarding/status`),
   getComplianceDocuments: (staffId) => fetchApi(`/staff/${staffId}/compliance-documents`),
   updateComplianceDocumentExpiry: (staffId, docId, expiryDate) =>
     fetchApi(`/staff/${staffId}/compliance-documents/${docId}`, { method: 'PATCH', body: JSON.stringify({ expiry_date: expiryDate || null }) }),
@@ -662,6 +761,11 @@ export const reports = {
 
 export const billing = {
   draftBatch: (fromDate, toDate) => fetchApi(`/billing/draft-batch?from_date=${encodeURIComponent(fromDate)}&to_date=${encodeURIComponent(toDate)}`),
+  adjustDraftTaskRate: (selectionId, unitPrice) =>
+    fetchApi('/billing/adjust-draft-task-rate', {
+      method: 'POST',
+      body: JSON.stringify({ selection_id: selectionId, unit_price: unitPrice })
+    }),
   createBatch: (data) => fetchApi('/billing/create-batch', { method: 'POST', body: JSON.stringify(data) }),
   list: () => fetchApi('/billing'),
   listBatches: () => fetchApi('/billing/batches'),
@@ -753,6 +857,18 @@ export const onboarding = {
     method: 'POST',
     body: JSON.stringify({ provider_organisation_id: providerOrganisationId || null })
   }),
+  // Phase 2: one-click orchestrator (initialize + library clone + generate form pack).
+  run: (participantId, providerOrganisationId) => fetchApi(`/onboarding/participants/${participantId}/onboarding/run`, {
+    method: 'POST',
+    body: JSON.stringify({ provider_organisation_id: providerOrganisationId || null })
+  }),
+  runStatus: (participantId) => fetchApi(`/onboarding/participants/${participantId}/onboarding/status`),
+  // Phase 4: self-service intake tokens.
+  issueIntakeToken: (participantId, body) => fetchApi(`/onboarding/participants/${participantId}/intake-token`, {
+    method: 'POST',
+    body: JSON.stringify(body || {})
+  }),
+  getIntakeToken: (participantId) => fetchApi(`/onboarding/participants/${participantId}/intake-token`),
   sendOnboardingPack: (participantId, body) =>
     fetchApi(`/onboarding/participants/${participantId}/send-onboarding-pack`, { method: 'POST', body: JSON.stringify(body || {}) }),
   get: (participantId) => fetchApi(`/onboarding/participants/${participantId}`),
@@ -813,6 +929,7 @@ export const onboarding = {
     method: 'POST'
   }),
   providerCompliance: (organisationId) => fetchApi(`/onboarding/providers/${organisationId}/compliance`),
+  getProviderSettings: (organisationId) => fetchApi(`/onboarding/providers/${organisationId}/settings`),
   providerSettings: (organisationId, data) => fetchApi(`/onboarding/providers/${organisationId}/settings`, {
     method: 'PUT',
     body: JSON.stringify(data || {})

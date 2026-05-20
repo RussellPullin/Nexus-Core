@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
-import { registers } from '../lib/api.js';
+import { registers, documentLibrary } from '../lib/api.js';
 import '../App.css';
 
 export default function RegistersPage() {
@@ -9,6 +9,9 @@ export default function RegistersPage() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState(null);
+  const [libraryRegisters, setLibraryRegisters] = useState([]);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryMessage, setLibraryMessage] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -27,10 +30,62 @@ export default function RegistersPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    documentLibrary
+      .listMasters()
+      .then((list) => {
+        if (cancelled) return;
+        const registersOnly = (list || []).filter((m) => m.category === 'register');
+        setLibraryRegisters(registersOnly);
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryRegisters([]);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const handleRenderRegister = async (master) => {
+    setLibraryBusy(true);
+    setLibraryMessage('');
+    try {
+      const res = await fetch(`/api/document-library/masters/${master.id}/render`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      if (!res.ok) throw new Error(`Render failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${master.slug}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setLibraryMessage(`Downloaded ${master.display_name}.`);
+    } catch (e) {
+      setLibraryMessage(e.message || 'Render failed');
+    } finally {
+      setLibraryBusy(false);
+    }
+  };
+
+  const handleCloneAll = async () => {
+    setLibraryBusy(true);
+    setLibraryMessage('');
+    try {
+      const res = await documentLibrary.cloneAllToOrg();
+      setLibraryMessage(`Cloned ${res.cloned || 0} master templates into your org.`);
+      const list = await documentLibrary.listMasters();
+      setLibraryRegisters((list || []).filter((m) => m.category === 'register'));
+    } catch (e) {
+      setLibraryMessage(e.message || 'Clone failed');
+    } finally {
+      setLibraryBusy(false);
+    }
+  };
 
   const active = data?.views?.find((v) => v.id === activeId) || data?.views?.[0];
 
@@ -157,6 +212,69 @@ export default function RegistersPage() {
         To refresh Excel files in OneDrive, use{' '}
         <a href={`${pathPrefix}/admin`}>Admin → Refresh Registers Now</a>.
       </p>
+
+      <div className="card" style={{ marginTop: '1.5rem', padding: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Register templates (document library)</h2>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+              Re-render any compliance register from the master library with your branding. Drop new templates into{' '}
+              <code style={{ fontSize: '0.85em' }}>server/data/forms/templates/library/&lt;slug&gt;/</code>.
+            </p>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={handleCloneAll} disabled={libraryBusy}>
+            {libraryBusy ? 'Working…' : 'Clone all masters to my org'}
+          </button>
+        </div>
+        {libraryMessage && (
+          <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#334155' }}>{libraryMessage}</div>
+        )}
+        {libraryRegisters.length === 0 ? (
+          <p style={{ marginTop: '0.5rem', color: '#64748b' }}>
+            No register templates registered yet. Run <code>node server/scripts/seed-document-library.mjs</code> to
+            populate the starter set.
+          </p>
+        ) : (
+          <table style={{ width: '100%', marginTop: '0.5rem', fontSize: '0.85rem' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>
+                <th style={{ padding: '.35rem' }}>Register</th>
+                <th style={{ padding: '.35rem' }}>Version</th>
+                <th style={{ padding: '.35rem' }}>Review cycle</th>
+                <th style={{ padding: '.35rem' }}>Cloned</th>
+                <th style={{ padding: '.35rem' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {libraryRegisters.map((m) => (
+                <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '.35rem' }}>
+                    <div>{m.display_name}</div>
+                    <code style={{ fontSize: '.72em', color: '#94a3b8' }}>{m.slug}</code>
+                  </td>
+                  <td style={{ padding: '.35rem', color: '#64748b' }}>{m.version}</td>
+                  <td style={{ padding: '.35rem', color: '#64748b' }}>
+                    {m.renewal_days ? `${m.renewal_days} days` : '—'}
+                  </td>
+                  <td style={{ padding: '.35rem' }}>
+                    {m.clone_id ? <span style={{ color: '#16a34a' }}>Yes</span> : <span style={{ color: '#b91c1c' }}>Not yet</span>}
+                  </td>
+                  <td style={{ padding: '.35rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => handleRenderRegister(m)}
+                      disabled={libraryBusy}
+                    >
+                      Render now
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }

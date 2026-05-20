@@ -53,6 +53,11 @@ export default function StaffProfile() {
   const [saving, setSaving] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [onboardingSending, setOnboardingSending] = useState(false);
+  // Phase 3: one-click orchestrator UI state.
+  const [orchBusy, setOrchBusy] = useState(false);
+  const [orchResult, setOrchResult] = useState(null);
+  const [orchError, setOrchError] = useState('');
+  const [staffReadiness, setStaffReadiness] = useState(null);
   const [contractDownloading, setContractDownloading] = useState(false);
   const [complianceDocs, setComplianceDocs] = useState([]);
   const [policyFiles, setPolicyFiles] = useState([]);
@@ -103,6 +108,11 @@ export default function StaffProfile() {
       const packs = (packsRes?.packs || []).filter((p) => p.workflow === 'staff_onboarding' || p.workflow === 'both');
       setStaffOnboardingDocPacks(packs);
       setEditForm(staffEditFormFromRow(staffData));
+      // Phase 3: pull readiness so the run-onboarding button can show why it's disabled.
+      staff
+        .onboardingRunStatus(id)
+        .then((r) => setStaffReadiness(r?.readiness || null))
+        .catch(() => setStaffReadiness(null));
     } catch (err) {
       console.error('StaffProfile load:', err);
     } finally {
@@ -213,6 +223,29 @@ export default function StaffProfile() {
       alert(err.message || 'Could not download contract');
     } finally {
       setContractDownloading(false);
+    }
+  };
+
+  // Phase 3: one-click orchestrator. Runs readiness + library clone + ensures the
+  // staff_onboarding row exists. Does NOT send the invite email — the existing
+  // "Onboard" / "Resend onboarding email" buttons still drive that, and the
+  // signing layer remains untouched.
+  const handleRunStaffOnboarding = async () => {
+    setOrchBusy(true);
+    setOrchError('');
+    try {
+      const result = await staff.onboardingRun(id);
+      setOrchResult(result);
+      try {
+        const rs = await staff.onboardingRunStatus(id);
+        setStaffReadiness(rs?.readiness || null);
+      } catch {
+        /* keep prev readiness */
+      }
+    } catch (err) {
+      setOrchError(err?.message || 'Run failed');
+    } finally {
+      setOrchBusy(false);
     }
   };
 
@@ -422,7 +455,7 @@ export default function StaffProfile() {
                   onChange={(e) => setStaffOnboardingPackChoice(e.target.value)}
                   style={{ maxWidth: 220, padding: '0.35rem' }}
                   disabled={onboardingSending}
-                  title="Choose which policy PDFs attach to the onboarding email. Organisation default is set under Forms → Form development."
+                  title="Choose which policy PDFs attach to the onboarding email. Organisation default is set under Forms."
                 >
                   <option value="">Organisation default</option>
                   {staffOnboardingDocPacks.map((p) => (
@@ -434,6 +467,71 @@ export default function StaffProfile() {
                 </select>
               </div>
             )}
+            {staffReadiness?.ready === false && (
+              <div
+                style={{
+                  flexBasis: '100%',
+                  padding: '0.5rem 0.75rem',
+                  border: '1px solid #fcd34d',
+                  background: '#fef3c7',
+                  color: '#78350f',
+                  borderRadius: 6,
+                  fontSize: '0.85rem'
+                }}
+              >
+                <strong>Not ready:</strong> {staffReadiness.reason}
+                {(staffReadiness.code === 'NO_POLICY_PDFS' || staffReadiness.code === 'NO_STAFF_DOCUMENT_PACK') && (
+                  <>
+                    {' '}
+                    <Link to={`${pathPrefix}/forms`}>Open Forms to fix</Link>.
+                  </>
+                )}
+              </div>
+            )}
+            {orchError && (
+              <div
+                style={{
+                  flexBasis: '100%',
+                  padding: '0.5rem 0.75rem',
+                  border: '1px solid #fecaca',
+                  background: '#fee2e2',
+                  color: '#991b1b',
+                  borderRadius: 6,
+                  fontSize: '0.85rem'
+                }}
+              >
+                {orchError}
+              </div>
+            )}
+            {orchResult?.steps?.length > 0 && (
+              <details style={{ flexBasis: '100%', fontSize: '0.85rem' }}>
+                <summary style={{ cursor: 'pointer', color: '#334155' }}>
+                  Last run — {orchResult.completed_steps}/{orchResult.total_steps} steps OK · next: {orchResult.next_action}
+                </summary>
+                <ul style={{ margin: '0.4rem 0 0', paddingLeft: '1.1rem' }}>
+                  {orchResult.steps.map((s) => (
+                    <li key={s.name} style={{ color: s.ok ? '#15803d' : '#b91c1c' }}>
+                      {s.ok ? '✓' : '✗'} {s.name}
+                      {s.skipped ? ' (skipped)' : ''}
+                      {s.error ? ` — ${s.error}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleRunStaffOnboarding}
+              disabled={orchBusy || staffReadiness?.ready === false}
+              title={
+                staffReadiness?.ready === false
+                  ? staffReadiness?.reason
+                  : 'Initialise staff onboarding, ensure the staff document pack is ready, and clone master library templates'
+              }
+            >
+              {orchBusy ? 'Running…' : 'Run staff onboarding'}
+            </button>
             {(!data.onboarding_status || data.onboarding_status === 'not_started') && data.email && (
               <button type="button" className="btn btn-primary" onClick={() => handleStartOnboarding(false)} disabled={onboardingSending}>
                 {onboardingSending ? 'Sending…' : 'Onboard'}
@@ -449,7 +547,7 @@ export default function StaffProfile() {
               className="btn btn-secondary"
               onClick={handleDownloadEmploymentContract}
               disabled={contractDownloading}
-              title="Prefilled employment contract from Forms → Staff (PDF or Word)"
+              title="Prefilled employment contract (template-based forms coming soon)"
             >
               {contractDownloading ? 'Downloading…' : 'Download to sign'}
             </button>
@@ -751,7 +849,7 @@ export default function StaffProfile() {
         <h3>Company policy PDFs (for onboarding emails)</h3>
         <p style={{ color: '#64748b', marginBottom: '1rem' }}>
           These PDFs can be attached to staff welcome emails (Onboard) and participant onboarding packs. Group them into packs and set organisation defaults under{' '}
-          <strong>Forms → Form development → Onboarding document packs</strong>.
+          <strong>Forms → Onboarding document packs</strong>.
         </p>
         <div style={{ marginBottom: '1rem' }}>
           <input type="file" accept=".pdf" onChange={handlePolicyUpload} disabled={policyUploading} />

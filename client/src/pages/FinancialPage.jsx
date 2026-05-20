@@ -43,6 +43,9 @@ export default function FinancialPage() {
   /** When set, the Invoice Batches table shows line items for that batch (invoices + outstanding). */
   const [expandedBatchRef, setExpandedBatchRef] = useState(null);
   const [xeroSyncingId, setXeroSyncingId] = useState(null);
+  const [editingDraftRate, setEditingDraftRate] = useState(null);
+  const [draftRateValue, setDraftRateValue] = useState('');
+  const [draftRateSaving, setDraftRateSaving] = useState(false);
 
   const loadDraft = async () => {
     setLoading(true);
@@ -200,6 +203,49 @@ export default function FinancialPage() {
     });
   };
 
+  const isSupportCoordDraftLine = (item) => item?.source_type === 'task';
+
+  const isEditableScHourlyDraftLine = (item) => {
+    const id = String(item?.id || '');
+    if (!isSupportCoordDraftLine(item)) return false;
+    if (id.includes('-km-') || id.includes('traveltime')) return false;
+    return (
+      id.startsWith('task-sc-day-') ||
+      id.startsWith('task-nf2f-') ||
+      (id.startsWith('task-') && !id.startsWith('task-sc-day-'))
+    );
+  };
+
+  const openEditDraftRate = (item) => {
+    setEditingDraftRate(item);
+    setDraftRateValue(String(item.unit_price ?? ''));
+  };
+
+  const closeEditDraftRate = () => {
+    setEditingDraftRate(null);
+    setDraftRateValue('');
+  };
+
+  const handleSaveDraftRate = async (e) => {
+    e.preventDefault();
+    if (!editingDraftRate) return;
+    const price = parseFloat(draftRateValue);
+    if (Number.isNaN(price) || price < 0) {
+      alert('Enter a valid rate.');
+      return;
+    }
+    setDraftRateSaving(true);
+    try {
+      await billing.adjustDraftTaskRate(editingDraftRate.id, price);
+      closeEditDraftRate();
+      await loadDraft();
+    } catch (err) {
+      alert(err.message || 'Failed to update rate');
+    } finally {
+      setDraftRateSaving(false);
+    }
+  };
+
   const handleCreateBatch = async () => {
     if (selectedIds.size === 0) {
       alert('Select at least one line item to include.');
@@ -335,6 +381,7 @@ export default function FinancialPage() {
             <h3 style={{ marginTop: 0 }}>Batch invoices</h3>
             <p style={{ color: '#64748b', marginBottom: '1rem' }}>
               Choose a period (e.g. one week). You&apos;ll see one draft invoice per participant. Click an invoice to view its line items, then <strong>Confirm batch</strong> to save drafts in Nexus only.
+              Support coordination tasks appear as <strong>Support coord.</strong> lines — click <strong>Edit rate</strong> to fix the hourly rate before batching.
               Open the <strong>Invoice Batches</strong> tab and click <strong>Send invoices</strong> to email PDFs from your connected mailbox (Settings → email). If Xero is linked, Nexus also creates invoices there for payment tracking and reconciliation.
             </p>
             <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -404,18 +451,21 @@ export default function FinancialPage() {
                               </tr>
                               {isExpanded && p.items?.length > 0 && (
                                 <tr key={`${p.participant_id}-detail`}>
-                                  <td colSpan={6} style={{ padding: 0, verticalAlign: 'top', borderTop: 'none' }}>
+                                  <td colSpan={9} style={{ padding: 0, verticalAlign: 'top', borderTop: 'none' }}>
                                     <div style={{ padding: '0.75rem 1rem 1rem 2rem', background: 'var(--bg-subtle, #f8fafc)', borderBottom: '1px solid #e2e8f0' }}>
                                       <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', fontWeight: 600 }}>Line items – uncheck to exclude from batch</p>
                                       <table style={{ width: '100%', fontSize: '0.9rem' }}>
                                         <thead>
                                           <tr>
                                             <th style={{ width: 32 }} />
+                                            <th>Type</th>
                                             <th>Date</th>
                                             <th>Description</th>
                                             <th>Item</th>
                                             <th style={{ textAlign: 'right' }}>Qty</th>
+                                            <th style={{ textAlign: 'right' }}>Rate</th>
                                             <th style={{ textAlign: 'right' }}>Total</th>
+                                            <th />
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -429,11 +479,33 @@ export default function FinancialPage() {
                                                   onClick={(e) => e.stopPropagation()}
                                                 />
                                               </td>
+                                              <td>
+                                                {item.source_type === 'task' ? (
+                                                  <span className="badge badge-secondary" title="Support coordination task">Support coord.</span>
+                                                ) : (
+                                                  <span className="badge badge-secondary">Shift</span>
+                                                )}
+                                              </td>
                                               <td>{item.line_date ? formatDate(item.line_date) : ''}</td>
                                               <td>{item.description}</td>
                                               <td style={{ color: '#64748b' }}>{item.support_item_number}</td>
                                               <td style={{ textAlign: 'right' }}>{item.quantity} {item.unit}</td>
+                                              <td style={{ textAlign: 'right' }}>
+                                                ${Number(item.unit_price || 0).toFixed(2)}/{item.unit || 'hr'}
+                                              </td>
                                               <td style={{ textAlign: 'right' }}>${item.total.toFixed(2)}</td>
+                                              <td onClick={(e) => e.stopPropagation()}>
+                                                {isEditableScHourlyDraftLine(item) && (
+                                                  <button
+                                                    type="button"
+                                                    className="btn btn-secondary"
+                                                    style={{ fontSize: '0.75rem' }}
+                                                    onClick={() => openEditDraftRate(item)}
+                                                  >
+                                                    Edit rate
+                                                  </button>
+                                                )}
+                                              </td>
                                             </tr>
                                           ))}
                                         </tbody>
@@ -672,6 +744,38 @@ export default function FinancialPage() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {editingDraftRate && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={closeEditDraftRate}>
+          <div style={{ background: 'var(--bg, #fff)', padding: '1.5rem', borderRadius: 8, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', minWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Edit support coordination rate</h3>
+            <p style={{ margin: '0 0 1rem', fontSize: '0.9rem', color: '#64748b' }}>{editingDraftRate.description}</p>
+            <form onSubmit={handleSaveDraftRate}>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label>Rate ($ per {editingDraftRate.unit || 'hour'})</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={draftRateValue}
+                  onChange={(e) => setDraftRateValue(e.target.value)}
+                  className="form-input"
+                  required
+                />
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                  Item {editingDraftRate.support_item_number}. Updates all tasks in this line before batching.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={closeEditDraftRate}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={draftRateSaving}>
+                  {draftRateSaving ? 'Saving...' : 'Save rate'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

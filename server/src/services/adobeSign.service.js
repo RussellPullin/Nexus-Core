@@ -356,9 +356,65 @@ export async function createAgreementPacket({
 }
 
 export function verifyWebhookPayload(_payload, reqHeaders = {}) {
-  const expectedSecret = process.env.ADOBE_SIGN_WEBHOOK_SECRET || '';
+  // Accept ADOBE_SIGN_WEBHOOK_SECRET; fall back to ADOBE_SIGN_CLIENT_ID (Adobe sends the client ID in x-adobesign-clientid).
+  const expectedSecret =
+    process.env.ADOBE_SIGN_WEBHOOK_SECRET?.trim() ||
+    process.env.ADOBE_SIGN_CLIENT_ID?.trim() ||
+    '';
   if (!expectedSecret) return { valid: true, reason: 'no_secret_configured' };
   const incoming = reqHeaders['x-adobesign-clientid'] || reqHeaders['x-adobesign-signature'] || '';
   if (!incoming) return { valid: false, reason: 'missing_signature_header' };
   return { valid: incoming === expectedSecret, reason: incoming === expectedSecret ? 'signature_ok' : 'signature_mismatch' };
+}
+
+/**
+ * @param {string | null} orgId
+ * @param {string} externalEnvelopeId
+ * @param {string} path
+ * @returns {Promise<Buffer | null>}
+ */
+async function fetchAdobeBinary(orgId, externalEnvelopeId, path) {
+  if (!externalEnvelopeId || String(externalEnvelopeId).startsWith('mock-')) return null;
+  if (!hasConfiguredAdobeForOrg(orgId)) return null;
+  const ctx = await getAdobeRestContext(orgId);
+  if (!ctx) return null;
+  const base = ctx.restBaseUrl.replace(/\/$/, '');
+  const res = await fetch(`${base}${path}`, {
+    headers: { Authorization: `Bearer ${ctx.accessToken}` }
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    const err = new Error(`Adobe Sign fetch failed (${res.status}): ${text.slice(0, 300)}`);
+    err.status = res.status;
+    throw err;
+  }
+  const ab = await res.arrayBuffer();
+  return Buffer.from(ab);
+}
+
+/**
+ * Download the merged signed PDF (all documents combined) for a completed Adobe Sign agreement.
+ * Returns null for mock envelopes or orgs without Adobe configured.
+ * @param {string | null} orgId
+ * @param {string} externalEnvelopeId
+ */
+export async function downloadAgreementCombinedDocument(orgId, externalEnvelopeId) {
+  return fetchAdobeBinary(
+    orgId,
+    externalEnvelopeId,
+    `/agreements/${encodeURIComponent(externalEnvelopeId)}/combinedDocument?attachSupportingDocuments=true&attachAuditReport=false`
+  );
+}
+
+/**
+ * Download the audit certificate PDF for a completed Adobe Sign agreement.
+ * @param {string | null} orgId
+ * @param {string} externalEnvelopeId
+ */
+export async function downloadAgreementAuditTrail(orgId, externalEnvelopeId) {
+  return fetchAdobeBinary(
+    orgId,
+    externalEnvelopeId,
+    `/agreements/${encodeURIComponent(externalEnvelopeId)}/auditTrail`
+  );
 }

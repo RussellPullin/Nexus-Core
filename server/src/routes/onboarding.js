@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { randomUUID } from 'crypto';
 import { db } from '../db/index.js';
 import { canAccessParticipant } from '../middleware/roles.js';
 import {
@@ -19,9 +18,10 @@ import {
   ensureProviderProfile,
   seedCoreTemplates,
   getTemplateCoverage,
-  createAuditEvent
+  createAuditEvent,
+  assertProviderOnboardingReady
 } from '../services/onboarding.service.js';
-import { createAgreementPacket, createAgreementWithDocument, uploadTransientDocument, verifyWebhookPayload } from '../services/adobeSign.service.js';
+import { createAgreementPacket, createAgreementWithDocument, uploadTransientDocument } from '../services/dropboxSign.service.js';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -29,6 +29,11 @@ import { fillConsentForm, getConsentFormPath, convertDocxToPdf } from '../servic
 import { tryPushParticipantDocument } from '../services/orgOnedriveSync.service.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from '../services/notification.service.js';
 import { buildPolicyAttachmentsForEmail } from '../services/onboardingDocumentPacks.service.js';
+import { orchestrateParticipantOnboarding } from '../services/participantOnboardingOrchestrator.service.js';
+import {
+  issueIntakeToken,
+  getLatestIntakeTokenForParticipant
+} from '../services/participantIntakeToken.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
@@ -74,6 +79,149 @@ router.post('/participants/:id/initialize', (req, res) => {
   }
 });
 
+/**
+ * Phase 2: One-click onboarding orchestrator.
+ *
+ * Composes provider readiness + library clone + initialize + generate-form-pack into a
+ * single idempotent endpoint. Returns a per-step status array so the UI can show progress
+ * and the user can see exactly which prerequisite (if any) is blocking. Signature handoff
+ * happens via the existing per-form send endpoints — this orchestrator does not interact
+ * with any signing provider directly.
+ */
+router.post('/participants/:id/onboarding/run', async (req, res) => {
+  try {
+    const result = await orchestrateParticipantOnboarding({
+      participantId: req.params.id,
+      providerOrganisationId: req.body?.provider_organisation_id || null,
+      userId: req.session?.user?.id || null,
+      ...actorContext(req)
+    });
+    const code = result.ready ? 200 : 409;
+    res.status(code).json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Phase 4: Issue a self-service intake token for the participant and email them the link.
+ *
+ * Body (all optional):
+ *   ttl_days       — default 30
+ *   skip_email     — true to just generate the token (coordinator copies/shares it manually)
+ *
+ * Returns the URL only on issue; the token itself is hashed before storage.
+ */
+router.post('/participants/:id/intake-token', async (req, res) => {
+  try {
+    const userId = req.session?.user?.id || null;
+    const participant = db
+      .prepare('SELECT id, name, email, provider_org_id, plan_manager_id FROM participants WHERE id = ?')
+      .get(req.params.id);
+    if (!participant) return res.status(404).json({ error: 'Participant not found' });
+
+    const orgId = participant.provider_org_id || participant.plan_manager_id || null;
+    const issued = issueIntakeToken({
+      participantId: req.params.id,
+      organisationId: orgId,
+      issuedByUserId: userId,
+      ttlDays: Number.isFinite(req.body?.ttl_days) ? Number(req.body.ttl_days) : 30
+    });
+
+    const baseUrl = (process.env.FRONTEND_BASE_URL || process.env.BASE_URL || 'http://localhost:5174').replace(/\/$/, '');
+    const intakeUrl = `${baseUrl}/intake/${issued.token}`;
+
+    let emailSent = false;
+    let emailError = null;
+    if (!req.body?.skip_email && participant.email?.trim() && userId && isEmailConfiguredForUser(userId)) {
+      try {
+        const org = orgId ? db.prepare('SELECT name FROM organisations WHERE id = ?').get(orgId) : null;
+        const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
+        const subject = `Complete your intake details – ${orgName}`;
+        let text = `Hi ${participant.name || 'there'},\n\n`;
+        text += `Please complete your intake details using the secure link below. It saves automatically as you go.\n\n`;
+        text += `Intake form: ${intakeUrl}\n\n`;
+        text += `The link expires on ${new Date(issued.expires_at).toLocaleDateString('en-AU')}. If you have questions reply to this email.\n`;
+        await sendEmailViaRelay(userId, participant.email.trim(), subject, text, null, null);
+        emailSent = true;
+      } catch (e) {
+        emailError = formatSmtpAuthError(e);
+      }
+    }
+
+    createAuditEvent({
+      participantId: req.params.id,
+      actorType: 'user',
+      actorId: userId,
+      eventType: 'participant_intake_token_issued',
+      entityType: 'participant',
+      entityId: req.params.id,
+      newValue: { expires_at: issued.expires_at, email_sent: emailSent },
+      sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
+      userAgent: req.headers['user-agent'] || null
+    });
+
+    res.status(201).json({
+      url: intakeUrl,
+      expires_at: issued.expires_at,
+      email_sent: emailSent,
+      email_error: emailError
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/participants/:id/intake-token', (req, res) => {
+  try {
+    const latest = getLatestIntakeTokenForParticipant(req.params.id);
+    res.json({ token_record: latest || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Phase 2: Detailed onboarding status payload (richer than /status — includes which steps
+ * are currently blocked by readiness checks). Used by ParticipantProfile to render the
+ * "Run onboarding" button + per-form badges.
+ */
+router.get('/participants/:id/onboarding/status', (req, res) => {
+  try {
+    const onboarding = getOnboardingByParticipant(req.params.id);
+    const participant = db
+      .prepare('SELECT id, name, provider_org_id, plan_manager_id FROM participants WHERE id = ?')
+      .get(req.params.id);
+    const providerOrgId =
+      participant?.provider_org_id ||
+      participant?.plan_manager_id ||
+      onboarding?.organisation_id ||
+      null;
+
+    /** @type {{ ready: boolean, reason?: string, code?: string }} */
+    let readiness = { ready: false };
+    if (providerOrgId) {
+      try {
+        assertProviderOnboardingReady(providerOrgId);
+        readiness = { ready: true };
+      } catch (err) {
+        readiness = { ready: false, reason: err.message, code: err.code || 'NOT_READY' };
+      }
+    } else {
+      readiness = { ready: false, reason: 'No provider organisation linked to participant.', code: 'PROVIDER_ORG_MISSING' };
+    }
+
+    res.json({
+      participant: participant ? { id: participant.id, name: participant.name } : null,
+      provider_organisation_id: providerOrgId,
+      readiness,
+      onboarding
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
   try {
     const userId = req.session?.user?.id;
@@ -101,7 +249,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
     if (!attachments.length) {
       return res.status(400).json({
         error:
-          'No PDFs to attach. Upload company policy PDFs (Staff profile → Company policy PDFs), create an onboarding pack under Forms → Form development, and add PDFs to that pack.'
+          'No PDFs to attach. Upload company policy PDFs (Staff profile → Company policy PDFs), create an onboarding pack under Forms, and add PDFs to that pack.'
       });
     }
 
@@ -373,49 +521,6 @@ router.post('/participants/:id/send-signatures', async (req, res) => {
   }
 });
 
-router.post('/webhooks/adobe-sign', (req, res) => {
-  try {
-    const verification = verifyWebhookPayload(req.body, req.headers);
-    if (!verification.valid) {
-      return res.status(401).json({ error: `Invalid webhook signature: ${verification.reason}` });
-    }
-
-    const externalEnvelopeId = req.body?.agreement?.id || req.body?.agreementId || req.body?.externalId || null;
-    const eventType = req.body?.event || req.body?.eventType || 'agreement_signed';
-    if (!externalEnvelopeId) return res.status(400).json({ error: 'Missing external envelope id' });
-
-    const envelope = db.prepare('SELECT * FROM signature_envelopes WHERE external_envelope_id = ?').get(externalEnvelopeId);
-    if (!envelope) return res.status(404).json({ error: 'Envelope not found for webhook' });
-
-    if (eventType.toLowerCase().includes('signed') || eventType === 'agreement_signed') {
-      markEnvelopeCompleted({
-        envelopeId: envelope.id,
-        externalEventId: req.body?.eventId || null,
-        eventType: 'agreement_signed',
-        payload: req.body,
-        sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
-        userAgent: req.headers['user-agent'] || null
-      });
-    } else {
-      db.prepare(`
-        INSERT INTO signature_events (
-          id, envelope_id, provider_name, external_event_id, event_type, event_timestamp, payload_json
-        ) VALUES (?, ?, 'adobe_sign', ?, ?, datetime('now'), ?)
-      `).run(
-        randomUUID(),
-        envelope.id,
-        req.body?.eventId || null,
-        eventType,
-        JSON.stringify(req.body)
-      );
-    }
-
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
 router.get('/participants/:id/status', (req, res) => {
   try {
     const onboarding = getOnboardingByParticipant(req.params.id);
@@ -508,6 +613,38 @@ router.get('/providers/:organisationId/compliance', (req, res) => {
     }
     const dashboard = getProviderComplianceDashboard(oid);
     res.json(dashboard);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/providers/:organisationId/settings', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const oid = req.params.organisationId;
+    if (!req.session.user.org_id || req.session.user.org_id !== oid) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const profile = ensureProviderProfile(oid);
+    seedCoreTemplates(profile.id);
+    const coverage = getTemplateCoverage(profile.id);
+    let readiness = { ready: false, reason: null };
+    try {
+      assertProviderOnboardingReady(oid);
+      readiness = { ready: true, reason: null };
+    } catch (e) {
+      readiness = { ready: false, reason: e.message, code: e.code || 'NOT_READY' };
+    }
+    let config = {};
+    if (profile.config_json) {
+      try { config = JSON.parse(profile.config_json); } catch { config = {}; }
+    }
+    res.json({
+      provider_profile: profile,
+      config,
+      template_coverage: coverage,
+      readiness
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

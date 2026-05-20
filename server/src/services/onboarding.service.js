@@ -10,6 +10,7 @@ import { embedRasterImageAsSinglePagePdf } from './imageToPdf.service.js';
 import { ensurePlanManagerOrg, buildOrgLookupMaps } from './organisations.service.js';
 import { fillServiceAgreement, fillSupportPlan, getServiceAgreementTemplatePath, getSupportPlanTemplatePath } from './formFill.service.js';
 import { composeParticipantLegalName, participantPrefillFieldPaths } from '../../../shared/onboardingFieldRegistry.js';
+import { tryPushParticipantDocument } from './orgOnedriveSync.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -26,6 +27,21 @@ function ensureOnboardingDir() {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function orgHasNexusServiceAgreement(orgId) {
+  if (!orgId) return false;
+  const row = db
+    .prepare(
+      `
+    SELECT i.id FROM nexus_org_form_templates i
+    JOIN nexus_form_template_masters m ON m.id = i.master_id
+    WHERE i.org_id = ? AND m.template_type = 'service_agreement'
+    LIMIT 1
+  `
+    )
+    .get(orgId);
+  return Boolean(row);
 }
 
 function parseJson(value, fallback = null) {
@@ -582,6 +598,10 @@ export async function generateFormPack({
       draftPath = persistFilledDocument(participantId, template.form_type, version, pdfBuffer || filledDocx, ext);
       sourceJson = JSON.stringify({ ...snapshot, template: { id: template.id, form_type: 'privacy_consent', display_name: template.display_name } });
     } else if (template.form_type === 'service_agreement' && getServiceAgreementTemplatePath(tmplPath)) {
+      const saOrgId = organisationId || participant?.provider_org_id || null;
+      if (orgHasNexusServiceAgreement(saOrgId)) {
+        continue;
+      }
       const filledBuffer = await fillServiceAgreement(participant, plan, intake, { ...signatureOptions, db, ...tmplPath });
       draftPath = persistFilledDocument(participantId, template.form_type, version, filledBuffer, 'pdf');
       sourceJson = JSON.stringify({
@@ -807,11 +827,114 @@ export function createEnvelopeRecords({
   return created;
 }
 
+/**
+ * Persist the signed/merged PDF and audit certificate against every form linked to an envelope.
+ * Writes to data/onboarding/, updates signed_document_path and certificate_document_path
+ * on each participant_form_instances row, pushes to OneDrive, and inserts participant_documents.
+ *
+ * Tolerant of missing buffers (logs a warning, never throws into the webhook path).
+ *
+ * @param {object} opts
+ * @param {string} opts.envelopeId
+ * @param {Buffer | null | undefined} [opts.signedBuffer]
+ * @param {Buffer | null | undefined} [opts.certificateBuffer]
+ */
+export function archiveSignedEnvelopeDocument({ envelopeId, signedBuffer, certificateBuffer }) {
+  if (!signedBuffer && !certificateBuffer) return { archived_form_ids: [] };
+  const envelope = db.prepare('SELECT * FROM signature_envelopes WHERE id = ?').get(envelopeId);
+  if (!envelope) return { archived_form_ids: [] };
+
+  ensureOnboardingDir();
+
+  const linkedForms = db.prepare(`
+    SELECT pfi.*, ft.form_type, ft.display_name
+    FROM envelope_form_instances efi
+    JOIN participant_form_instances pfi ON pfi.id = efi.form_instance_id
+    JOIN form_templates ft ON ft.id = pfi.form_template_id
+    WHERE efi.envelope_id = ?
+  `).all(envelopeId);
+
+  const archivedFormIds = [];
+  for (const form of linkedForms) {
+    const safeType = normalizeFormType(form.form_type) || 'custom_form';
+    let signedPath = null;
+    let certPath = null;
+
+    try {
+      if (signedBuffer) {
+        signedPath = join(onboardingDir, `${form.participant_id}-${safeType}-v${form.version}-signed.pdf`);
+        writeFileSync(signedPath, signedBuffer);
+      }
+      if (certificateBuffer) {
+        certPath = join(onboardingDir, `${form.participant_id}-${safeType}-v${form.version}-certificate.pdf`);
+        writeFileSync(certPath, certificateBuffer);
+      }
+    } catch (e) {
+      console.warn('[onboarding] failed to write signed/cert PDF:', e?.message);
+      continue;
+    }
+
+    db.prepare(`
+      UPDATE participant_form_instances
+      SET signed_document_path = COALESCE(?, signed_document_path),
+          certificate_document_path = COALESCE(?, certificate_document_path),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(signedPath, certPath, form.id);
+
+    if (signedBuffer && signedPath) {
+      const display = form.display_name || form.form_type || 'Signed document';
+      const safeFilename = `${display}-signed-v${form.version}.pdf`.replace(/[^a-zA-Z0-9._-]/g, '_');
+      void tryPushParticipantDocument({
+        participantId: form.participant_id,
+        category: display,
+        buffer: signedBuffer,
+        originalFilename: safeFilename,
+        mimeType: 'application/pdf',
+        notes: `Signed via Adobe Sign envelope ${envelopeId}`
+      }).catch((e) => console.warn('[onboarding] OneDrive push signed PDF failed:', e?.message));
+
+      try {
+        db.prepare(`
+          INSERT INTO participant_documents (id, participant_id, filename, category, file_path)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(uuidv4(), form.participant_id, safeFilename, display, signedPath);
+      } catch (e) {
+        console.warn('[onboarding] insert participant_documents (signed) failed:', e?.message);
+      }
+    }
+
+    archivedFormIds.push(form.id);
+  }
+
+  return { archived_form_ids: archivedFormIds };
+}
+
+/**
+ * Return true when every required form instance for this onboarding has been signed.
+ * Used by markEnvelopeCompleted and any orchestration that needs a single completion truth.
+ */
+export function isOnboardingComplete(participantOnboardingId) {
+  const counts = db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN status = 'signed' THEN 1 ELSE 0 END) AS signed_count
+    FROM participant_form_instances
+    WHERE participant_onboarding_id = ?
+      AND status NOT IN ('superseded')
+  `).get(participantOnboardingId) || { total: 0, signed_count: 0 };
+  const total = Number(counts.total || 0);
+  if (total === 0) return false;
+  return Number(counts.signed_count || 0) === total;
+}
+
 export function markEnvelopeCompleted({
   envelopeId,
   externalEventId = null,
   eventType = 'agreement_signed',
   payload = null,
+  signedBuffer = null,
+  certificateBuffer = null,
   sourceIp = null,
   userAgent = null
 }) {
@@ -854,13 +977,17 @@ export function markEnvelopeCompleted({
     );
   });
 
-  const notSignedCount = db.prepare(`
-    SELECT COUNT(*) as c
-    FROM participant_form_instances
-    WHERE participant_onboarding_id = ? AND status != 'signed'
-  `).get(envelope.participant_onboarding_id)?.c || 0;
+  let archivedFormIds = [];
+  if (signedBuffer || certificateBuffer) {
+    try {
+      const result = archiveSignedEnvelopeDocument({ envelopeId, signedBuffer, certificateBuffer });
+      archivedFormIds = result.archived_form_ids || [];
+    } catch (e) {
+      console.warn('[onboarding] archiveSignedEnvelopeDocument failed:', e?.message);
+    }
+  }
 
-  if (notSignedCount === 0) {
+  if (isOnboardingComplete(envelope.participant_onboarding_id)) {
     db.prepare(`
       UPDATE participant_onboarding
       SET status = 'complete', current_stage = 'complete', completed_at = ?, last_activity_at = ?, updated_at = datetime('now')
@@ -876,10 +1003,222 @@ export function markEnvelopeCompleted({
     eventType: 'signature_completed',
     entityType: 'envelope',
     entityId: envelopeId,
-    newValue: { envelope_status: 'signed', linked_forms: linkedForms.map((f) => f.id) },
+    newValue: {
+      envelope_status: 'signed',
+      linked_forms: linkedForms.map((f) => f.id),
+      archived_signed_form_ids: archivedFormIds,
+      has_signed_document: Boolean(signedBuffer),
+      has_audit_certificate: Boolean(certificateBuffer)
+    },
     sourceIp,
     userAgent
   });
+}
+
+/**
+ * Bridge a Nexus structured Service Agreement into the legacy signature lifecycle.
+ *
+ * Today nexus_generated_form_documents is parallel to participant_form_instances, so the
+ * "complete onboarding when all forms signed" rule never sees the Nexus SA. This helper
+ * ensures the same SA also exists as a participant_form_instances row of form_type='service_agreement'
+ * so that Adobe Sign + completion criteria apply uniformly.
+ *
+ * Idempotent: if a non-superseded SA form instance already exists for this onboarding it is
+ * updated to point at the new PDF and bumped in version; otherwise a new row is inserted.
+ *
+ * @param {object} opts
+ * @param {string} opts.participantId
+ * @param {string} opts.organisationId  Provider organisation id
+ * @param {string} opts.pdfAbsolutePath Absolute path to the generated SA PDF
+ * @param {object} [opts.snapshot]      Snapshot json to persist as source_snapshot_json
+ * @param {string} [opts.nexusGeneratedDocumentId] FK back to nexus_generated_form_documents.id
+ * @returns {{ form_instance_id: string, participant_onboarding_id: string } | null}
+ */
+export function bridgeNexusServiceAgreementToFormInstance({
+  participantId,
+  organisationId,
+  pdfAbsolutePath,
+  snapshot = null,
+  nexusGeneratedDocumentId = null
+}) {
+  if (!participantId || !pdfAbsolutePath) return null;
+  const providerProfile = organisationId ? ensureProviderProfile(organisationId) : null;
+  if (!providerProfile) return null;
+
+  // Ensure the participant has an initialised onboarding row.
+  let onboarding = db
+    .prepare('SELECT * FROM participant_onboarding WHERE participant_id = ?')
+    .get(participantId);
+  if (!onboarding) {
+    initializeParticipantOnboarding({
+      participantId,
+      providerOrganisationId: organisationId,
+      actorType: 'system',
+      actorId: 'nexus_sa_bridge'
+    });
+    onboarding = db
+      .prepare('SELECT * FROM participant_onboarding WHERE participant_id = ?')
+      .get(participantId);
+    if (!onboarding) return null;
+  }
+
+  // Resolve (or create) the org's service_agreement form template row.
+  seedCoreTemplates(providerProfile.id);
+  const saTemplate = db
+    .prepare(
+      `SELECT * FROM form_templates
+       WHERE provider_profile_id = ? AND form_type = 'service_agreement' AND is_active = 1
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(providerProfile.id);
+  if (!saTemplate) return null;
+
+  // Supersede any previous draft/generated/sent SA instances for this onboarding.
+  db.prepare(
+    `UPDATE participant_form_instances
+     SET status = 'superseded', superseded_at = ?, updated_at = datetime('now')
+     WHERE participant_onboarding_id = ?
+       AND form_template_id = ?
+       AND status IN ('draft', 'generated', 'sent', 'viewed')`
+  ).run(nowIso(), onboarding.id, saTemplate.id);
+
+  const version = getNextFormVersion(onboarding.id, saTemplate.id);
+  const renewalDays = saTemplate.renewal_days || 365;
+  const dueAt = new Date();
+  dueAt.setDate(dueAt.getDate() + renewalDays);
+
+  const sourceJson = JSON.stringify({
+    ...(snapshot || {}),
+    nexus_generated_form_id: nexusGeneratedDocumentId || null,
+    template: {
+      id: saTemplate.id,
+      form_type: 'service_agreement',
+      display_name: saTemplate.display_name,
+      version: saTemplate.version
+    }
+  });
+
+  const formId = uuidv4();
+  db.prepare(
+    `INSERT INTO participant_form_instances (
+       id, participant_onboarding_id, participant_id, form_template_id, status, version,
+       due_at, generated_at, source_snapshot_json, draft_document_path
+     ) VALUES (?, ?, ?, ?, 'generated', ?, ?, ?, ?, ?)`
+  ).run(
+    formId,
+    onboarding.id,
+    participantId,
+    saTemplate.id,
+    version,
+    dueAt.toISOString(),
+    nowIso(),
+    sourceJson,
+    pdfAbsolutePath
+  );
+
+  return { form_instance_id: formId, participant_onboarding_id: onboarding.id };
+}
+
+/**
+ * Throw with a structured error when the provider org is not yet ready to send onboarding documents.
+ * Designed to surface configuration gaps clearly to UI before any signature/send action runs.
+ *
+ * @param {string} orgId
+ * @returns {{ ready: true, profile: object }}
+ */
+export function assertProviderOnboardingReady(orgId) {
+  if (!orgId) {
+    const err = new Error('Provider organisation is required.');
+    err.code = 'PROVIDER_ORG_MISSING';
+    throw err;
+  }
+  const profile = db.prepare('SELECT * FROM provider_profiles WHERE organisation_id = ?').get(orgId);
+  if (!profile) {
+    const err = new Error('No provider profile for this organisation. Open Forms to initialise it.');
+    err.code = 'PROVIDER_PROFILE_MISSING';
+    throw err;
+  }
+  if (!profile.onboarding_enabled) {
+    const err = new Error('Onboarding is disabled for this organisation. Enable it in Forms settings.');
+    err.code = 'ONBOARDING_DISABLED';
+    throw err;
+  }
+
+  const policyCount =
+    db.prepare('SELECT COUNT(*) as c FROM company_policy_files WHERE provider_profile_id = ?').get(profile.id)?.c || 0;
+  if (policyCount === 0) {
+    const err = new Error('No company policy PDFs uploaded. Upload at least one policy PDF in Forms before sending onboarding.');
+    err.code = 'NO_POLICY_PDFS';
+    throw err;
+  }
+
+  const packCount =
+    db.prepare('SELECT COUNT(*) as c FROM onboarding_document_packs WHERE provider_profile_id = ?').get(profile.id)?.c || 0;
+  if (packCount === 0) {
+    const err = new Error('No onboarding document pack configured. Create at least one pack in Forms.');
+    err.code = 'NO_DOCUMENT_PACK';
+    throw err;
+  }
+
+  return { ready: true, profile };
+}
+
+/**
+ * Phase 3: Readiness gate for staff onboarding. Mirrors `assertProviderOnboardingReady`
+ * but enforces the staff-workflow specific requirements:
+ *   - Provider profile exists with onboarding enabled
+ *   - At least one company policy PDF uploaded
+ *   - At least one document pack with workflow `staff_onboarding` or `both`
+ *
+ * Throws an Error with `.code` matching the reason; callers (orchestrator + UI)
+ * use the code to render guided "fix this" links into the relevant Forms page.
+ */
+export function assertStaffOnboardingReady(orgId) {
+  if (!orgId) {
+    const err = new Error('Provider organisation is required.');
+    err.code = 'PROVIDER_ORG_MISSING';
+    throw err;
+  }
+  const profile = db.prepare('SELECT * FROM provider_profiles WHERE organisation_id = ?').get(orgId);
+  if (!profile) {
+    const err = new Error('No provider profile for this organisation. Open Forms to initialise it.');
+    err.code = 'PROVIDER_PROFILE_MISSING';
+    throw err;
+  }
+  if (!profile.onboarding_enabled) {
+    const err = new Error('Onboarding is disabled for this organisation. Enable it in Forms settings.');
+    err.code = 'ONBOARDING_DISABLED';
+    throw err;
+  }
+
+  const policyCount =
+    db.prepare('SELECT COUNT(*) as c FROM company_policy_files WHERE provider_profile_id = ?').get(profile.id)?.c || 0;
+  if (policyCount === 0) {
+    const err = new Error('No company policy PDFs uploaded. Upload policy PDFs in Forms before sending staff onboarding.');
+    err.code = 'NO_POLICY_PDFS';
+    throw err;
+  }
+
+  // A staff-onboarding pack is one whose workflow is `staff_onboarding` or `both` (or NULL
+  // for legacy rows — those count as participant-only so we exclude them here).
+  const staffPackCount =
+    db
+      .prepare(
+        `SELECT COUNT(*) as c
+         FROM onboarding_document_packs
+         WHERE provider_profile_id = ?
+           AND (workflow = 'staff_onboarding' OR workflow = 'both')`
+      )
+      .get(profile.id)?.c || 0;
+  if (staffPackCount === 0) {
+    const err = new Error(
+      'No staff onboarding document pack configured. Create a pack in Forms with workflow "Staff" or "Both".'
+    );
+    err.code = 'NO_STAFF_DOCUMENT_PACK';
+    throw err;
+  }
+
+  return { ready: true, profile };
 }
 
 export function upsertRenewalTasksForParticipant(participantOnboardingId) {

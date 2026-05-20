@@ -4,8 +4,9 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, createReadStream } from 'fs';
 import { join, resolve, dirname } from 'path';
+import { EDITABLE_SECTIONS } from '../data/serviceAgreementSpring2V3/fieldCatalog.js';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
@@ -15,6 +16,8 @@ import {
   parseJson,
   baselineVariableDefaults
 } from '../services/nexusFormTemplateRuntime.service.js';
+import { buildServiceAgreementOrgPreviewSnapshot } from '../services/serviceAgreementSnapshot.service.js';
+import { generateServiceAgreementPdfBuffer } from '../services/serviceAgreementPdf.service.js';
 import { VARIABLE_GROUPS } from '../data/serviceAgreementSpring2V3/variableSchema.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -164,12 +167,14 @@ ROUTER.get('/instances/:id/preview-model', requireAdminOrDelegate, (req, res) =>
     if (!row) return res.status(404).json({ error: 'Not found.' });
     const merged = mergeVariableValues(row.master_variable_schema_json, row.variable_values_json);
     const branding = mergeBranding(row.branding_json);
+    const definition = parseJson(row.master_definition_json, {});
     res.json({
       variable_values: merged,
       variable_defaults: baselineVariableDefaults(row.master_variable_schema_json),
       branding,
       variable_groups: VARIABLE_GROUPS,
-      definition_json: parseJson(row.master_definition_json, {}),
+      definition_json: definition,
+      editable_sections: definition.editableSections || EDITABLE_SECTIONS,
       instance: {
         id: row.id,
         label: row.label,
@@ -180,6 +185,66 @@ ROUTER.get('/instances/:id/preview-model', requireAdminOrDelegate, (req, res) =>
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+ROUTER.get('/instances/:id/preview.pdf', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const orgId = orgIdForUser(req.session.user.id);
+    if (!orgId) return res.status(400).json({ error: 'No organisation.' });
+    const row = db
+      .prepare(
+        `
+      SELECT i.*, m.template_type, m.definition_json AS master_definition_json, m.variable_schema_json AS master_variable_schema_json
+      FROM nexus_org_form_templates i
+      JOIN nexus_form_template_masters m ON m.id = i.master_id
+      WHERE i.id = ? AND i.org_id = ?
+    `
+      )
+      .get(req.params.id, orgId);
+    if (!row) return res.status(404).json({ error: 'Not found.' });
+    if (row.template_type !== 'service_agreement') {
+      return res.status(400).json({ error: 'Preview PDF is only available for service agreement templates.' });
+    }
+    const master = {
+      id: row.master_id,
+      template_key: row.template_key,
+      definition_json: row.master_definition_json,
+      variable_schema_json: row.master_variable_schema_json
+    };
+    const snapshot = buildServiceAgreementOrgPreviewSnapshot({
+      orgId,
+      masterRow: master,
+      orgTemplateRow: row
+    });
+    const pdfBuf = await generateServiceAgreementPdfBuffer(snapshot);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="Services-Agreement-template-preview.pdf"');
+    res.send(pdfBuf);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+ROUTER.get('/instances/:id/logo', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const orgId = orgIdForUser(req.session.user.id);
+    if (!orgId) return res.status(404).end();
+    const row = db
+      .prepare(`SELECT branding_json FROM nexus_org_form_templates WHERE id = ? AND org_id = ?`)
+      .get(req.params.id, orgId);
+    if (!row) return res.status(404).end();
+    const branding = mergeBranding(row.branding_json);
+    const rel = branding.logo_relative_path;
+    if (!rel) return res.status(404).end();
+    const abs = join(projectRoot, rel);
+    if (!existsSync(abs)) return res.status(404).end();
+    const ext = abs.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+    res.setHeader('Content-Type', ext);
+    createReadStream(abs).pipe(res);
+  } catch {
+    res.status(500).end();
   }
 });
 

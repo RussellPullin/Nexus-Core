@@ -21,6 +21,9 @@ import OnboardingPage from './pages/OnboardingPage';
 import AdminPage from './pages/AdminPage';
 import RegistersPage from './pages/RegistersPage';
 import FeatureFlagsAdminPage from './pages/FeatureFlagsAdminPage';
+import DocumentLibraryAdminPage from './pages/DocumentLibraryAdminPage';
+import IntakePage from './pages/IntakePage';
+import CompliancePage from './pages/CompliancePage';
 import LoginPage from './pages/LoginPage';
 import SetupOrgPage from './pages/SetupOrgPage';
 import SettingsPage from './pages/SettingsPage';
@@ -288,6 +291,7 @@ export default function App() {
           <Route path="/setup-org" element={<SetupOrgPage />} />
           <Route path="/staff-onboarding/:token" element={<StaffOnboardingFormPage />} />
           <Route path="/staff-onboarding/renew/:token" element={<StaffRenewalPage />} />
+          <Route path="/intake/:token" element={<IntakePage />} />
 
           <Route path="/participants/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
           <Route path="/directory" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
@@ -326,6 +330,8 @@ export default function App() {
               <Route path="registers" element={<RegistersPage />} />
               <Route path="admin" element={<AdminPage />} />
               <Route path="admin/feature-flags" element={<FeatureFlagsAdminPage />} />
+              <Route path="admin/document-library" element={<DocumentLibraryAdminPage />} />
+              <Route path="compliance" element={<CompliancePage />} />
             </Route>
           </Route>
         </Routes>

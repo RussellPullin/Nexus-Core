@@ -13,6 +13,10 @@ import { buildServiceAgreementSnapshot } from '../services/serviceAgreementSnaps
 import { computeServiceAgreementGaps } from '../services/serviceAgreementGaps.service.js';
 import { generateServiceAgreementPdfBuffer } from '../services/serviceAgreementPdf.service.js';
 import { tryPushParticipantDocument } from '../services/orgOnedriveSync.service.js';
+import {
+  bridgeNexusServiceAgreementToFormInstance,
+  createAuditEvent
+} from '../services/onboarding.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -177,11 +181,51 @@ ROUTER.post('/:participantId/service-agreements/generate', async (req, res) => {
       }
     }
 
+    // Bridge into the legacy participant_form_instances lifecycle so Adobe Sign +
+    // onboarding completion treat the Nexus SA uniformly with privacy_consent / support_plan.
+    let bridgedFormInstanceId = null;
+    let bridgedOnboardingId = null;
+    try {
+      const bridged = bridgeNexusServiceAgreementToFormInstance({
+        participantId,
+        organisationId: orgId,
+        pdfAbsolutePath: absPath,
+        snapshot,
+        nexusGeneratedDocumentId: docId
+      });
+      bridgedFormInstanceId = bridged?.form_instance_id || null;
+      bridgedOnboardingId = bridged?.participant_onboarding_id || null;
+    } catch (e) {
+      console.warn('[service-agreements] bridge to participant_form_instances skipped:', e?.message);
+    }
+
+    try {
+      createAuditEvent({
+        participantId,
+        participantOnboardingId: bridgedOnboardingId,
+        actorType: 'user',
+        actorId: userId,
+        eventType: 'nexus_service_agreement_generated',
+        entityType: 'nexus_generated_form',
+        entityId: docId,
+        newValue: {
+          org_template_id: orgTemplateId,
+          form_instance_id: bridgedFormInstanceId,
+          onedrive_web_url
+        },
+        sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
+        userAgent: req.headers['user-agent'] || null
+      });
+    } catch (e) {
+      console.warn('[service-agreements] audit event failed:', e?.message);
+    }
+
     res.status(201).json({
       id: docId,
       participant_id: participantId,
       download_url: `/api/generated-forms/${docId}/pdf`,
-      onedrive_web_url
+      onedrive_web_url,
+      form_instance_id: bridgedFormInstanceId
     });
   } catch (err) {
     console.error('[service-agreements/generate]', err);

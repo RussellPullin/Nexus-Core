@@ -8,7 +8,8 @@ import {
   getSupportCoordLineItem,
   roundToBillableUnits,
   buildTaskInvoiceLineItems,
-  resolveSupportCoordProviderTravelKmItem
+  resolveSupportCoordProviderTravelKmItem,
+  resolveCoordinatorTaskUnitPrice
 } from '../services/coordinatorTasks.service.js';
 import PDFDocument from 'pdfkit';
 
@@ -89,7 +90,8 @@ router.post('/', (req, res) => {
       includes_travel,
       travel_km,
       travel_time_min,
-      ndis_line_item_id
+      ndis_line_item_id,
+      unit_price: bodyUnitPrice
     } = req.body;
 
     if (!participant_id || !staff_id || !task_type || !activity_date || duration_minutes == null) {
@@ -111,13 +113,15 @@ router.post('/', (req, res) => {
     const interval = userId ? getBillingIntervalForUser(userId) : 15;
 
     const lineItem = ndis_line_item_id
-      ? db.prepare('SELECT id, rate FROM ndis_line_items WHERE id = ?').get(ndis_line_item_id)
+      ? db
+          .prepare('SELECT id, rate, rate_remote, rate_very_remote FROM ndis_line_items WHERE id = ?')
+          .get(ndis_line_item_id)
       : getSupportCoordLineItem(participant_id, activity_date);
 
     if (!lineItem) return res.status(400).json({ error: 'No NDIS line items found. Import the NDIS pricing catalogue in NDIS Pricing first.' });
 
     const quantity = roundToBillableUnits(Number(duration_minutes) || 0, interval);
-    const unitPrice = lineItem.rate;
+    const unitPrice = resolveCoordinatorTaskUnitPrice(participant_id, lineItem, bodyUnitPrice);
 
     const id = uuidv4();
     db.prepare(`
@@ -279,19 +283,26 @@ router.put('/:id', (req, res) => {
       includes_travel,
       travel_km,
       travel_time_min,
-      ndis_line_item_id
+      ndis_line_item_id,
+      unit_price: bodyUnitPrice
     } = req.body;
+
+    if (task.billing_invoice_id) {
+      return res.status(400).json({ error: 'Cannot edit task that is on a billing invoice. Void the invoice first.' });
+    }
 
     const interval = userId ? getBillingIntervalForUser(userId) : 15;
 
     const lineItem = ndis_line_item_id
-      ? db.prepare('SELECT id, rate FROM ndis_line_items WHERE id = ?').get(ndis_line_item_id)
+      ? db
+          .prepare('SELECT id, rate, rate_remote, rate_very_remote FROM ndis_line_items WHERE id = ?')
+          .get(ndis_line_item_id)
       : getSupportCoordLineItem(task.participant_id, activity_date || task.activity_date);
 
     if (!lineItem) return res.status(400).json({ error: 'No NDIS line item found' });
 
     const quantity = roundToBillableUnits(Number(duration_minutes ?? task.duration_minutes) || 0, interval);
-    const unitPrice = lineItem.rate;
+    const unitPrice = resolveCoordinatorTaskUnitPrice(task.participant_id, lineItem, bodyUnitPrice);
 
     db.prepare(`
       UPDATE coordinator_tasks SET

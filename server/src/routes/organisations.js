@@ -1,9 +1,55 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
+import { extname, join, resolve, dirname } from 'path';
+import { writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { tenantParticipantClause } from '../lib/orgScopeSql.js';
+import { getOrgRenderContext } from '../services/orgContext.service.js';
+import { seedOrgFromMasters } from '../services/orgBootstrap.service.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectRoot = resolve(__dirname, '../..');
+const orgLogoDir = process.env.DATA_DIR
+  ? join(process.env.DATA_DIR, 'uploads', 'org-logos')
+  : join(projectRoot, 'data', 'uploads', 'org-logos');
+
+const memoryUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 } // 4 MB cap
+});
+
+const ORG_PROFILE_FIELDS = [
+  'legal_name',
+  'trading_name',
+  'abn',
+  'acn',
+  'ndis_reg_number',
+  'email',
+  'phone',
+  'website',
+  'address',
+  'postal_address',
+  'street_address',
+  'primary_contact_name',
+  'primary_contact_role',
+  'primary_contact_email',
+  'primary_contact_phone',
+  'default_signatory_name',
+  'default_signatory_role',
+  'default_signatory_email',
+  'bank_name',
+  'bsb',
+  'account_name',
+  'account_number',
+  'xero_short_code',
+  'brand_primary_color',
+  'brand_accent_color',
+  'letterhead_footer_text'
+];
 
 const router = Router();
 router.use(requireAuth);
@@ -251,6 +297,119 @@ router.delete('/:id/contacts/:contactId', requireAdminOrDelegate, (req, res) => 
   }
   db.prepare('DELETE FROM contacts WHERE id = ? AND organisation_id = ?').run(req.params.contactId, req.params.id);
   res.status(204).send();
+});
+
+// -------------------- Phase 1: Org profile + logo endpoints --------------------
+
+/** Return canonical render context for the requester's own org (used by the setup wizard). */
+router.get('/me/profile', (req, res) => {
+  try {
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
+    const ctx = getOrgRenderContext(orgId);
+    const row = db.prepare('SELECT setup_completed_at FROM organisations WHERE id = ?').get(orgId);
+    res.json({
+      organisation_id: orgId,
+      setup_completed_at: row?.setup_completed_at || null,
+      ...ctx
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Save the org profile. Accepts a subset of `ORG_PROFILE_FIELDS`; only provided keys are
+ * updated so the wizard can save step-by-step.
+ *
+ * When `setup_completed=true` is supplied, we stamp `setup_completed_at` so downstream
+ * automation knows the org is ready to receive participants/staff.
+ */
+router.put('/me/profile', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
+    const updates = [];
+    const params = [];
+    for (const field of ORG_PROFILE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, field)) {
+        updates.push(`${field} = ?`);
+        const raw = req.body[field];
+        params.push(raw === '' ? null : raw);
+      }
+    }
+    // Legacy `name` column drives most UI labels — keep it in sync with trading_name when supplied.
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'name')) {
+      updates.push('name = ?');
+      params.push(req.body.name || null);
+    } else if (req.body?.trading_name) {
+      updates.push('name = COALESCE(name, ?)');
+      params.push(req.body.trading_name);
+    }
+    if (req.body?.setup_completed) {
+      updates.push("setup_completed_at = datetime('now')");
+    }
+    if (!updates.length) {
+      return res.status(400).json({ error: 'No updatable fields supplied' });
+    }
+    params.push(orgId);
+    db.prepare(`UPDATE organisations SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+
+    let seedSummary = null;
+    if (req.body?.setup_completed) {
+      try {
+        seedSummary = seedOrgFromMasters(orgId);
+      } catch (seedErr) {
+        console.warn('[orgBootstrap] seed on setup_completed failed:', seedErr?.message);
+        seedSummary = { error: seedErr?.message || 'seed failed' };
+      }
+    }
+
+    const ctx = getOrgRenderContext(orgId);
+    res.json({ organisation_id: orgId, ...ctx, seed: seedSummary });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Manually re-run the master template seed for the current org. Idempotent — existing clones
+ * are skipped, only newly added masters become available.
+ */
+router.post('/me/seed-templates', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
+    const summary = seedOrgFromMasters(orgId);
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Upload the org logo. Stored under `data/uploads/org-logos/<orgId>.<ext>` and the resulting
+ * path is saved to `organisations.logo_path` so every renderer can stamp it onto documents.
+ */
+router.post('/me/logo', requireAdminOrDelegate, memoryUpload.single('logo'), (req, res) => {
+  try {
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
+    if (!req.file) return res.status(400).json({ error: 'logo file required (multipart field: logo)' });
+    const ext = (extname(req.file.originalname || '').toLowerCase() || '.png').replace(/[^.a-z0-9]/g, '');
+    const safeExt = ['.png', '.jpg', '.jpeg', '.svg', '.webp'].includes(ext) ? ext : '.png';
+    if (!existsSync(orgLogoDir)) mkdirSync(orgLogoDir, { recursive: true });
+    const existing = db.prepare('SELECT logo_path FROM organisations WHERE id = ?').get(orgId);
+    if (existing?.logo_path && existsSync(existing.logo_path)) {
+      try { unlinkSync(existing.logo_path); } catch {}
+    }
+    const absPath = join(orgLogoDir, `${orgId}${safeExt}`);
+    writeFileSync(absPath, req.file.buffer);
+    db.prepare('UPDATE organisations SET logo_path = ? WHERE id = ?').run(absPath, orgId);
+    res.json({ logo_path: absPath, size: req.file.size, mime: req.file.mimetype });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;
