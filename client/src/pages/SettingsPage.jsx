@@ -794,7 +794,7 @@ function ShifterIntegrationCard() {
               className="form-input"
               placeholder={
                 linkInfo?.organization_name
-                  ? `Default: Nexus name “${linkInfo.organization_name}”`
+                  ? `Default: Nexus name "${linkInfo.organization_name}"`
                   : 'Leave blank to use Nexus organisation name'
               }
               value={shifterNameOverride}
@@ -1241,8 +1241,8 @@ function BusinessSetup() {
         </div>
       )}
 
-      <h4 className=”settings-subsection-title”>Signatures – Dropbox Sign</h4>
-      <p className=”settings-desc”>
+      <h4 className="settings-subsection-title">Signatures – Dropbox Sign</h4>
+      <p className="settings-desc">
         Connect your Dropbox Sign account so participant onboarding agreements are sent for e-signature automatically.
         Use an API key for simple setup, or OAuth to connect a specific Dropbox Sign account per organisation.
       </p>
@@ -1257,8 +1257,8 @@ function BusinessSetup() {
           {biz.dropbox_sign_oauth_linked ? (
             <div style={{ marginTop: '0.5rem' }}>
               <button
-                type=”button”
-                className=”btn btn-secondary”
+                type="button"
+                className="btn btn-secondary"
                 onClick={async () => {
                   setMsg('');
                   try {
@@ -1280,7 +1280,7 @@ function BusinessSetup() {
         <div style={{ marginBottom: '1rem' }}>
           {!biz.dropbox_sign_oauth_via_env && (
             <p
-              className=”settings-desc”
+              className="settings-desc"
               style={{
                 marginBottom: '0.75rem',
                 color: '#b45309',
@@ -1299,8 +1299,8 @@ function BusinessSetup() {
             </p>
           )}
           <button
-            type=”button”
-            className=”btn btn-primary”
+            type="button"
+            className="btn btn-primary"
             disabled={!biz.dropbox_sign_oauth_via_env}
             onClick={async () => {
               setMsg('');
