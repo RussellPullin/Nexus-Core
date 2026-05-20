@@ -20,21 +20,27 @@ function hexToRgb(hex) {
 }
 
 function resolveLogoFullPath(branding, org) {
-  // Phase 1: prefer the org-level logo uploaded via the setup wizard.
+  const candidates = [];
+  // Phase 1: prefer the org-level logo uploaded via the setup wizard. May be an
+  // absolute path, a project-relative path, or a bare filename (legacy
+  // `business_settings.logo_path`).
   if (org?.logo_path) {
-    const direct = String(org.logo_path);
-    if (existsSync(direct)) return direct;
+    const v = String(org.logo_path).trim();
+    if (v) {
+      candidates.push(v);
+      candidates.push(join(projectRoot, v));
+      candidates.push(join(projectRoot, 'data', 'uploads', v.replace(/^.*[/\\]/, '')));
+    }
   }
   const rel = branding?.logo_relative_path;
-  if (!rel) return null;
-  const trimmed = String(rel).trim();
-  const candidates = [
-    join(projectRoot, trimmed),
-    join(projectRoot, 'data', 'uploads', trimmed.replace(/^.*[/\\]/, '')),
-    join(process.env.DATA_DIR || join(projectRoot, 'data'), 'uploads', trimmed.replace(/^.*[/\\]/, ''))
-  ];
+  if (rel) {
+    const trimmed = String(rel).trim();
+    candidates.push(join(projectRoot, trimmed));
+    candidates.push(join(projectRoot, 'data', 'uploads', trimmed.replace(/^.*[/\\]/, '')));
+    candidates.push(join(process.env.DATA_DIR || join(projectRoot, 'data'), 'uploads', trimmed.replace(/^.*[/\\]/, '')));
+  }
   for (const p of candidates) {
-    if (existsSync(p)) return p;
+    if (p && existsSync(p)) return p;
   }
   return null;
 }
@@ -94,11 +100,27 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
     const drawFooterOnCurrentPage = () => {
       const { bits, ctrl } = footerText(snapshot);
       const fy = doc.page.height - 42;
+      doc.save();
       doc.fontSize(7).fillColor('#475569').font(font);
-      doc.text(bits, margin, fy, { width: pageWidth - 2 * margin, align: 'center' });
+      // lineBreak: false + height clamps stop pdfkit from auto-paginating when the
+      // footer line is too long to fit (which was producing 10 blank trailing pages).
+      doc.text(bits, margin, fy, {
+        width: pageWidth - 2 * margin,
+        align: 'center',
+        lineBreak: false,
+        height: 9,
+        ellipsis: true
+      });
       if (ctrl) {
-        doc.text(ctrl, margin, fy + 10, { width: pageWidth - 2 * margin, align: 'center' });
+        doc.text(ctrl, margin, fy + 10, {
+          width: pageWidth - 2 * margin,
+          align: 'center',
+          lineBreak: false,
+          height: 9,
+          ellipsis: true
+        });
       }
+      doc.restore();
     };
 
     /* Header band */
@@ -333,10 +355,12 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
     y += 88;
 
     const range = doc.bufferedPageRange();
-    for (let i = 0; i < range.count; i++) {
+    const pageCountAtFooterTime = range.count;
+    for (let i = 0; i < pageCountAtFooterTime; i++) {
       doc.switchToPage(range.start + i);
       drawFooterOnCurrentPage();
     }
+    doc.flushPages();
     doc.end();
   });
 }
