@@ -3,11 +3,14 @@
  */
 import PDFDocument from 'pdfkit';
 import { existsSync } from 'fs';
-import { join, resolve, dirname } from 'path';
+import { join, resolve, dirname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
+const dataUploadsDir = process.env.DATA_DIR
+  ? join(process.env.DATA_DIR, 'uploads')
+  : join(projectRoot, 'data', 'uploads');
 
 function hexToRgb(hex) {
   const h = String(hex || '').replace('#', '').trim();
@@ -20,29 +23,55 @@ function hexToRgb(hex) {
 }
 
 function resolveLogoFullPath(branding, org) {
-  const candidates = [];
-  // Phase 1: prefer the org-level logo uploaded via the setup wizard. May be an
-  // absolute path, a project-relative path, or a bare filename (legacy
-  // `business_settings.logo_path`).
+  // Phase 1: prefer the org-level logo uploaded via the setup wizard (absolute path).
   if (org?.logo_path) {
-    const v = String(org.logo_path).trim();
-    if (v) {
-      candidates.push(v);
-      candidates.push(join(projectRoot, v));
-      candidates.push(join(projectRoot, 'data', 'uploads', v.replace(/^.*[/\\]/, '')));
+    const raw = String(org.logo_path).trim();
+    if (raw) {
+      const candidates = isAbsolute(raw)
+        ? [raw]
+        : [
+            join(projectRoot, raw),
+            join(dataUploadsDir, raw.replace(/^.*[/\\]/, '')),
+            join(dataUploadsDir, raw)
+          ];
+      for (const p of candidates) {
+        if (existsSync(p)) return p;
+      }
     }
   }
-  const rel = branding?.logo_relative_path;
-  if (rel) {
-    const trimmed = String(rel).trim();
-    candidates.push(join(projectRoot, trimmed));
-    candidates.push(join(projectRoot, 'data', 'uploads', trimmed.replace(/^.*[/\\]/, '')));
-    candidates.push(join(process.env.DATA_DIR || join(projectRoot, 'data'), 'uploads', trimmed.replace(/^.*[/\\]/, '')));
+  // Legacy: Settings → Business stored a relative filename in business_settings.logo_path
+  // and copied that into snapshot.org.business_logo_filename.
+  const legacy = org?.business_logo_filename;
+  if (legacy) {
+    const file = String(legacy).trim().replace(/^.*[/\\]/, '');
+    const candidates = [
+      join(dataUploadsDir, file),
+      join(projectRoot, 'data', 'uploads', file)
+    ];
+    for (const p of candidates) {
+      if (existsSync(p)) return p;
+    }
   }
+  // Template branding fallback.
+  const rel = branding?.logo_relative_path;
+  if (!rel) return null;
+  const trimmed = String(rel).trim();
+  const candidates = [
+    join(projectRoot, trimmed),
+    join(dataUploadsDir, trimmed.replace(/^.*[/\\]/, '')),
+    join(dataUploadsDir, trimmed)
+  ];
   for (const p of candidates) {
-    if (p && existsSync(p)) return p;
+    if (existsSync(p)) return p;
   }
   return null;
+}
+
+function pickColor(orgValue, brandingValue, fallbackHex) {
+  const isValid = (v) => typeof v === 'string' && /^#?[0-9a-fA-F]{6}$/.test(v.trim());
+  if (isValid(orgValue)) return orgValue.trim();
+  if (isValid(brandingValue)) return brandingValue.trim();
+  return fallbackHex;
 }
 
 function footerText(snapshot) {
@@ -81,8 +110,13 @@ function ensureSpace(doc, y, needed, margin, pageMaxY) {
 export function generateServiceAgreementPdfBuffer(snapshot) {
   return new Promise((resolvePromise, reject) => {
     const branding = snapshot.branding || {};
-    const primary = hexToRgb(branding.primary_color);
-    const accent = hexToRgb(branding.accent_color);
+    const orgBlock = snapshot.org || {};
+    // Prefer the org-profile colours (set via the setup wizard / Settings → Org profile);
+    // fall back to the template branding, then a tasteful default.
+    const primaryHex = pickColor(orgBlock.primary_color, branding.primary_color, '#1e3a5f');
+    const accentHex = pickColor(orgBlock.accent_color, branding.accent_color, '#2563eb');
+    const primary = hexToRgb(primaryHex);
+    const accent = hexToRgb(accentHex);
     const font = branding.body_font && branding.body_font !== 'Helvetica' ? 'Helvetica' : 'Helvetica';
 
     const doc = new PDFDocument({ margin: 48, size: 'A4', bufferPages: true });
@@ -100,15 +134,16 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
     const drawFooterOnCurrentPage = () => {
       const { bits, ctrl } = footerText(snapshot);
       const fy = doc.page.height - 42;
-      doc.save();
       doc.fontSize(7).fillColor('#475569').font(font);
-      // lineBreak: false + height clamps stop pdfkit from auto-paginating when the
-      // footer line is too long to fit (which was producing 10 blank trailing pages).
+      // CRITICAL: lineBreak:false + a small explicit height stops pdfkit from
+      // auto-paginating when the footer text is long. Without this, a long org
+      // address overflows the footer line and creates an empty trailing page,
+      // and the loop in bufferedPageRange then cascades the bug for every page.
       doc.text(bits, margin, fy, {
         width: pageWidth - 2 * margin,
         align: 'center',
         lineBreak: false,
-        height: 9,
+        height: 10,
         ellipsis: true
       });
       if (ctrl) {
@@ -116,11 +151,10 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
           width: pageWidth - 2 * margin,
           align: 'center',
           lineBreak: false,
-          height: 9,
+          height: 10,
           ellipsis: true
         });
       }
-      doc.restore();
     };
 
     /* Header band */
@@ -354,13 +388,13 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
     }
     y += 88;
 
+    // Snapshot the page range BEFORE drawing footers — lineBreak:false above stops
+    // text() from auto-paginating, so this fixed bound is now safe.
     const range = doc.bufferedPageRange();
-    const pageCountAtFooterTime = range.count;
-    for (let i = 0; i < pageCountAtFooterTime; i++) {
+    for (let i = 0; i < range.count; i++) {
       doc.switchToPage(range.start + i);
       drawFooterOnCurrentPage();
     }
-    doc.flushPages();
     doc.end();
   });
 }

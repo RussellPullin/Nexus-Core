@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { formTemplates } from '../lib/api';
+import { formTemplates, organisations } from '../lib/api';
 
 const ORG_FIELD_KEYS = new Set([
   'org_legal_name',
@@ -54,6 +54,10 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
   const [metadata, setMetadata] = useState({});
   const [expandedSection, setExpandedSection] = useState('s1');
   const [logoFile, setLogoFile] = useState(null);
+  const [orgProfile, setOrgProfile] = useState(null);
+  const [brandPrimary, setBrandPrimary] = useState('#1e3a5f');
+  const [brandAccent, setBrandAccent] = useState('#2563eb');
+  const [savingBrand, setSavingBrand] = useState(false);
 
   const notify = (msg, isError) => {
     if (onMessage) onMessage(msg, isError);
@@ -96,6 +100,47 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    organisations
+      .getMyProfile()
+      .then((p) => {
+        setOrgProfile(p?.org || null);
+        if (p?.branding?.primaryColor) setBrandPrimary(p.branding.primaryColor);
+        if (p?.branding?.accentColor) setBrandAccent(p.branding.accentColor);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveBranding = async () => {
+    setSavingBrand(true);
+    try {
+      await organisations.updateMyProfile({
+        brand_primary_color: brandPrimary || null,
+        brand_accent_color: brandAccent || null
+      });
+      notify('Brand colours saved. Re-download the preview to see them applied.');
+    } catch (e) {
+      notify(e.message || 'Save failed', true);
+    } finally {
+      setSavingBrand(false);
+    }
+  };
+
+  const handleUploadOrgLogo = async (file) => {
+    if (!file) return;
+    setSavingBrand(true);
+    try {
+      await organisations.uploadMyLogo(file);
+      const refreshed = await organisations.getMyProfile();
+      setOrgProfile(refreshed?.org || null);
+      notify('Logo uploaded — re-download the preview to see it in the header.');
+    } catch (e) {
+      notify(e.message || 'Upload failed', true);
+    } finally {
+      setSavingBrand(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!instanceId) return;
@@ -152,11 +197,77 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
         template preview and are filled from each participant’s profile and onboarding intake when you generate an agreement.
       </p>
 
+      <div className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
+        <h3 className="forms-subheading" style={{ marginTop: 0 }}>Organisation branding</h3>
+        <p className="forms-muted" style={{ fontSize: '0.85rem', margin: '0 0 0.75rem' }}>
+          Colours and logo applied to every generated document (Service Agreement, policies, registers). Saved to your organisation profile.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', alignItems: 'end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <span style={{ fontSize: '0.8rem', color: '#475569' }}>Primary colour (header band)</span>
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+              <input
+                type="color"
+                value={brandPrimary || '#1e3a5f'}
+                onChange={(e) => setBrandPrimary(e.target.value)}
+                style={{ width: 40, height: 32, padding: 0, border: '1px solid #cbd5e1', borderRadius: 4 }}
+              />
+              <input
+                type="text"
+                className="form-input"
+                value={brandPrimary || ''}
+                onChange={(e) => setBrandPrimary(e.target.value)}
+                placeholder="#1e3a5f"
+                style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+              />
+            </div>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <span style={{ fontSize: '0.8rem', color: '#475569' }}>Accent colour (section bars)</span>
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+              <input
+                type="color"
+                value={brandAccent || '#2563eb'}
+                onChange={(e) => setBrandAccent(e.target.value)}
+                style={{ width: 40, height: 32, padding: 0, border: '1px solid #cbd5e1', borderRadius: 4 }}
+              />
+              <input
+                type="text"
+                className="form-input"
+                value={brandAccent || ''}
+                onChange={(e) => setBrandAccent(e.target.value)}
+                placeholder="#2563eb"
+                style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+              />
+            </div>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <span style={{ fontSize: '0.8rem', color: '#475569' }}>Replace org logo</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/svg+xml,image/webp"
+              onChange={(e) => handleUploadOrgLogo(e.target.files?.[0] || null)}
+            />
+            {orgProfile?.hasLogo || orgProfile?.logoPath ? (
+              <span style={{ fontSize: '0.75rem', color: '#16a34a' }}>Org logo on file ✓</span>
+            ) : (
+              <span style={{ fontSize: '0.75rem', color: '#b91c1c' }}>No org logo on file</span>
+            )}
+          </label>
+        </div>
+        <div style={{ marginTop: '0.75rem' }}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveBranding} disabled={savingBrand}>
+            {savingBrand ? 'Saving…' : 'Save brand colours'}
+          </button>
+        </div>
+      </div>
+
       <div className="forms-logo-row card" style={{ padding: '1rem', marginBottom: '1rem' }}>
         <div>
-          <h3 className="forms-subheading" style={{ marginTop: 0 }}>Logo (optional)</h3>
+          <h3 className="forms-subheading" style={{ marginTop: 0 }}>Template-only logo override (optional)</h3>
           <p className="forms-muted" style={{ fontSize: '0.85rem', margin: '0 0 0.5rem' }}>
-            Upload your organisation logo for the PDF header. If you leave this empty, the header shows a blank logo area only.
+            Use this only if you want a logo different from your org logo for the Service Agreement specifically.
+            Most users should leave this empty and rely on the org logo above.
           </p>
           <input type="file" accept="image/png,image/jpeg" onChange={(e) => setLogoFile(e.target.files?.[0] || null)} />
         </div>

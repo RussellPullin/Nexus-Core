@@ -297,6 +297,9 @@ export function buildServiceAgreementSnapshot({
       website: org?.website || '',
       contact_person: interpMap.org_contact_person,
       logo_path: org?.logo_path || null,
+      // Legacy fallback: Settings → Business stored a filename here. The PDF
+      // renderer joins it with the uploads dir when org.logo_path is missing.
+      business_logo_filename: biz?.logo_path || null,
       primary_color: org?.brand_primary_color || branding.primary_color || null,
       accent_color: org?.brand_accent_color || branding.accent_color || null
     },
