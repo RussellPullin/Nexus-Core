@@ -55,7 +55,8 @@ export function buildMergePreviewRows(contractFieldMap, renderData) {
   return rows;
 }
 
-function participantPreviewFixture() {
+/** Fictitious participant/plan/intake used for admin sample previews. */
+export function buildSampleParticipantContext() {
   const intake = participantEmptyIntake();
   Object.assign(intake, {
     first_name: 'Jamie',
@@ -146,7 +147,7 @@ export function buildSampleRenderData(workflow, contractFieldMap, organisation) 
     return applyContractPlaceholderMap(base, contractFieldMap || {});
   }
 
-  const { participant, plan, intake } = participantPreviewFixture();
+  const { participant, plan, intake } = buildSampleParticipantContext();
   const base = buildParticipantCustomMergeData(participant, plan, intake, providerOrg);
   return applyContractPlaceholderMap(base, contractFieldMap || {});
 }

@@ -521,7 +521,6 @@ try {
         onboarding_pilot INTEGER DEFAULT 0,
         default_renewal_days INTEGER DEFAULT 365,
         signature_mode TEXT DEFAULT 'hybrid',
-        adobe_template_set_id TEXT,
         config_json TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
@@ -531,6 +530,28 @@ try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_provider_profiles_org ON provider_profiles(organisation_id)');
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('provider_profiles migration:', e.message);
+  }
+
+  // Drop legacy Adobe Sign columns left over from earlier installs. SQLite ≥ 3.35
+  // supports DROP COLUMN; on older versions this is a no-op (the columns just stay
+  // dormant, since no code reads or writes them anymore).
+  try {
+    const ppCols = new Set(db.prepare('PRAGMA table_info(provider_profiles)').all().map((c) => c.name));
+    if (ppCols.has('adobe_template_set_id')) {
+      try { db.exec('ALTER TABLE provider_profiles DROP COLUMN adobe_template_set_id'); } catch { /* old sqlite */ }
+    }
+    const ftCols = new Set(db.prepare('PRAGMA table_info(form_templates)').all().map((c) => c.name));
+    if (ftCols.has('adobe_template_id')) {
+      try { db.exec('ALTER TABLE form_templates DROP COLUMN adobe_template_id'); } catch { /* old sqlite */ }
+    }
+    const bsCols = new Set(db.prepare('PRAGMA table_info(business_settings)').all().map((c) => c.name));
+    for (const legacy of ['adobe_sign_refresh_token', 'adobe_sign_api_access_point', 'adobe_sign_web_access_point']) {
+      if (bsCols.has(legacy)) {
+        try { db.exec(`ALTER TABLE business_settings DROP COLUMN ${legacy}`); } catch { /* old sqlite */ }
+      }
+    }
+  } catch (e) {
+    console.warn('adobe-sign column cleanup migration:', e?.message);
   }
 
   try {
@@ -545,7 +566,6 @@ try {
         required_signer_role TEXT,
         renewal_days INTEGER,
         legal_basis TEXT,
-        adobe_template_id TEXT,
         mapping_json TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
@@ -671,7 +691,7 @@ try {
         participant_onboarding_id TEXT NOT NULL,
         participant_id TEXT NOT NULL,
         packet_mode TEXT DEFAULT 'hybrid',
-        provider_name TEXT DEFAULT 'adobe_sign',
+        provider_name TEXT DEFAULT 'dropbox_sign',
         external_envelope_id TEXT,
         status TEXT DEFAULT 'draft',
         packet_reasoning TEXT,
@@ -710,7 +730,7 @@ try {
         id TEXT PRIMARY KEY,
         envelope_id TEXT NOT NULL,
         form_instance_id TEXT,
-        provider_name TEXT DEFAULT 'adobe_sign',
+        provider_name TEXT DEFAULT 'dropbox_sign',
         external_event_id TEXT,
         event_type TEXT NOT NULL,
         event_timestamp TEXT NOT NULL,
@@ -1241,9 +1261,6 @@ try {
       'xero_refresh_token',
       'xero_tenant_id',
       'xero_tenant_name',
-      'adobe_sign_refresh_token',
-      'adobe_sign_api_access_point',
-      'adobe_sign_web_access_point',
       'dropbox_sign_access_token',
       'dropbox_sign_refresh_token'
     ]) {

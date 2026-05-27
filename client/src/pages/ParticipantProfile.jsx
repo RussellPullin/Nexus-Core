@@ -2967,7 +2967,7 @@ export default function ParticipantProfile() {
 
               <h4 style={{ marginTop: '1.5rem' }}>Generated agreements</h4>
               <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem' }}>
-                Download to sign with your own process. Nexus Core e-sign (Adobe) will appear on Sign with Nexus Core when that integration is finalised.
+                Download to sign with your own process, or use Sign with Nexus Core (Dropbox Sign) once enabled in Forms → Onboarding settings.
               </p>
               {saAgreements.length === 0 ? (
                 <p className="empty-state">None yet.</p>

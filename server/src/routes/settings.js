@@ -128,19 +128,6 @@ function xeroOauthConfiguredViaEnv() {
   return !!(id && secret && redirect);
 }
 
-/** Callback URL registered on the Acrobat Sign API application (must match exactly). */
-function getEffectiveAdobeRedirectUri() {
-  const explicit = process.env.ADOBE_SIGN_REDIRECT_URI?.trim();
-  if (explicit) return explicit;
-  const origin = oauthPublicApiOriginFromEnv();
-  if (origin) return `${origin}/api/settings/adobe-sign-callback`;
-  return '';
-}
-
-function isAllowedAdobeRedirectUri(redirectUri) {
-  return isAllowedXeroRedirectUri(redirectUri);
-}
-
 function dropboxOauthConfiguredViaEnv() {
   const id = process.env.DROPBOX_SIGN_CLIENT_ID?.trim();
   const secret = process.env.DROPBOX_SIGN_CLIENT_SECRET?.trim();

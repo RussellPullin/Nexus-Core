@@ -14,10 +14,12 @@ import {
   mergeVariableValues,
   mergeBranding,
   parseJson,
-  baselineVariableDefaults
+  baselineVariableDefaults,
+  enrichVariablesFromOrgProfile
 } from '../services/nexusFormTemplateRuntime.service.js';
 import { buildServiceAgreementOrgPreviewSnapshot } from '../services/serviceAgreementSnapshot.service.js';
 import { generateServiceAgreementPdfBuffer } from '../services/serviceAgreementPdf.service.js';
+import { assessOrgSampleReadiness } from '../services/formSample.service.js';
 import { VARIABLE_GROUPS } from '../data/serviceAgreementSpring2V3/variableSchema.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -165,7 +167,13 @@ ROUTER.get('/instances/:id/preview-model', requireAdminOrDelegate, (req, res) =>
       )
       .get(req.params.id, orgId);
     if (!row) return res.status(404).json({ error: 'Not found.' });
-    const merged = mergeVariableValues(row.master_variable_schema_json, row.variable_values_json);
+    let merged = mergeVariableValues(row.master_variable_schema_json, row.variable_values_json);
+    const org = db.prepare('SELECT * FROM organisations WHERE id = ?').get(orgId);
+    const biz = db.prepare('SELECT * FROM business_settings WHERE org_id = ?').get(orgId);
+    const adminUser = db
+      .prepare(`SELECT name FROM users WHERE org_id = ? AND role = 'admin' ORDER BY created_at ASC LIMIT 1`)
+      .get(orgId);
+    merged = enrichVariablesFromOrgProfile(merged, org, biz, adminUser?.name || '');
     const branding = mergeBranding(row.branding_json);
     const definition = parseJson(row.master_definition_json, {});
     res.json({
@@ -206,6 +214,10 @@ ROUTER.get('/instances/:id/preview.pdf', requireAdminOrDelegate, async (req, res
     if (row.template_type !== 'service_agreement') {
       return res.status(400).json({ error: 'Preview PDF is only available for service agreement templates.' });
     }
+    const readiness = assessOrgSampleReadiness(orgId);
+    if (!readiness.sample_ready) {
+      return res.status(400).json({ error: 'Add your organisation name before downloading a sample.' });
+    }
     const master = {
       id: row.master_id,
       template_key: row.template_key,
@@ -219,7 +231,7 @@ ROUTER.get('/instances/:id/preview.pdf', requireAdminOrDelegate, async (req, res
     });
     const pdfBuf = await generateServiceAgreementPdfBuffer(snapshot);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="Services-Agreement-template-preview.pdf"');
+    res.setHeader('Content-Disposition', 'inline; filename="Services-Agreement-sample.pdf"');
     res.send(pdfBuf);
   } catch (e) {
     res.status(500).json({ error: e.message });

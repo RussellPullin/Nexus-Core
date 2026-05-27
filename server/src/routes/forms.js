@@ -31,6 +31,11 @@ import {
   buildSampleRenderData
 } from '../services/formTemplateRecipientPreview.service.js';
 import {
+  buildFormCatalog,
+  formCatalogContextForUser
+} from '../services/formCatalog.service.js';
+import { buildCoreFormSamplePdfBuffer, assessOrgSampleReadiness } from '../services/formSample.service.js';
+import {
   listPacks,
   createPack,
   updatePack,
@@ -88,6 +93,69 @@ function unlinkOtherCustomTemplateFiles(dir, templateId, keepBasename) {
     }
   }
 }
+
+// GET /api/forms/catalog — org forms with sample download URLs
+ROUTER.get('/catalog', (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { orgId, providerProfileId } = formCatalogContextForUser(req.session.user.id);
+    res.json(buildFormCatalog({ orgId, providerProfileId }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/forms/core-samples/:formType.pdf — sample PDF for core uploaded templates
+ROUTER.get('/core-samples/:formType.pdf', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile, organisation_id: orgId } = getProviderProfileForUser(req.session.user.id);
+    if (!profile || !orgId) return res.status(400).json({ error: 'No organisation set.' });
+
+    const formType = String(req.params.formType || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\.pdf$/i, '');
+    if (!['privacy_consent', 'support_plan', 'service_agreement'].includes(formType)) {
+      return res.status(400).json({ error: 'Unsupported form type for sample generation.' });
+    }
+
+    const readiness = assessOrgSampleReadiness(orgId);
+    if (!readiness.sample_ready) {
+      return res.status(400).json({ error: 'Add your organisation name before downloading samples.' });
+    }
+
+    let templateFilename = null;
+    const templateId = req.query.template_id ? String(req.query.template_id).trim() : '';
+    if (templateId) {
+      const row = db
+        .prepare('SELECT template_filename FROM form_templates WHERE id = ? AND provider_profile_id = ?')
+        .get(templateId, profile.id);
+      if (!row) return res.status(404).json({ error: 'Form template not found.' });
+      templateFilename = row.template_filename || null;
+    } else {
+      const row = db
+        .prepare(
+          `SELECT template_filename FROM form_templates
+           WHERE provider_profile_id = ? AND form_type = ? AND is_active = 1
+           ORDER BY datetime(COALESCE(updated_at, created_at)) DESC LIMIT 1`
+        )
+        .get(profile.id, formType);
+      templateFilename = row?.template_filename || null;
+    }
+
+    const pdfBuffer = await buildCoreFormSamplePdfBuffer(formType, {
+      organisationId: orgId,
+      templateFilename
+    });
+    const safeName = `${formType.replace(/_/g, '-')}-sample.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Sample generation failed' });
+  }
+});
 
 // GET /api/forms/context - current user's organisation for forms
 ROUTER.get('/context', (req, res) => {

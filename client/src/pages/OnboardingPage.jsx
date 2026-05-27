@@ -10,7 +10,7 @@ import {
   composeParticipantLegalName,
   splitParticipantNameFromFull
 } from '@nexus-shared/onboardingFieldRegistry.js';
-import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useAdobeSignEnabled } from '../lib/featureFlags.js';
+import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useDropboxSignEnabled } from '../lib/featureFlags.js';
 import ServiceAgreementOnboardingBlock from '../components/ServiceAgreementOnboardingBlock.jsx';
 
 const PARTICIPANT_LABELS = participantFieldLabels();
@@ -120,7 +120,7 @@ export default function OnboardingPage() {
   const { id } = useParams();
   const idRef = useRef(id);
   idRef.current = id;
-  const adobeSignEnabled = useAdobeSignEnabled();
+  const signEnabled = useDropboxSignEnabled();
   const [participant, setParticipant] = useState(null);
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -562,7 +562,7 @@ export default function OnboardingPage() {
     try {
       await onboarding.sendFormForSignature(id, formInstanceId);
       await refresh();
-      alert('Form sent via Nexus Core (Adobe Sign).');
+      alert('Form sent via Nexus Core (Dropbox Sign).');
     } catch (err) {
       alert(err.message);
     } finally {
@@ -635,9 +635,9 @@ export default function OnboardingPage() {
       await onboarding.uploadFormDocument(id, formInstanceId, file);
       await refresh();
       alert(
-        adobeSignEnabled
+        signEnabled
           ? 'Document updated. Download to sign or use Sign with Nexus Core when ready.'
-          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once Adobe Sign is enabled in Forms → Onboarding settings.'
+          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once Dropbox Sign is enabled in Forms → Onboarding settings.'
       );
     } catch (err) {
       alert(err.message);
@@ -1431,10 +1431,10 @@ export default function OnboardingPage() {
                               className="btn btn-primary"
                               style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
                               onClick={() => handleSendForm(f.id)}
-                              disabled={working || !adobeSignEnabled}
+                              disabled={working || !signEnabled}
                               title={
-                                adobeSignEnabled
-                                  ? 'Send for signature via Nexus Core (Adobe Sign)'
+                                signEnabled
+                                  ? 'Send for signature via Nexus Core (Dropbox Sign)'
                                   : NEXUS_CORE_SIGN_COMING_SOON_TITLE
                               }
                             >

@@ -947,6 +947,13 @@ export const onboarding = {
 
 export const forms = {
   context: () => fetchApi('/forms/context'),
+  catalog: () => fetchApi('/forms/catalog'),
+  /** Turn a relative sample URL from the catalog into an absolute API URL. */
+  sampleUrl: (relativePath) => `${API}${relativePath.startsWith('/') ? relativePath : `/${relativePath}`}`,
+  coreSamplePdfUrl: (formType, templateId) =>
+    `${API}/forms/core-samples/${encodeURIComponent(formType)}.pdf${
+      templateId ? `?template_id=${encodeURIComponent(templateId)}` : ''
+    }`,
   templates: (workflow) => fetchApi(`/forms/templates${workflow ? `?workflow=${encodeURIComponent(workflow)}` : ''}`),
   createTemplate: (data) => fetchApi('/forms/templates', { method: 'POST', body: JSON.stringify(data) }),
   updateTemplate: (id, data) => fetchApi(`/forms/templates/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

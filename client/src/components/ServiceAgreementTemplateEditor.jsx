@@ -119,7 +119,7 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
         brand_primary_color: brandPrimary || null,
         brand_accent_color: brandAccent || null
       });
-      notify('Brand colours saved. Re-download the preview to see them applied.');
+      notify('Brand colours saved. Download a sample to see them applied.');
     } catch (e) {
       notify(e.message || 'Save failed', true);
     } finally {
@@ -134,7 +134,7 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
       await organisations.uploadMyLogo(file);
       const refreshed = await organisations.getMyProfile();
       setOrgProfile(refreshed?.org || null);
-      notify('Logo uploaded — re-download the preview to see it in the header.');
+      notify('Logo uploaded — download a sample to see it in the header.');
     } catch (e) {
       notify(e.message || 'Upload failed', true);
     } finally {
@@ -171,7 +171,7 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
     }
   };
 
-  const handleDownloadPreviewPdf = () => {
+  const handleDownloadSample = () => {
     if (!instanceId) return;
     window.open(formTemplates.previewPdfUrl(instanceId), '_blank', 'noopener,noreferrer');
   };
@@ -384,10 +384,10 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
           type="button"
           className="btn btn-secondary"
           disabled={!templateReady}
-          onClick={handleDownloadPreviewPdf}
-          title={templateReady ? 'Download a PDF with your organisation details (participant fields blank)' : 'Add your organisation name first'}
+          onClick={handleDownloadSample}
+          title={templateReady ? 'Download a sample PDF with your organisation details (participant fields blank)' : 'Add your organisation name first'}
         >
-          Download template PDF
+          Sample
         </button>
         {!templateReady ? (
           <span className="forms-muted" style={{ fontSize: '0.85rem' }}>Add organisation name to enable download.</span>

@@ -451,7 +451,7 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
       UPDATE signature_envelopes
       SET external_envelope_id = ?, provider_name = ?, status = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(agreement.external_envelope_id, agreement.provider || 'adobe_sign', agreement.status || 'sent', envelope.envelope_id);
+    `).run(agreement.external_envelope_id, agreement.provider || 'dropbox_sign', agreement.status || 'sent', envelope.envelope_id);
 
     if (oneDriveCopy) {
       try {
@@ -511,7 +511,7 @@ router.post('/participants/:id/send-signatures', async (req, res) => {
         UPDATE signature_envelopes
         SET external_envelope_id = ?, provider_name = ?, status = ?, updated_at = datetime('now')
         WHERE id = ?
-      `).run(agreement.external_envelope_id, agreement.provider || 'adobe_sign', agreement.status || 'sent', envelope.envelope_id);
+      `).run(agreement.external_envelope_id, agreement.provider || 'dropbox_sign', agreement.status || 'sent', envelope.envelope_id);
       envelopeResponses.push({ ...envelope, ...agreement });
     }
 
@@ -663,7 +663,6 @@ router.put('/providers/:organisationId/settings', (req, res) => {
       onboarding_pilot,
       default_renewal_days,
       signature_mode,
-      adobe_template_set_id,
       config
     } = req.body || {};
 
@@ -674,7 +673,6 @@ router.put('/providers/:organisationId/settings', (req, res) => {
         onboarding_pilot = COALESCE(?, onboarding_pilot),
         default_renewal_days = COALESCE(?, default_renewal_days),
         signature_mode = COALESCE(?, signature_mode),
-        adobe_template_set_id = COALESCE(?, adobe_template_set_id),
         config_json = COALESCE(?, config_json),
         updated_at = datetime('now')
       WHERE id = ?
@@ -683,7 +681,6 @@ router.put('/providers/:organisationId/settings', (req, res) => {
       onboarding_pilot == null ? null : (onboarding_pilot ? 1 : 0),
       default_renewal_days ?? null,
       signature_mode ?? null,
-      adobe_template_set_id ?? null,
       config ? JSON.stringify(config) : null,
       profile.id
     );
