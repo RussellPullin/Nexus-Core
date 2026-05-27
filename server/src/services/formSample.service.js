@@ -44,6 +44,53 @@ function resolveCoreTemplate(formType, { organisationId, templateFilename }) {
 }
 
 /**
+ * Build a sample document buffer for a core form, preferring PDF when possible.
+ * On minimal Linux images (e.g. Fly), LibreOffice may not be installed, so the
+ * privacy consent sample can fall back to DOCX instead of failing.
+ *
+ * @param {'privacy_consent'|'support_plan'|'service_agreement'} formType
+ * @param {{ organisationId: string, templateFilename?: string|null }} opts
+ * @returns {Promise<{ buffer: Buffer, mimeType: string, ext: 'pdf'|'docx' }>}
+ */
+export async function buildCoreFormSampleBuffer(formType, opts) {
+  const resolved = resolveCoreTemplate(formType, opts);
+  if (!resolved) {
+    throw new Error('No template file uploaded for this form yet.');
+  }
+
+  const { participant, plan, intake } = buildSampleParticipantContext();
+  const pathOpts = {
+    organisationId: opts.organisationId,
+    templateFilename: opts.templateFilename || null
+  };
+
+  if (formType === 'privacy_consent') {
+    const filledDocx = fillConsentForm(participant, intake, pathOpts);
+    const pdfBuffer = convertDocxToPdf(filledDocx);
+    if (pdfBuffer) {
+      return { buffer: pdfBuffer, mimeType: 'application/pdf', ext: 'pdf' };
+    }
+    return {
+      buffer: filledDocx,
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ext: 'docx'
+    };
+  }
+
+  if (formType === 'support_plan') {
+    const filled = await fillSupportPlan(participant, plan, intake, pathOpts);
+    return { buffer: filled, mimeType: 'application/pdf', ext: 'pdf' };
+  }
+
+  if (formType === 'service_agreement') {
+    const filled = fillServiceAgreement(participant, plan, intake, { db, ...pathOpts });
+    return { buffer: filled, mimeType: 'application/pdf', ext: 'pdf' };
+  }
+
+  throw new Error('Unsupported form type for sample generation.');
+}
+
+/**
  * @param {'privacy_consent'|'support_plan'|'service_agreement'} formType
  * @param {{ organisationId: string, templateFilename?: string|null }} opts
  */

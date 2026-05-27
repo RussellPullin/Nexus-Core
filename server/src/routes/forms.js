@@ -34,7 +34,7 @@ import {
   buildFormCatalog,
   formCatalogContextForUser
 } from '../services/formCatalog.service.js';
-import { buildCoreFormSamplePdfBuffer, assessOrgSampleReadiness } from '../services/formSample.service.js';
+import { buildCoreFormSampleBuffer, assessOrgSampleReadiness } from '../services/formSample.service.js';
 import {
   listPacks,
   createPack,
@@ -144,14 +144,14 @@ ROUTER.get('/core-samples/:formType.pdf', async (req, res) => {
       templateFilename = row?.template_filename || null;
     }
 
-    const pdfBuffer = await buildCoreFormSamplePdfBuffer(formType, {
+    const sample = await buildCoreFormSampleBuffer(formType, {
       organisationId: orgId,
       templateFilename
     });
-    const safeName = `${formType.replace(/_/g, '-')}-sample.pdf`;
-    res.setHeader('Content-Type', 'application/pdf');
+    const safeName = `${formType.replace(/_/g, '-')}-sample.${sample.ext}`;
+    res.setHeader('Content-Type', sample.mimeType);
     res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
-    res.send(pdfBuffer);
+    res.send(sample.buffer);
   } catch (err) {
     res.status(400).json({ error: err.message || 'Sample generation failed' });
   }

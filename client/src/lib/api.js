@@ -948,8 +948,14 @@ export const onboarding = {
 export const forms = {
   context: () => fetchApi('/forms/context'),
   catalog: () => fetchApi('/forms/catalog'),
-  /** Turn a relative sample URL from the catalog into an absolute API URL. */
-  sampleUrl: (relativePath) => `${API}${relativePath.startsWith('/') ? relativePath : `/${relativePath}`}`,
+  /** Turn a catalog sample path into a browser URL (catalog paths already include /api/...). */
+  sampleUrl: (relativePath) => {
+    const p = String(relativePath || '').trim();
+    if (!p) return API;
+    if (p.startsWith('/api/') || p === '/api') return p;
+    if (p.startsWith('api/')) return `/${p}`;
+    return `${API}${p.startsWith('/') ? p : `/${p}`}`;
+  },
   coreSamplePdfUrl: (formType, templateId) =>
     `${API}/forms/core-samples/${encodeURIComponent(formType)}.pdf${
       templateId ? `?template_id=${encodeURIComponent(templateId)}` : ''
