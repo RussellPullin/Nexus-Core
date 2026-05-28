@@ -10,8 +10,8 @@ client/node_modules/
 server/node_modules/
 client/dist/
 
-# Data (often contains PII)
-data/
+# Data (often contains PII) — root-level only (SQLite DB + uploads)
+/data/
 
 # OS / editor
 .DS_Store
