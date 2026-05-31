@@ -133,8 +133,16 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
 
     const drawFooterOnCurrentPage = () => {
       const { bits, ctrl } = footerText(snapshot);
-      const fy = doc.page.height - 42;
-      doc.fontSize(7).fillColor('#475569').font(font);
+      const fy = doc.page.height - 44;
+
+      // Subtle footer divider
+      doc.save();
+      doc.strokeColor('#e5e7eb').lineWidth(0.5);
+      doc.moveTo(margin, fy - 8).lineTo(pageWidth - margin, fy - 8).stroke();
+      doc.restore();
+
+      // Footer text with improved readability
+      doc.fontSize(7.5).fillColor('#6b7280').font(font);
       // CRITICAL: lineBreak:false + a small explicit height stops pdfkit from
       // auto-paginating when the footer text is long. Without this, a long org
       // address overflows the footer line and creates an empty trailing page,
@@ -143,11 +151,11 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
         width: pageWidth - 2 * margin,
         align: 'center',
         lineBreak: false,
-        height: 10,
+        height: 11,
         ellipsis: true
       });
       if (ctrl) {
-        doc.text(ctrl, margin, fy + 10, {
+        doc.fontSize(7).text(ctrl, margin, fy + 9, {
           width: pageWidth - 2 * margin,
           align: 'center',
           lineBreak: false,
@@ -157,83 +165,113 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
       }
     };
 
-    /* Header band */
+    /* ══════════════════════════════════════════════════════════════════
+       ENHANCED HEADER — Logo centered, refined typography, better spacing
+       ══════════════════════════════════════════════════════════════════ */
     doc.save();
-    doc.rect(0, 0, pageWidth, 56).fill(`rgb(${primary.r},${primary.g},${primary.b})`);
-    doc.fillColor('#ffffff').fontSize(16).font('Helvetica-Bold');
-    const title = snapshot.definition_meta?.documentTitle || 'Services Agreement';
-    doc.text(title, margin, 18, { width: pageWidth - 2 * margin, align: 'center' });
-    const ver = snapshot.definition_meta?.versionLabel || '';
-    if (ver) {
-      doc.fontSize(9).text(ver, margin, 38, { width: pageWidth - 2 * margin, align: 'center' });
-    }
 
+    // Subtle background rectangle for the entire header area
+    doc.rect(0, 0, pageWidth, 100).fill('#f8fafc');
+
+    // Logo placement — centered, larger
     const logoPath = resolveLogoFullPath(branding, snapshot.org);
+    const logoWidth = 70;
+    const logoX = (pageWidth - logoWidth) / 2;
+    const logoY = 12;
+
     if (logoPath) {
       try {
-        doc.image(logoPath, margin, 8, { height: 40 });
+        doc.image(logoPath, logoX, logoY, { width: logoWidth });
       } catch {
         /* skip corrupt logo */
       }
     } else {
-      doc.strokeColor('#cbd5e1').lineWidth(0.75);
-      doc.rect(margin, 8, 88, 40).stroke();
-      doc.fillColor('#94a3b8').fontSize(7).text('Logo', margin + 4, 26, { width: 80, align: 'center' });
+      // Placeholder with subtle styling
+      doc.strokeColor('#cbd5e1').lineWidth(1);
+      doc.rect(logoX, logoY, logoWidth, logoWidth).stroke();
+      doc.fillColor('#94a3b8').fontSize(8).font('Helvetica').text('Logo', logoX, logoY + (logoWidth / 2) - 4, {
+        width: logoWidth,
+        align: 'center',
+        height: 10
+      });
     }
+
+    // Organization name — bold and prominent
+    y = logoY + logoWidth + 12;
+    const orgName = snapshot.org?.trading_name || snapshot.org?.legal_name || 'Service Provider';
+    doc.fillColor(`rgb(${primary.r},${primary.g},${primary.b})`).fontSize(18).font('Helvetica-Bold');
+    doc.text(orgName, margin, y, { width: pageWidth - 2 * margin, align: 'center' });
+    y += 20;
+
+    // Document title
+    const title = snapshot.definition_meta?.documentTitle || 'Service Agreement';
+    doc.fillColor('#1f2937').fontSize(12).font('Helvetica');
+    doc.text(title, margin, y, { width: pageWidth - 2 * margin, align: 'center' });
+    y += 8;
+
+    // Version label if present
+    const ver = snapshot.definition_meta?.versionLabel || '';
+    if (ver) {
+      doc.fontSize(8).fillColor('#6b7280').font('Helvetica');
+      doc.text(ver, margin, y, { width: pageWidth - 2 * margin, align: 'center' });
+    }
+
     doc.restore();
 
-    y = 68;
-    const orgSubtitle = [snapshot.org?.trading_name, snapshot.org?.legal_name].filter(Boolean).join(' · ');
-    if (orgSubtitle) {
-      doc.fillColor('#475569').font(font).fontSize(9);
-      doc.text(orgSubtitle, margin, y, { width: pageWidth - 2 * margin, align: 'center' });
-      y += 16;
-    }
+    // Professional divider after header
+    doc.strokeColor(`rgb(${accent.r},${accent.g},${accent.b})`).lineWidth(2);
+    doc.moveTo(margin, 104).lineTo(pageWidth - margin, 104).stroke();
+
+    y = 115;
 
     const sectionBar = (label) => {
       y = ensureSpace(doc, y, 36, margin, pageMaxY());
       doc.save();
-      doc.rect(margin, y, pageWidth - 2 * margin, 22).fill(`rgb(${accent.r},${accent.g},${accent.b})`);
-      doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold').text(label, margin + 8, y + 5, {
-        width: pageWidth - 2 * margin - 16
+      // Enhanced section header with shadow effect
+      doc.rect(margin, y, pageWidth - 2 * margin, 24).fill(`rgb(${primary.r},${primary.g},${primary.b})`);
+      doc.fillColor('#ffffff').fontSize(12).font('Helvetica-Bold');
+      doc.text(label, margin + 12, y + 6, {
+        width: pageWidth - 2 * margin - 24,
+        lineBreak: false
       });
       doc.restore();
-      y += 30;
+      y += 32;
     };
 
     const bodyPara = (text, opts = {}) => {
       const size = opts.size || 9;
-      doc.fillColor('#0f172a').font(font).fontSize(size);
+      doc.fillColor('#374151').font(font).fontSize(size);
       const h = doc.heightOfString(text, { width: pageWidth - 2 * margin });
-      y = ensureSpace(doc, y, h + 8, margin, pageMaxY());
-      doc.text(text, margin, y, { width: pageWidth - 2 * margin, align: 'left' });
-      y += h + 8;
+      y = ensureSpace(doc, y, h + 10, margin, pageMaxY());
+      doc.text(text, margin, y, { width: pageWidth - 2 * margin, align: 'left', lineGap: 2 });
+      y += h + 10;
     };
 
     const subHeading = (text) => {
-      y = ensureSpace(doc, y, 22, margin, pageMaxY());
+      y = ensureSpace(doc, y, 24, margin, pageMaxY());
       doc.font('Helvetica-Bold').fontSize(10).fillColor(`rgb(${primary.r},${primary.g},${primary.b})`).text(
         text,
         margin,
         y,
-        { width: pageWidth - 2 * margin, lineBreak: false, height: 14 }
+        { width: pageWidth - 2 * margin, lineBreak: false, height: 15 }
       );
-      // accent underline tying the heading visually to the section bar
+      // Professional underline using accent color
       doc.save();
-      doc.rect(margin, y + 13, 36, 1.5).fill(`rgb(${accent.r},${accent.g},${accent.b})`);
+      doc.strokeColor(`rgb(${accent.r},${accent.g},${accent.b})`).lineWidth(2);
+      doc.moveTo(margin, y + 14).lineTo(margin + 40, y + 14).stroke();
       doc.restore();
-      y += 18;
+      y += 20;
     };
 
     // Render label/value pairs in a multi-column grid. Default 2 columns.
     // Skips pairs with no value so we don't pad the form with '—' rows.
     const kvGrid = (pairs, opts = {}) => {
       const cols = opts.cols || 2;
-      const gutter = 14;
+      const gutter = 16;
       const cellW = (pageWidth - 2 * margin - gutter * (cols - 1)) / cols;
-      const labelH = 10;
-      const valuePadAbove = 1;
-      const bottomPad = opts.bottomPad ?? 6;
+      const labelH = 11;
+      const valuePadAbove = 2;
+      const bottomPad = opts.bottomPad ?? 10;
       const visible = pairs.filter((p) => {
         if (opts.includeEmpty) return true;
         return String(p?.value ?? '').trim() !== '';
@@ -241,7 +279,7 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
       doc.font(font).fontSize(9);
       for (let i = 0; i < visible.length; i += cols) {
         const rowPairs = visible.slice(i, i + cols);
-        let maxValueH = 11;
+        let maxValueH = 12;
         rowPairs.forEach((p) => {
           const vh = doc.heightOfString(String(p.value || '—'), { width: cellW });
           maxValueH = Math.max(maxValueH, vh);
@@ -250,18 +288,20 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
         y = ensureSpace(doc, y, rowH, margin, pageMaxY());
         rowPairs.forEach((p, j) => {
           const x = margin + j * (cellW + gutter);
-          doc.font('Helvetica-Bold').fontSize(7).fillColor('#64748b')
+          // Label — bold, uppercase, professional gray
+          doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#6b7280')
             .text(String(p.label || '').toUpperCase(), x, y, {
               width: cellW,
               lineBreak: false,
-              characterSpacing: 0.4,
+              characterSpacing: 0.5,
               height: labelH
             });
-          doc.font(font).fontSize(9).fillColor('#0f172a').text(
+          // Value — dark text, better readability
+          doc.font(font).fontSize(9.5).fillColor('#1f2937').text(
             String(p.value || '—'),
             x,
             y + labelH + valuePadAbove,
-            { width: cellW }
+            { width: cellW, lineGap: 1 }
           );
         });
         y += rowH;
@@ -349,7 +389,7 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
       { label: 'Communication Preferences', value: s2.communication_preferences }
     ]);
 
-    y += 6;
+    y += 8;
     subHeading('Services and Supports Schedule');
     const rows = snapshot.schedule_rows || [];
     if (rows.length === 0) {
@@ -359,69 +399,99 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
     } else {
       const tableTop = y;
       const col = [margin, margin + 280, margin + 360, margin + 440];
-      // Branded header band using the org accent colour
+
+      // ━━━ Enhanced table header with primary color background ━━━
       doc.save();
-      doc.rect(margin, tableTop - 2, pageWidth - 2 * margin, 16)
-        .fill(`rgb(${accent.r},${accent.g},${accent.b})`);
+      doc.rect(margin, tableTop - 2, pageWidth - 2 * margin, 18)
+        .fill(`rgb(${primary.r},${primary.g},${primary.b})`);
       doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8);
-      doc.text('SUPPORT / SERVICE', col[0] + 4, tableTop + 2, { width: 268, characterSpacing: 0.4 });
-      doc.text('HOURS', col[1] + 4, tableTop + 2, { width: 72, characterSpacing: 0.4, align: 'right' });
-      doc.text('RATE ($/HR)', col[2] + 4, tableTop + 2, { width: 72, characterSpacing: 0.4, align: 'right' });
-      doc.text('LINE TOTAL', col[3] + 4, tableTop + 2, { width: pageWidth - col[3] - margin - 4, characterSpacing: 0.4, align: 'right' });
+      doc.text('SUPPORT / SERVICE', col[0] + 6, tableTop + 3, { width: 268, characterSpacing: 0.3 });
+      doc.text('HOURS', col[1] + 4, tableTop + 3, { width: 72, characterSpacing: 0.3, align: 'right' });
+      doc.text('RATE ($/HR)', col[2] + 4, tableTop + 3, { width: 72, characterSpacing: 0.3, align: 'right' });
+      doc.text('LINE TOTAL', col[3] + 4, tableTop + 3, { width: pageWidth - col[3] - margin - 6, characterSpacing: 0.3, align: 'right' });
       doc.restore();
-      y = tableTop + 18;
-      doc.font(font).fontSize(9).fillColor('#0f172a');
+
+      y = tableTop + 20;
+      doc.font(font).fontSize(9).fillColor('#1f2937');
+
       rows.forEach((r, idx) => {
         const desc = r.description || '';
-        const h = Math.max(14, doc.heightOfString(desc, { width: 268 }));
-        y = ensureSpace(doc, y, h + 6, margin, pageMaxY());
-        // zebra striping for legibility
-        if (idx % 2 === 1) {
+        const h = Math.max(16, doc.heightOfString(desc, { width: 268 }));
+        y = ensureSpace(doc, y, h + 8, margin, pageMaxY());
+
+        // Enhanced zebra striping with subtle color
+        if (idx % 2 === 0) {
           doc.save();
-          doc.rect(margin, y - 2, pageWidth - 2 * margin, h + 6).fill('#f8fafc');
+          doc.fillColor('#f9fafb');
+          doc.rect(margin, y - 2, pageWidth - 2 * margin, h + 8).fill();
           doc.restore();
-          doc.fillColor('#0f172a');
+        } else {
+          doc.save();
+          doc.fillColor('#ffffff');
+          doc.rect(margin, y - 2, pageWidth - 2 * margin, h + 8).fill();
+          doc.restore();
         }
-        doc.text(desc, col[0] + 4, y, { width: 268 });
-        doc.text(r.hours || r.duration || '', col[1] + 4, y, { width: 72, align: 'right' });
-        doc.text(r.rate || r.price || '', col[2] + 4, y, { width: 72, align: 'right' });
-        doc.text(r.budget || r.line_total_display || '', col[3] + 4, y, {
-          width: pageWidth - col[3] - margin - 4,
+
+        // Row divider
+        doc.save();
+        doc.strokeColor('#e5e7eb').lineWidth(0.5);
+        doc.moveTo(margin, y + h + 6).lineTo(pageWidth - margin, y + h + 6).stroke();
+        doc.restore();
+
+        doc.fillColor('#1f2937');
+        doc.text(desc, col[0] + 6, y + 3, { width: 268 });
+        doc.fontSize(9).text(r.hours || r.duration || '', col[1] + 4, y + 3, { width: 72, align: 'right' });
+        doc.text(r.rate || r.price || '', col[2] + 4, y + 3, { width: 72, align: 'right' });
+        doc.text(r.budget || r.line_total_display || '', col[3] + 4, y + 3, {
+          width: pageWidth - col[3] - margin - 6,
           align: 'right'
         });
-        y += h + 6;
+        y += h + 8;
       });
-      // Total row in primary colour
-      y = ensureSpace(doc, y, 22, margin, pageMaxY());
+
+      // ━━━ Enhanced total row with strong visual hierarchy ━━━
+      y = ensureSpace(doc, y, 24, margin, pageMaxY());
       doc.save();
-      doc.rect(margin, y, pageWidth - 2 * margin, 18)
+      doc.rect(margin, y, pageWidth - 2 * margin, 20)
         .fill(`rgb(${primary.r},${primary.g},${primary.b})`);
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10);
-      doc.text('Total quote for the plan', margin + 4, y + 4, { width: 360 });
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(11);
+      doc.text('Total Quote for the Plan', margin + 8, y + 4, { width: 350 });
       doc.text(`$${Number(snapshot.schedule_total || 0).toFixed(2)}`, margin + 360, y + 4, {
         width: pageWidth - 2 * margin - 364,
         align: 'right'
       });
       doc.restore();
-      y += 24;
+      y += 28;
     }
 
     /* Section 3 — Terms of Agreement (was Section 4; the in-PDF checklist is intentionally
        not printed on the signed copy. Admin verifies its items in Nexus before sending.) */
     sectionBar('Section 3 — Terms of Agreement');
-    (snapshot.clauses_rendered || []).forEach((c) => {
+    (snapshot.clauses_rendered || []).forEach((c, idx) => {
       const heading = `Clause ${c.number}: ${c.title}`;
-      y = ensureSpace(doc, y, 22, margin, pageMaxY());
-      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(10).text(heading, margin, y, {
-        width: pageWidth - 2 * margin
+      y = ensureSpace(doc, y, 24, margin, pageMaxY());
+
+      // Subtle background for clause group
+      if (idx % 2 === 0) {
+        doc.save();
+        doc.fillColor('#f9fafb');
+        doc.rect(margin - 4, y - 2, pageWidth - 2 * margin + 8, 18).fill();
+        doc.restore();
+      }
+
+      // Clause heading with better styling
+      doc.fillColor(`rgb(${primary.r},${primary.g},${primary.b})`).font('Helvetica-Bold').fontSize(10).text(heading, margin, y, {
+        width: pageWidth - 2 * margin,
+        lineBreak: false
       });
-      y += 14;
+      y += 16;
+
       const body = c.body_rendered || '';
-      doc.font(font).fontSize(9).fillColor('#1e293b');
+      doc.font(font).fontSize(9).fillColor('#374151');
       const bh = doc.heightOfString(body, { width: pageWidth - 2 * margin });
-      y = ensureSpace(doc, y, bh + 12, margin, pageMaxY());
-      doc.text(body, margin, y, { width: pageWidth - 2 * margin, align: 'justify' });
-      y += bh + 12;
+      y = ensureSpace(doc, y, bh + 14, margin, pageMaxY());
+      doc.text(body, margin, y, { width: pageWidth - 2 * margin, align: 'justify', lineGap: 1.5 });
+      y += bh + 14;
     });
 
     /* Execution — Signatures. All details are finalised in Nexus Core before sending,
@@ -438,38 +508,55 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
 
     const sigBox = (label, x, width) => {
       const boxY = y;
-      doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a').text(label, x, boxY);
+      // Label with accent color for visual hierarchy
+      doc.font('Helvetica-Bold').fontSize(10).fillColor(`rgb(${primary.r},${primary.g},${primary.b})`).text(label, x, boxY);
 
-      const innerY = boxY + 14;
-      const sigInputH = 32;
-      const lineH = 16;
-      const lblH = 10;
-      const gap = 6;
-      const innerH = sigInputH + lineH + lineH + lblH * 3 + gap * 3 + 6;
+      const innerY = boxY + 16;
+      const sigInputH = 40;  // Larger signature area
+      const lineH = 18;
+      const lblH = 11;
+      const gap = 8;
+      const padding = 12;
+      const innerH = sigInputH + lineH + lineH + lblH * 3 + gap * 3 + padding;
 
-      doc.rect(x, innerY, width, innerH).stroke('#64748b');
+      // Professional box with subtle border
+      doc.save();
+      doc.strokeColor('#d1d5db').lineWidth(1.5);
+      doc.rect(x, innerY, width, innerH).stroke();
+      // Subtle background fill
+      doc.fillColor('#fafbfc').rect(x, innerY, width, innerH).fill();
+      doc.restore();
 
-      let cy = innerY + 4;
-      doc.font(font).fontSize(7).fillColor('#64748b').text('Signature', x + 4, cy);
+      let cy = innerY + padding;
+
+      // Signature field label
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('#374151').text('Signature', x + padding, cy);
       cy += lblH;
-      const sigField = { x: x + 4, y: cy, width: width - 8, height: sigInputH };
-      doc.rect(sigField.x, sigField.y, sigField.width, sigField.height).stroke('#e2e8f0');
+      const sigField = { x: x + padding, y: cy, width: width - 2 * padding, height: sigInputH };
+      doc.strokeColor('#9ca3af').lineWidth(1);
+      doc.rect(sigField.x, sigField.y, sigField.width, sigField.height).stroke();
+      // Light background in signature area
+      doc.fillColor('#f3f4f6').rect(sigField.x, sigField.y, sigField.width, sigField.height).fill();
       cy += sigInputH + gap;
 
-      doc.font(font).fontSize(7).fillColor('#64748b').text('Printed name', x + 4, cy);
+      // Printed name field label
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('#374151').text('Printed Name', x + padding, cy);
       cy += lblH;
-      const nameField = { x: x + 4, y: cy, width: width - 8, height: lineH };
+      const nameField = { x: x + padding, y: cy, width: width - 2 * padding, height: lineH };
+      doc.strokeColor('#d1d5db').lineWidth(0.8);
       doc.moveTo(nameField.x, nameField.y + nameField.height)
         .lineTo(nameField.x + nameField.width, nameField.y + nameField.height)
-        .stroke('#94a3b8');
+        .stroke();
       cy += lineH + gap;
 
-      doc.font(font).fontSize(7).fillColor('#64748b').text('Date', x + 4, cy);
+      // Date field label
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('#374151').text('Date', x + padding, cy);
       cy += lblH;
-      const dateField = { x: x + 4, y: cy, width: width - 8, height: lineH };
+      const dateField = { x: x + padding, y: cy, width: width - 2 * padding, height: lineH };
+      doc.strokeColor('#d1d5db').lineWidth(0.8);
       doc.moveTo(dateField.x, dateField.y + dateField.height)
         .lineTo(dateField.x + dateField.width, dateField.y + dateField.height)
-        .stroke('#94a3b8');
+        .stroke();
 
       return { boxY, x, width, innerH, signature: sigField, printedName: nameField, date: dateField };
     };

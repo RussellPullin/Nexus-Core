@@ -2013,6 +2013,54 @@ try {
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('nexus_form_template migration:', e.message);
   }
+
+  // Company documents library (per-org bulk upload + OneDrive import)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS org_company_documents (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'policy',
+        engine TEXT NOT NULL DEFAULT 'static-pdf',
+        template_filename TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'upload',
+        library_master_id TEXT,
+        onedrive_item_id TEXT,
+        onedrive_path TEXT,
+        sync_to_onboarding INTEGER DEFAULT 0,
+        company_policy_file_id TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(org_id, slug),
+        FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE,
+        FOREIGN KEY (library_master_id) REFERENCES document_library_masters(id) ON DELETE SET NULL,
+        FOREIGN KEY (company_policy_file_id) REFERENCES company_policy_files(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_org_company_documents_org ON org_company_documents(org_id);
+      CREATE INDEX IF NOT EXISTS idx_org_company_documents_master ON org_company_documents(library_master_id);
+    `);
+    const cpfCols = db.prepare('PRAGMA table_info(company_policy_files)').all();
+    if (!cpfCols.some((c) => c.name === 'org_company_document_id')) {
+      db.exec('ALTER TABLE company_policy_files ADD COLUMN org_company_document_id TEXT');
+    }
+    const odCols = db.prepare('PRAGMA table_info(organization_onedrive_link)').all();
+    if (odCols.length) {
+      if (!odCols.some((c) => c.name === 'import_source_path')) {
+        db.exec('ALTER TABLE organization_onedrive_link ADD COLUMN import_source_path TEXT');
+      }
+      if (!odCols.some((c) => c.name === 'import_enabled')) {
+        db.exec('ALTER TABLE organization_onedrive_link ADD COLUMN import_enabled INTEGER DEFAULT 0');
+      }
+      if (!odCols.some((c) => c.name === 'import_last_synced_at')) {
+        db.exec('ALTER TABLE organization_onedrive_link ADD COLUMN import_last_synced_at TEXT');
+      }
+    }
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('org_company_documents migration:', e.message);
+  }
 } catch (err) {
   console.warn('Migration error:', err.message);
 }

@@ -3,6 +3,7 @@
   "type": "module",
   "dependencies": {
     "@supabase/supabase-js": "^2.78.0",
+    "adm-zip": "^0.5.17",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^11.6.0",
     "cors": "^2.8.5",

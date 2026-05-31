@@ -325,7 +325,7 @@ router.get('/me/profile', (req, res) => {
  * When `setup_completed=true` is supplied, we stamp `setup_completed_at` so downstream
  * automation knows the org is ready to receive participants/staff.
  */
-router.put('/me/profile', requireAdminOrDelegate, (req, res) => {
+router.put('/me/profile', requireAdminOrDelegate, async (req, res) => {
   try {
     const orgId = requesterOrgId(req);
     if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
@@ -358,7 +358,7 @@ router.put('/me/profile', requireAdminOrDelegate, (req, res) => {
     let seedSummary = null;
     if (req.body?.setup_completed) {
       try {
-        seedSummary = seedOrgFromMasters(orgId);
+        seedSummary = await seedOrgFromMasters(orgId);
       } catch (seedErr) {
         console.warn('[orgBootstrap] seed on setup_completed failed:', seedErr?.message);
         seedSummary = { error: seedErr?.message || 'seed failed' };
@@ -376,11 +376,11 @@ router.put('/me/profile', requireAdminOrDelegate, (req, res) => {
  * Manually re-run the master template seed for the current org. Idempotent — existing clones
  * are skipped, only newly added masters become available.
  */
-router.post('/me/seed-templates', requireAdminOrDelegate, (req, res) => {
+router.post('/me/seed-templates', requireAdminOrDelegate, async (req, res) => {
   try {
     const orgId = requesterOrgId(req);
     if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
-    const summary = seedOrgFromMasters(orgId);
+    const summary = await seedOrgFromMasters(orgId);
     res.json(summary);
   } catch (err) {
     res.status(500).json({ error: err.message });

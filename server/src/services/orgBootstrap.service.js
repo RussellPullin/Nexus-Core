@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { cloneAllLibraryMastersForOrg } from './documentLibrary.service.js';
 import { mergeBranding } from './nexusFormTemplateRuntime.service.js';
+import { bootstrapCompanyDocumentsForOrg } from './companyDocumentsOnboardingSync.service.js';
 
 /**
  * @param {string} orgId
@@ -22,7 +23,7 @@ import { mergeBranding } from './nexusFormTemplateRuntime.service.js';
  *   skipped_existing: number
  * }}
  */
-export function seedOrgFromMasters(orgId) {
+export async function seedOrgFromMasters(orgId) {
   if (!orgId) throw new Error('orgId required');
 
   const result = {
@@ -77,6 +78,14 @@ export function seedOrgFromMasters(orgId) {
       VALUES (?, ?, 0, 1, 'hybrid', 365, '{}', datetime('now'), datetime('now'))
     `).run(id, orgId);
     result.provider_profile_id = id;
+  }
+
+  // ---- 4. Mirror library masters into org company docs + optional onboarding sync ----
+  try {
+    result.company_documents = await bootstrapCompanyDocumentsForOrg(orgId);
+  } catch (e) {
+    console.warn('[orgBootstrap] company documents bootstrap failed:', e?.message);
+    result.company_documents = { error: e?.message };
   }
 
   return result;

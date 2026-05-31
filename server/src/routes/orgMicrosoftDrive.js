@@ -16,6 +16,7 @@ import {
   syncRegisterWorkbookNow,
   syncTemplateRegistersNow
 } from '../services/orgOnedriveSync.service.js';
+import { getOnedriveImportSettings } from '../services/companyDocumentsOnedriveImport.service.js';
 import { buildSettingsRedirectLocation } from '../lib/frontendBaseUrl.js';
 import { oauthApiPublicOrigin } from '../lib/oauthPublicOrigin.js';
 
@@ -32,11 +33,13 @@ router.get('/status', requireAuth, (req, res) => {
       return res.json({ connected: false, organization_id: null, message: 'No organisation on your account.' });
     }
     const row = getOnedriveLinkRow(orgId);
+    const importSettings = getOnedriveImportSettings(orgId);
     res.json({
       connected: Boolean(row?.refresh_token_encrypted),
       organization_id: orgId,
       connected_at: row?.connected_at || null,
-      nexus_core_ready: Boolean(row?.nexus_core_folder_id)
+      nexus_core_ready: Boolean(row?.nexus_core_folder_id),
+      import: importSettings
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

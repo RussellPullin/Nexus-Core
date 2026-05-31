@@ -3,6 +3,7 @@ import { forms, onboarding } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import ServiceAgreementTemplateEditor from '../components/ServiceAgreementTemplateEditor';
 import OrgFormsCatalog from '../components/OrgFormsCatalog';
+import CompanyDocumentsPanel from '../components/CompanyDocumentsPanel';
 
 function workflowLabel(w) {
   if (w === 'staff_onboarding') return 'Staff only';
@@ -240,6 +241,11 @@ export default function FormsPage() {
         </p>
       )}
       {context?.message && <p className="forms-muted">{context.message}</p>}
+
+      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
+        <h2 className="forms-section-heading">Company documents</h2>
+        <CompanyDocumentsPanel onMessage={(msg, isError) => setMessage(msg)} />
+      </section>
 
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
         <h2 className="forms-section-heading">Your forms</h2>
