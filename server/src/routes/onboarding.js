@@ -22,6 +22,13 @@ import {
   assertProviderOnboardingReady
 } from '../services/onboarding.service.js';
 import { createAgreementPacket, createAgreementWithDocument, uploadTransientDocument } from '../services/dropboxSign.service.js';
+import {
+  buildServiceAgreementDropboxFields,
+  isServiceAgreementSnapshot
+} from '../services/serviceAgreementDropboxFields.service.js';
+import { buildPrivacyConsentDropboxFields } from '../services/privacyConsentDropboxFields.service.js';
+import { isPrivacyConsentSnapshot, buildPrivacyConsentSnapshot } from '../services/privacyConsentSnapshot.service.js';
+import { generatePrivacyConsentPdfBuffer } from '../services/privacyConsentPdf.service.js';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -388,33 +395,63 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
       const coordinatorSignatureDataUrl = req.session?.user?.id
         ? (db.prepare('SELECT signature_data FROM users WHERE id = ?').get(req.session.user.id)?.signature_data || null)
         : null;
-      const docBuffer = fillConsentForm(
-        participant,
-        intake,
-        coordinatorSignatureDataUrl
-          ? { coordinatorSignatureDataUrl, ...consentPathOpts }
-          : { ...consentPathOpts }
-      );
-      const pdfBuffer = convertDocxToPdf(docBuffer);
-      const consentFilename = pdfBuffer ? 'FM-Consent-NDIS-information.pdf' : 'FM-Consent-NDIS-information.docx';
-      const uploadBuf = pdfBuffer || docBuffer;
-      oneDriveCopy = {
-        buffer: uploadBuf,
-        originalFilename: consentFilename,
-        mimeType: pdfBuffer
-          ? 'application/pdf'
-          : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        category: 'Consent and service agreement'
-      };
-      const transientId = await uploadTransientDocument(uploadBuf, consentFilename, organisationId);
-      agreement = await createAgreementWithDocument({
-        participantName: participant.name,
-        participantEmail: participant.email,
-        envelopeId: envelope.envelope_id,
-        transientDocumentId: transientId,
-        documentName: 'Privacy Consent (NDIS)',
-        orgId: organisationId
-      });
+      const resolved = getConsentFormPath(consentPathOpts);
+      const isPdfTemplate = resolved && String(resolved).toLowerCase().endsWith('.pdf');
+      if (isPdfTemplate) {
+        const snap = parseSnapshot(form) || {};
+        const pcSnap = snap.privacy_consent && isPrivacyConsentSnapshot(snap.privacy_consent)
+          ? snap.privacy_consent
+          : buildPrivacyConsentSnapshot({ participantId: participant.id, participantOnboardingId: onboarding.id, overrides: {} });
+        const pdfBuffer = await generatePrivacyConsentPdfBuffer(pcSnap);
+        const filename = 'Privacy-Consent-Form.pdf';
+        oneDriveCopy = {
+          buffer: pdfBuffer,
+          originalFilename: filename,
+          mimeType: 'application/pdf',
+          category: 'Consent and service agreement'
+        };
+        const dropboxFields = buildPrivacyConsentDropboxFields(pcSnap);
+        const transientId = await uploadTransientDocument(pdfBuffer, filename, organisationId, {
+          formFieldsPerDocument: dropboxFields.formFieldsPerDocument,
+          customFields: dropboxFields.customFields
+        });
+        agreement = await createAgreementWithDocument({
+          participantName: participant.name,
+          participantEmail: participant.email,
+          envelopeId: envelope.envelope_id,
+          transientDocumentId: transientId,
+          documentName: 'Privacy Consent Form',
+          orgId: organisationId
+        });
+      } else {
+        const docBuffer = fillConsentForm(
+          participant,
+          intake,
+          coordinatorSignatureDataUrl
+            ? { coordinatorSignatureDataUrl, ...consentPathOpts }
+            : { ...consentPathOpts }
+        );
+        const pdfBuffer = convertDocxToPdf(docBuffer);
+        const consentFilename = pdfBuffer ? 'FM-Consent-NDIS-information.pdf' : 'FM-Consent-NDIS-information.docx';
+        const uploadBuf = pdfBuffer || docBuffer;
+        oneDriveCopy = {
+          buffer: uploadBuf,
+          originalFilename: consentFilename,
+          mimeType: pdfBuffer
+            ? 'application/pdf'
+            : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          category: 'Consent and service agreement'
+        };
+        const transientId = await uploadTransientDocument(uploadBuf, consentFilename, organisationId);
+        agreement = await createAgreementWithDocument({
+          participantName: participant.name,
+          participantEmail: participant.email,
+          envelopeId: envelope.envelope_id,
+          transientDocumentId: transientId,
+          documentName: 'Privacy Consent (NDIS)',
+          orgId: organisationId
+        });
+      }
     } else if (form.draft_document_path && existsSync(form.draft_document_path)) {
       const ext = form.draft_document_path.toLowerCase().endsWith('.docx') ? 'docx' : 'pdf';
       const docBuffer = readFileSync(form.draft_document_path);
@@ -428,7 +465,41 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
             : 'application/pdf',
         category: form.display_name || form.form_type || 'Service agreement'
       };
-      const transientId = await uploadTransientDocument(docBuffer, filename, organisationId);
+      let dropboxFieldOpts = {};
+      let twoSignerSigners = null;
+      if (form.form_type === 'service_agreement' && ext === 'pdf') {
+        let snap = {};
+        try {
+          snap = parseSnapshot(form);
+        } catch {
+          snap = {};
+        }
+        if (isServiceAgreementSnapshot(snap)) {
+          dropboxFieldOpts = buildServiceAgreementDropboxFields(snap);
+          const derived = dropboxFieldOpts.signers || {};
+          const orgEmail = (derived.org?.email || '').trim();
+          const orgName = (derived.org?.name || '').trim();
+          const participantEmail = (participant.email || '').trim();
+          const participantName = (participant.name || '').trim();
+          if (!orgEmail) {
+            return res
+              .status(400)
+              .json({ error: 'Set the default signatory email in Settings → Business so the organisation admin signs first.' });
+          }
+          if (!participantEmail) {
+            return res.status(400).json({ error: 'Add a participant email before sending for signature.' });
+          }
+          twoSignerSigners = [
+            { name: orgName || 'Organisation admin', email: orgEmail, order: 0, role: derived.org?.role || 'Organisation admin' },
+            { name: participantName || 'Participant', email: participantEmail, order: 1, role: 'Participant' }
+          ];
+        }
+      }
+      const transientId = await uploadTransientDocument(docBuffer, filename, organisationId, {
+        formFieldsPerDocument: dropboxFieldOpts.formFieldsPerDocument,
+        customFields: dropboxFieldOpts.customFields,
+        signers: twoSignerSigners
+      });
       agreement = await createAgreementWithDocument({
         participantName: participant.name,
         participantEmail: participant.email,
@@ -719,6 +790,65 @@ router.get('/participants/:id/forms/:formId/prefill-snapshot', (req, res) => {
     res.json({ form_id: form.id, snapshot: parseSnapshot(form) });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Update coordinator tickboxes / free-text for the PDF-based privacy consent form.
+ * Stores snapshot back into participant_form_instances.source_snapshot_json and regenerates the draft PDF.
+ *
+ * Body:
+ *   { overrides: { checkboxes?: object, text?: object } }
+ */
+router.put('/participants/:id/forms/:formId/prefill-snapshot', async (req, res) => {
+  try {
+    const onboarding = getOnboardingByParticipant(req.params.id);
+    if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
+
+    const form = db.prepare(`
+      SELECT pfi.*, ft.form_type, ft.display_name, ft.template_filename
+      FROM participant_form_instances pfi
+      JOIN form_templates ft ON ft.id = pfi.form_template_id
+      WHERE pfi.id = ? AND pfi.participant_onboarding_id = ?
+    `).get(req.params.formId, onboarding.id);
+    if (!form) return res.status(404).json({ error: 'Form not found' });
+    if (form.form_type !== 'privacy_consent') {
+      return res.status(400).json({ error: 'This endpoint only supports privacy_consent.' });
+    }
+    if (!['generated', 'draft'].includes(form.status)) {
+      return res.status(400).json({ error: `Form is ${form.status}. Cannot update snapshot.` });
+    }
+
+    const current = parseSnapshot(form) || {};
+    const overrides = req.body?.overrides && typeof req.body.overrides === 'object' ? req.body.overrides : {};
+
+    const pcSnapshot = buildPrivacyConsentSnapshot({
+      participantId: req.params.id,
+      participantOnboardingId: onboarding.id,
+      overrides
+    });
+
+    const nextSnapshot = {
+      ...current,
+      privacy_consent: pcSnapshot
+    };
+
+    // Regenerate the draft PDF so the checkboxes + details are baked in before signature send.
+    const pdfBuffer = await generatePrivacyConsentPdfBuffer(pcSnapshot);
+    const ext = 'pdf';
+    const absolutePath = join(onboardingDir, `${form.participant_id}-privacy_consent-v${form.version}.${ext}`);
+    mkdirSync(onboardingDir, { recursive: true });
+    writeFileSync(absolutePath, pdfBuffer);
+
+    db.prepare(
+      `UPDATE participant_form_instances
+       SET source_snapshot_json = ?, draft_document_path = ?, updated_at = datetime('now')
+       WHERE id = ?`
+    ).run(JSON.stringify(nextSnapshot), absolutePath, form.id);
+
+    res.json({ ok: true, form_id: form.id, snapshot: nextSnapshot });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

@@ -132,6 +132,32 @@ function loadImplementationsSchedule(participantId, planId) {
   });
 }
 
+/**
+ * Build schedule rows from admin-entered overrides (up to 5 NDIS line items).
+ * Each input: { description, rate, hours } — rate is $/hr, hours is total hours over the plan.
+ */
+function scheduleRowsFromOverrides(services) {
+  if (!Array.isArray(services)) return [];
+  const out = [];
+  for (const raw of services.slice(0, 5)) {
+    if (!raw) continue;
+    const desc = String(raw.description || '').trim();
+    const rate = Number(raw.rate) || 0;
+    const hours = Number(raw.hours) || 0;
+    if (!desc && rate === 0 && hours === 0) continue;
+    const line = Math.round(rate * hours * 100) / 100;
+    out.push({
+      description: desc || 'Support service',
+      hours: hours ? String(hours) : '',
+      rate: rate ? `$${rate.toFixed(2)}` : '',
+      ratio: '',
+      budget: line ? `$${line.toFixed(2)}` : '',
+      line_total: line
+    });
+  }
+  return out;
+}
+
 function sumScheduleTotal(rows) {
   let t = 0;
   rows.forEach((r) => {
@@ -215,7 +241,10 @@ export function buildServiceAgreementSnapshot({
   const intake = previewMode ? {} : getIntakeFieldsForParticipant(participantId);
   const plan = previewMode ? null : getCurrentPlan(participantId) || getLatestPlan(participantId);
 
-  let scheduleRows = loadImplementationsSchedule(participantId, plan?.id);
+  let scheduleRows = scheduleRowsFromOverrides(instanceOverrides?.services);
+  if (scheduleRows.length === 0) {
+    scheduleRows = loadImplementationsSchedule(participantId, plan?.id);
+  }
   if (scheduleRows.length === 0) {
     scheduleRows = parseScheduleRowsFromIntake(intake);
   }

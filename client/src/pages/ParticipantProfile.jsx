@@ -4,7 +4,7 @@ import { backToPreviousListPath, participantProfileBackLabel } from '../lib/list
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { participants, organisations, ndis, smartDefaults, onboarding, formTemplates } from '../lib/api';
-import { NEXUS_CORE_SIGN_COMING_SOON_TITLE } from '../lib/featureFlags.js';
+import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useDropboxSignEnabled } from '../lib/featureFlags.js';
 import CopyableField from '../components/CopyableField';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate, toInputDate } from '../lib/dateUtils';
@@ -213,10 +213,19 @@ export default function ParticipantProfile() {
     scheduled_review_date: '',
     monitoring_worker_frequency: '',
     other_provider_consultation_frequency: '',
-    communication_preferences: ''
+    communication_preferences: '',
+    services: [
+      { description: '', rate: '', hours: '' },
+      { description: '', rate: '', hours: '' },
+      { description: '', rate: '', hours: '' },
+      { description: '', rate: '', hours: '' },
+      { description: '', rate: '', hours: '' }
+    ]
   });
   const [saGaps, setSaGaps] = useState(null);
   const [saPreflightLoading, setSaPreflightLoading] = useState(false);
+  const [saSignBusy, setSaSignBusy] = useState(false);
+  const signEnabled = useDropboxSignEnabled();
   const [saScrollTarget, setSaScrollTarget] = useState(null);
 
   const saInstanceOverridesPayload = useMemo(() => {
@@ -229,8 +238,68 @@ export default function ParticipantProfile() {
       instance_overrides.other_provider_consultation_frequency = o.other_provider_consultation_frequency.trim();
     }
     if (o.communication_preferences?.trim()) instance_overrides.communication_preferences = o.communication_preferences.trim();
+    const services = (Array.isArray(o.services) ? o.services : [])
+      .map((s) => ({
+        description: String(s?.description || '').trim(),
+        rate: Number(s?.rate) || 0,
+        hours: Number(s?.hours) || 0
+      }))
+      .filter((s) => s.description || s.rate || s.hours);
+    if (services.length > 0) instance_overrides.services = services;
     return instance_overrides;
   }, [saOverrides]);
+
+  const saServicesTotals = useMemo(() => {
+    const list = Array.isArray(saOverrides.services) ? saOverrides.services : [];
+    const lines = list.map((s) => {
+      const rate = Number(s?.rate) || 0;
+      const hours = Number(s?.hours) || 0;
+      return Math.round(rate * hours * 100) / 100;
+    });
+    const total = Math.round(lines.reduce((a, b) => a + b, 0) * 100) / 100;
+    const completeRows = list.filter((s) => {
+      const rate = Number(s?.rate) || 0;
+      const hours = Number(s?.hours) || 0;
+      return String(s?.description || '').trim() && rate > 0 && hours > 0;
+    }).length;
+    return { lines, total, completeRows };
+  }, [saOverrides.services]);
+
+  const saPreSendChecklist = useMemo(() => {
+    const fmtDob = data?.date_of_birth ? formatDate(String(data.date_of_birth).slice(0, 10)) : '';
+    return [
+      { key: 'name', label: 'Full name', value: data?.name },
+      { key: 'address', label: 'Address', value: data?.address },
+      { key: 'phone', label: 'Phone', value: data?.phone || data?.mobile },
+      { key: 'email', label: 'Participant email (signing step 2)', value: data?.email },
+      { key: 'ndis_number', label: 'NDIS number', value: data?.ndis_number },
+      { key: 'dob', label: 'Date of birth', value: fmtDob },
+      { key: 'agreement_date', label: 'Agreement date', value: saOverrides.agreement_date },
+      { key: 'review_date', label: 'Scheduled review date', value: saOverrides.scheduled_review_date },
+      {
+        key: 'services',
+        label: 'Services & quote (at least one line)',
+        value: saServicesTotals.completeRows > 0
+          ? `${saServicesTotals.completeRows} line${saServicesTotals.completeRows === 1 ? '' : 's'} · Total $${saServicesTotals.total.toFixed(2)}`
+          : ''
+      }
+    ];
+  }, [
+    data?.name,
+    data?.address,
+    data?.phone,
+    data?.mobile,
+    data?.email,
+    data?.ndis_number,
+    data?.date_of_birth,
+    saOverrides.agreement_date,
+    saOverrides.scheduled_review_date,
+    saServicesTotals.completeRows,
+    saServicesTotals.total
+  ]);
+
+  const saChecklistMissing = saPreSendChecklist.filter((r) => !String(r.value || '').trim());
+  const saReadyToSend = saChecklistMissing.length === 0;
 
   const navigateToGapFix = useCallback(
     (gap) => {
@@ -2871,6 +2940,86 @@ export default function ParticipantProfile() {
                   )}
                 </div>
               ) : null}
+              <div
+                style={{
+                  marginBottom: '1rem',
+                  padding: '0.85rem 1rem',
+                  borderRadius: 8,
+                  border: `1px solid ${saReadyToSend ? '#bbf7d0' : '#fde68a'}`,
+                  background: saReadyToSend ? '#f0fdf4' : '#fffbeb'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <strong style={{ color: '#0f172a' }}>Pre-send checklist (complete in Nexus before signing)</strong>
+                  <span style={{ fontSize: '0.82rem', color: saReadyToSend ? '#15803d' : '#b45309' }}>
+                    {saReadyToSend
+                      ? 'Ready to send for signatures'
+                      : `${saChecklistMissing.length} item${saChecklistMissing.length === 1 ? '' : 's'} remaining`}
+                  </span>
+                </div>
+                <p style={{ margin: '0 0 0.65rem 0', fontSize: '0.84rem', color: '#475569' }}>
+                  All agreement details are finalised here in Nexus Core. Once everything below is ticked, click <strong>Sign with Nexus Core</strong> — the signed PDF is sent first to the organisation admin (Default signatory under <Link to="/settings">Settings → Business</Link>), then auto-forwarded to the participant. Both only need to add a signature, printed name, and date — no other fields to fill.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '0.4rem' }}>
+                  {saPreSendChecklist.map((row) => {
+                    const ok = !!String(row.value || '').trim();
+                    return (
+                      <div
+                        key={row.key}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '0.5rem',
+                          fontSize: '0.86rem',
+                          color: ok ? '#0f172a' : '#991b1b'
+                        }}
+                      >
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            display: 'inline-block',
+                            width: 16,
+                            textAlign: 'center',
+                            fontWeight: 700,
+                            color: ok ? '#15803d' : '#b91c1c'
+                          }}
+                        >
+                          {ok ? '✓' : '✗'}
+                        </span>
+                        <span style={{ flex: 1 }}>
+                          <span style={{ display: 'block', fontWeight: 600 }}>{row.label}</span>
+                          <span style={{ color: ok ? '#334155' : '#b91c1c' }}>
+                            {ok
+                              ? row.value
+                              : row.key === 'services'
+                                ? 'Add at least one line below (description + hours + rate)'
+                                : ['agreement_date', 'review_date'].includes(row.key)
+                                  ? 'Set the date below'
+                                  : 'Missing — open Edit'}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {!saReadyToSend && saChecklistMissing.some((r) => !['agreement_date', 'review_date', 'services'].includes(r.key)) ? (
+                  <div style={{ marginTop: '0.65rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.82rem', padding: '0.25rem 0.6rem' }}
+                      onClick={() => {
+                        if (data) {
+                          setEditForm({ ...data, invoice_emails: parseInvoiceEmailsField(data.invoice_emails) });
+                        }
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                    >
+                      Edit participant details
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <div id="sa-gap-agreements-fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
                 <div className="form-group">
                   <label>Agreement date</label>
@@ -2916,6 +3065,124 @@ export default function ParticipantProfile() {
                   />
                 </div>
               </div>
+              <div
+                style={{
+                  marginBottom: '1rem',
+                  padding: '0.85rem 1rem',
+                  borderRadius: 8,
+                  border: '1px solid #e2e8f0',
+                  background: '#ffffff'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <strong style={{ color: '#0f172a' }}>Services & quote (up to 5 NDIS line items)</strong>
+                  <span style={{ fontSize: '0.85rem', color: '#0f172a' }}>
+                    Total quote: <strong>${saServicesTotals.total.toFixed(2)}</strong>
+                  </span>
+                </div>
+                <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.84rem', color: '#475569' }}>
+                  Enter the NDIS supports you're quoting for this plan. Line total = hours × rate. Grand total prints on the agreement. Leave a row blank to skip it. If you leave all rows blank, the schedule is loaded from the participant's plan implementations.
+                </p>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9' }}>
+                        <th style={{ padding: '0.4rem', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>#</th>
+                        <th style={{ padding: '0.4rem', textAlign: 'left', borderBottom: '1px solid #e2e8f0', minWidth: 260 }}>
+                          NDIS line item / description
+                        </th>
+                        <th style={{ padding: '0.4rem', textAlign: 'right', borderBottom: '1px solid #e2e8f0', width: 110 }}>Hours</th>
+                        <th style={{ padding: '0.4rem', textAlign: 'right', borderBottom: '1px solid #e2e8f0', width: 130 }}>Rate ($/hr)</th>
+                        <th style={{ padding: '0.4rem', textAlign: 'right', borderBottom: '1px solid #e2e8f0', width: 130 }}>Line total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(saOverrides.services || []).map((row, i) => (
+                        <tr key={i}>
+                          <td style={{ padding: '0.35rem', color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>{i + 1}</td>
+                          <td style={{ padding: '0.35rem', borderBottom: '1px solid #f1f5f9' }}>
+                            <input
+                              className="form-input"
+                              value={row.description}
+                              placeholder="e.g. 01_011_0107_1_1 — Assistance with daily personal activities"
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setSaOverrides((o) => {
+                                  const next = [...(o.services || [])];
+                                  next[i] = { ...(next[i] || {}), description: v };
+                                  return { ...o, services: next };
+                                });
+                              }}
+                            />
+                          </td>
+                          <td style={{ padding: '0.35rem', borderBottom: '1px solid #f1f5f9' }}>
+                            <input
+                              className="form-input"
+                              type="number"
+                              min="0"
+                              step="0.25"
+                              style={{ textAlign: 'right' }}
+                              value={row.hours}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setSaOverrides((o) => {
+                                  const next = [...(o.services || [])];
+                                  next[i] = { ...(next[i] || {}), hours: v };
+                                  return { ...o, services: next };
+                                });
+                              }}
+                            />
+                          </td>
+                          <td style={{ padding: '0.35rem', borderBottom: '1px solid #f1f5f9' }}>
+                            <input
+                              className="form-input"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              style={{ textAlign: 'right' }}
+                              value={row.rate}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setSaOverrides((o) => {
+                                  const next = [...(o.services || [])];
+                                  next[i] = { ...(next[i] || {}), rate: v };
+                                  return { ...o, services: next };
+                                });
+                              }}
+                            />
+                          </td>
+                          <td
+                            style={{
+                              padding: '0.35rem',
+                              textAlign: 'right',
+                              borderBottom: '1px solid #f1f5f9',
+                              fontVariantNumeric: 'tabular-nums',
+                              color: saServicesTotals.lines[i] > 0 ? '#0f172a' : '#94a3b8'
+                            }}
+                          >
+                            ${(saServicesTotals.lines[i] || 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td colSpan={4} style={{ padding: '0.5rem 0.35rem', textAlign: 'right', fontWeight: 700 }}>
+                          Total quote
+                        </td>
+                        <td
+                          style={{
+                            padding: '0.5rem 0.35rem',
+                            textAlign: 'right',
+                            fontWeight: 700,
+                            fontVariantNumeric: 'tabular-nums'
+                          }}
+                        >
+                          ${saServicesTotals.total.toFixed(2)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
               <button
                 type="button"
                 className="btn btn-primary"
@@ -2945,7 +3212,12 @@ export default function ParticipantProfile() {
                     setSaMessage('Generated. Download opened in a new tab; the file is saved under Documents and to OneDrive when connected.');
                     window.open(formTemplates.generatedPdfUrl(r.id), '_blank', 'noopener,noreferrer');
                     const list = await participants.listServiceAgreements(id);
-                    setSaAgreements(list.items || []);
+                    const items = list.items || [];
+                    if (r.form_instance_id && items.length) {
+                      const idx = items.findIndex((x) => x.id === r.id);
+                      if (idx >= 0) items[idx] = { ...items[idx], form_instance_id: r.form_instance_id };
+                    }
+                    setSaAgreements(items);
                   } catch (e) {
                     const payload = e.apiPayload;
                     if (payload?.gaps) {
@@ -2967,7 +3239,9 @@ export default function ParticipantProfile() {
 
               <h4 style={{ marginTop: '1.5rem' }}>Generated agreements</h4>
               <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem' }}>
-                Download to sign with your own process, or use Sign with Nexus Core (Dropbox Sign) once enabled in Forms → Onboarding settings.
+                Download to review the full pre-filled agreement, or click <strong>Sign with Nexus Core</strong> to send it for signatures.
+                The Sign button is enabled only once the pre-send checklist above is complete. The PDF goes first to the organisation default signatory, then to the participant — both only sign, no editing in Dropbox Sign.
+                Set the default signatory under <Link to="/settings">Settings → Business</Link>, enable signing under Forms → Onboarding settings, and connect Dropbox Sign in Settings.
               </p>
               {saAgreements.length === 0 ? (
                 <p className="empty-state">None yet.</p>
@@ -2995,10 +3269,52 @@ export default function ParticipantProfile() {
                             type="button"
                             className="btn btn-primary"
                             style={{ fontSize: '0.8rem', marginLeft: 6 }}
-                            disabled
-                            title={NEXUS_CORE_SIGN_COMING_SOON_TITLE}
+                            disabled={
+                              saSignBusy ||
+                              !signEnabled ||
+                              !g.form_instance_id ||
+                              !['generated', 'draft'].includes(g.status) ||
+                              !saReadyToSend
+                            }
+                            title={
+                              !signEnabled
+                                ? NEXUS_CORE_SIGN_COMING_SOON_TITLE
+                                : !g.form_instance_id
+                                  ? 'Generate the agreement first'
+                                  : !data?.email?.trim()
+                                    ? 'Add participant email in Edit (use your email for a self-test)'
+                                    : !saReadyToSend
+                                      ? `Complete the pre-send checklist first: ${saChecklistMissing.map((m) => m.label).join(', ')}`
+                                      : 'Send this agreement for signature via Dropbox Sign'
+                            }
+                            onClick={async () => {
+                              if (!g.form_instance_id) return;
+                              if (!data?.email?.trim()) {
+                                setSaMessage('Add a participant email in Edit before sending for signature.');
+                                return;
+                              }
+                              if (
+                                !confirm(
+                                  `Send the service agreement to ${data.email.trim()} for signature via Dropbox Sign?`
+                                )
+                              ) {
+                                return;
+                              }
+                              setSaSignBusy(true);
+                              setSaMessage('');
+                              try {
+                                await onboarding.sendFormForSignature(id, g.form_instance_id);
+                                setSaMessage(`Sent for signature to ${data.email.trim()}. Check that inbox.`);
+                                const list = await participants.listServiceAgreements(id);
+                                setSaAgreements(list.items || []);
+                              } catch (e) {
+                                setSaMessage(e.message || 'Could not send for signature');
+                              } finally {
+                                setSaSignBusy(false);
+                              }
+                            }}
                           >
-                            Sign with Nexus Core
+                            {saSignBusy ? 'Sending…' : 'Sign with Nexus Core'}
                           </button>
                           {g.onedrive_web_url ? (
                             <a

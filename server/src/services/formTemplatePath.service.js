@@ -60,8 +60,10 @@ export function getTemplatePath(formType, options = {}) {
   const legacy = join(TEMPLATES_DIR, dirName);
   if (!dirsToTry.length || dirsToTry[0] !== legacy) dirsToTry.push(legacy);
 
+  // Privacy consent historically used DOCX only; we now allow PDF too so the org can
+  // upload a PDF-based consent form and still use the core onboarding pipeline.
   const extensions = formType === 'privacy_consent'
-    ? ['.docx']
+    ? ['.pdf', '.docx']
     : ['.pdf', '.docx'];
 
   for (const dir of dirsToTry) {

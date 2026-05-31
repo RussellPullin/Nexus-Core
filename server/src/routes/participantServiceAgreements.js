@@ -36,6 +36,27 @@ function assertParticipantOrg(participantId, orgId) {
   return { ok: true, participant: p };
 }
 
+/** Linked participant_form_instances row after bridgeNexusServiceAgreementToFormInstance. */
+function findFormInstanceIdForNexusDoc(participantId, nexusDocId) {
+  const rows = db
+    .prepare(
+      `SELECT id, source_snapshot_json, status FROM participant_form_instances
+       WHERE participant_id = ?
+       ORDER BY datetime(generated_at) DESC`
+    )
+    .all(participantId);
+  for (const row of rows) {
+    if (!row.source_snapshot_json) continue;
+    try {
+      const snap = JSON.parse(row.source_snapshot_json);
+      if (snap.nexus_generated_form_id === nexusDocId) return row.id;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
 const ROUTER = Router({ mergeParams: true });
 
 ROUTER.post('/:participantId/service-agreements/preflight', (req, res) => {
@@ -255,7 +276,11 @@ ROUTER.get('/:participantId/service-agreements', (req, res) => {
     `
       )
       .all(participantId, orgId);
-    res.json({ items: rows });
+    const items = rows.map((row) => ({
+      ...row,
+      form_instance_id: findFormInstanceIdForNexusDoc(participantId, row.id)
+    }));
+    res.json({ items });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

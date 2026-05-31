@@ -119,26 +119,70 @@ async function requestDropbox(orgId, path, options = {}) {
  * Store file buffer temporarily so createAgreementWithDocument can send it.
  * Returns a key the caller passes back as transientDocumentId.
  */
-export async function uploadTransientDocument(fileBuffer, filename = 'document.pdf', orgId = null) {
+export async function uploadTransientDocument(
+  fileBuffer,
+  filename = 'document.pdf',
+  orgId = null,
+  options = {}
+) {
   if (!hasConfiguredDropboxForOrg(orgId)) {
     return `mock-transient-${Date.now()}`;
   }
   const key = randomUUID();
-  pendingBuffers.set(key, { buffer: fileBuffer, filename });
+  pendingBuffers.set(key, {
+    buffer: fileBuffer,
+    filename,
+    formFieldsPerDocument: options.formFieldsPerDocument || null,
+    customFields: options.customFields || null,
+    signers: options.signers || null
+  });
   setTimeout(() => pendingBuffers.delete(key), 5 * 60 * 1000);
   return key;
 }
 
-async function sendSignatureRequest(orgId, { signerName, signerEmail, title, message, files }) {
+/**
+ * @param {Array<{ name: string, email: string, order?: number, role?: string }>} signers
+ *   Index in array is the signer's API index (signers[i] in Dropbox's payload).
+ *   If `order` is provided on every signer, the request becomes a sequential signing flow.
+ */
+async function sendSignatureRequest(orgId, {
+  signers,
+  // Back-compat single-signer shorthand
+  signerName,
+  signerEmail,
+  title,
+  subject,
+  message,
+  files,
+  formFieldsPerDocument = null,
+  customFields = null
+}) {
   const ctx = await getDropboxContext(orgId);
   if (!ctx) throw new Error('Dropbox Sign is not configured for this organisation.');
 
+  const signerList = (Array.isArray(signers) && signers.length > 0)
+    ? signers
+    : [{ name: signerName || 'Participant', email: signerEmail || '' }];
+
   const form = new FormData();
-  form.append('signers[0][email_address]', signerEmail || '');
-  form.append('signers[0][name]', signerName || 'Participant');
+  signerList.forEach((s, i) => {
+    form.append(`signers[${i}][email_address]`, s.email || '');
+    form.append(`signers[${i}][name]`, s.name || `Signer ${i + 1}`);
+    if (Number.isInteger(s.order)) {
+      form.append(`signers[${i}][order]`, String(s.order));
+    }
+  });
+
   form.append('title', title || 'Document');
-  form.append('subject', title || 'Please sign this document');
+  form.append('subject', subject || title || 'Please sign this document');
   form.append('message', message || 'Please review and sign the attached document.');
+
+  if (formFieldsPerDocument?.length) {
+    form.append('form_fields_per_document', JSON.stringify(formFieldsPerDocument));
+  }
+  if (customFields?.length) {
+    form.append('custom_fields', JSON.stringify(customFields));
+  }
 
   for (let i = 0; i < files.length; i++) {
     const { buffer, filename } = files[i];
@@ -177,14 +221,29 @@ export async function createAgreementWithDocument({
   if (!fileInfo) {
     return { provider: 'mock', external_envelope_id: `mock-${envelopeId}`, status: 'sent', packet_summary: '1 form sent' };
   }
+  const { formFieldsPerDocument, customFields, buffer, filename, signers: storedSigners } = fileInfo;
   pendingBuffers.delete(transientDocumentId);
 
+  const signers = Array.isArray(storedSigners) && storedSigners.length > 0
+    ? storedSigners
+    : [{ name: participantName || 'Participant', email: participantEmail || '' }];
+
+  const subject = signers.length > 1
+    ? `Action requested: review & sign ${documentName}`
+    : `Please sign ${documentName}`;
+
+  const message = signers.length > 1
+    ? `${documentName}: the organisation admin signs first to confirm participant details, then the participant signs.`
+    : `Please review and sign: ${documentName}.`;
+
   const signatureRequestId = await sendSignatureRequest(orgId, {
-    signerName: participantName,
-    signerEmail: participantEmail,
+    signers,
     title: `${documentName} – ${participantName || 'Participant'}`,
-    message: `Please review and sign: ${documentName}.`,
-    files: [fileInfo]
+    subject,
+    message,
+    files: [{ buffer, filename }],
+    formFieldsPerDocument,
+    customFields
   });
 
   return {

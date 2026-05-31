@@ -11,6 +11,8 @@ import { ensurePlanManagerOrg, buildOrgLookupMaps } from './organisations.servic
 import { fillServiceAgreement, fillSupportPlan, getServiceAgreementTemplatePath, getSupportPlanTemplatePath } from './formFill.service.js';
 import { composeParticipantLegalName, participantPrefillFieldPaths } from '../../../shared/onboardingFieldRegistry.js';
 import { tryPushParticipantDocument } from './orgOnedriveSync.service.js';
+import { buildPrivacyConsentSnapshot } from './privacyConsentSnapshot.service.js';
+import { generatePrivacyConsentPdfBuffer } from './privacyConsentPdf.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -592,11 +594,33 @@ export async function generateFormPack({
     let draftPath;
     let sourceJson;
     if (template.form_type === 'privacy_consent') {
-      const filledDocx = fillConsentForm(participant, intake, { ...signatureOptions, ...tmplPath });
-      const pdfBuffer = convertDocxToPdf(filledDocx);
-      const ext = pdfBuffer ? 'pdf' : 'docx';
-      draftPath = persistFilledDocument(participantId, template.form_type, version, pdfBuffer || filledDocx, ext);
-      sourceJson = JSON.stringify({ ...snapshot, template: { id: template.id, form_type: 'privacy_consent', display_name: template.display_name } });
+      // Prefer PDF-based privacy consent rendering (matches the supplied Privacy Consent Form PDF fields).
+      // If the org template is a DOCX (legacy), keep the old flow.
+      const consentTpl = getConsentFormPath(tmplPath);
+      const isPdfTemplate = consentTpl && String(consentTpl).toLowerCase().endsWith('.pdf');
+      if (isPdfTemplate) {
+        const pcSnapshot = buildPrivacyConsentSnapshot({
+          participantId,
+          participantOnboardingId: onboarding.id,
+          overrides: {}
+        });
+        const pdfBuffer = await generatePrivacyConsentPdfBuffer(pcSnapshot);
+        draftPath = persistFilledDocument(participantId, template.form_type, version, pdfBuffer, 'pdf');
+        sourceJson = JSON.stringify({
+          ...snapshot,
+          privacy_consent: pcSnapshot,
+          template: { id: template.id, form_type: 'privacy_consent', display_name: template.display_name }
+        });
+      } else {
+        const filledDocx = fillConsentForm(participant, intake, { ...signatureOptions, ...tmplPath });
+        const pdfBuffer = convertDocxToPdf(filledDocx);
+        const ext = pdfBuffer ? 'pdf' : 'docx';
+        draftPath = persistFilledDocument(participantId, template.form_type, version, pdfBuffer || filledDocx, ext);
+        sourceJson = JSON.stringify({
+          ...snapshot,
+          template: { id: template.id, form_type: 'privacy_consent', display_name: template.display_name }
+        });
+      }
     } else if (template.form_type === 'service_agreement' && getServiceAgreementTemplatePath(tmplPath)) {
       const saOrgId = organisationId || participant?.provider_org_id || null;
       if (orgHasNexusServiceAgreement(saOrgId)) {

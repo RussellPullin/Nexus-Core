@@ -210,142 +210,205 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
       y += h + 8;
     };
 
-    const rowLine = (label, value) => {
-      const line = `${label}: ${value || '—'}`;
-      bodyPara(line, { size: 9 });
+    const subHeading = (text) => {
+      y = ensureSpace(doc, y, 22, margin, pageMaxY());
+      doc.font('Helvetica-Bold').fontSize(10).fillColor(`rgb(${primary.r},${primary.g},${primary.b})`).text(
+        text,
+        margin,
+        y,
+        { width: pageWidth - 2 * margin, lineBreak: false, height: 14 }
+      );
+      // accent underline tying the heading visually to the section bar
+      doc.save();
+      doc.rect(margin, y + 13, 36, 1.5).fill(`rgb(${accent.r},${accent.g},${accent.b})`);
+      doc.restore();
+      y += 18;
     };
 
-    /* Section 1 */
-    sectionBar(snapshot.section_titles?.s1 || 'Section 1 — Parties to this Agreement');
+    // Render label/value pairs in a multi-column grid. Default 2 columns.
+    // Skips pairs with no value so we don't pad the form with '—' rows.
+    const kvGrid = (pairs, opts = {}) => {
+      const cols = opts.cols || 2;
+      const gutter = 14;
+      const cellW = (pageWidth - 2 * margin - gutter * (cols - 1)) / cols;
+      const labelH = 10;
+      const valuePadAbove = 1;
+      const bottomPad = opts.bottomPad ?? 6;
+      const visible = pairs.filter((p) => {
+        if (opts.includeEmpty) return true;
+        return String(p?.value ?? '').trim() !== '';
+      });
+      doc.font(font).fontSize(9);
+      for (let i = 0; i < visible.length; i += cols) {
+        const rowPairs = visible.slice(i, i + cols);
+        let maxValueH = 11;
+        rowPairs.forEach((p) => {
+          const vh = doc.heightOfString(String(p.value || '—'), { width: cellW });
+          maxValueH = Math.max(maxValueH, vh);
+        });
+        const rowH = labelH + valuePadAbove + maxValueH + bottomPad;
+        y = ensureSpace(doc, y, rowH, margin, pageMaxY());
+        rowPairs.forEach((p, j) => {
+          const x = margin + j * (cellW + gutter);
+          doc.font('Helvetica-Bold').fontSize(7).fillColor('#64748b')
+            .text(String(p.label || '').toUpperCase(), x, y, {
+              width: cellW,
+              lineBreak: false,
+              characterSpacing: 0.4,
+              height: labelH
+            });
+          doc.font(font).fontSize(9).fillColor('#0f172a').text(
+            String(p.value || '—'),
+            x,
+            y + labelH + valuePadAbove,
+            { width: cellW }
+          );
+        });
+        y += rowH;
+      }
+    };
+
+    // Section numbers are renderer-controlled and contiguous so the printed PDF goes
+    // 1 → 2 → 3 → Execution. We intentionally ignore snapshot.section_titles for the
+    // section *numbers* (the legacy template stored a "Section 4 — …" title for terms,
+    // and we removed the old Section 3 checklist from the participant copy).
+    /* Section 1 — Parties */
+    sectionBar('Section 1 — Parties to this Agreement');
     const pl = snapshot.parties_labels || {};
-    bodyPara(`${pl.service_provider || 'Service Provider'}`, { size: 10 });
-    rowLine('Organisation', snapshot.org?.legal_name);
-    rowLine('ABN', snapshot.org?.abn);
-    rowLine('Address', snapshot.org?.address);
-    rowLine('Email', snapshot.org?.email);
-    rowLine('Contact', snapshot.org?.contact_person);
-    rowLine('Phone', snapshot.org?.phone);
+
+    subHeading(pl.service_provider || 'Service Provider');
+    kvGrid([
+      { label: 'Organisation', value: snapshot.org?.legal_name },
+      { label: 'ABN', value: snapshot.org?.abn },
+      { label: 'Address', value: snapshot.org?.address },
+      { label: 'Email', value: snapshot.org?.email },
+      { label: 'Contact', value: snapshot.org?.contact_person },
+      { label: 'Phone', value: snapshot.org?.phone }
+    ]);
 
     y += 4;
-    bodyPara(`${pl.client_details || 'Client Details'}`, { size: 10 });
+    subHeading(pl.client_details || 'Client Details');
     const p = snapshot.participant || {};
-    rowLine('First name', p.first_name);
-    rowLine('Last name', p.last_name);
-    rowLine('Phone', p.phone);
-    rowLine('Mobile', p.mobile);
-    rowLine('Email', p.email);
-    rowLine('Date of birth', p.date_of_birth_display);
-    rowLine('NDIS number', p.ndis_number);
-    rowLine('Street address', p.street_address);
-    rowLine('Suburb', p.suburb);
-    rowLine('State', p.state);
-    rowLine('Postal code', p.postcode);
-    rowLine('Plan start date', p.plan_start);
-    rowLine('Plan expiry date', p.plan_expiry);
+    kvGrid([
+      { label: 'First name', value: p.first_name },
+      { label: 'Last name', value: p.last_name },
+      { label: 'Phone', value: p.phone },
+      { label: 'Mobile', value: p.mobile },
+      { label: 'Email', value: p.email },
+      { label: 'Date of birth', value: p.date_of_birth_display },
+      { label: 'NDIS number', value: p.ndis_number },
+      { label: 'Street address', value: p.street_address },
+      { label: 'Suburb', value: p.suburb },
+      { label: 'State', value: p.state },
+      { label: 'Postal code', value: p.postcode },
+      { label: 'Plan start', value: p.plan_start },
+      { label: 'Plan expiry', value: p.plan_expiry }
+    ]);
 
     const rep = snapshot.representative;
     if (rep && (rep.name || rep.first_name || rep.last_name || rep.phone || rep.email)) {
       y += 4;
-      bodyPara(`${pl.representative || 'Representative / Advocate'}`, { size: 10 });
-      rowLine('First name', rep.first_name);
-      rowLine('Last name', rep.last_name);
-      rowLine('Phone', rep.phone);
-      rowLine('Mobile', rep.mobile);
-      rowLine('Email', rep.email);
-      rowLine('Relationship to client', rep.relationship);
+      subHeading(pl.representative || 'Representative / Advocate');
+      kvGrid([
+        { label: 'First name', value: rep.first_name },
+        { label: 'Last name', value: rep.last_name },
+        { label: 'Phone', value: rep.phone },
+        { label: 'Mobile', value: rep.mobile },
+        { label: 'Email', value: rep.email },
+        { label: 'Relationship to client', value: rep.relationship }
+      ]);
     }
 
     y += 4;
-    bodyPara(`${pl.invoicing_funding || 'Invoicing / Funding Management'}`, { size: 10 });
+    subHeading(pl.invoicing_funding || 'Invoicing / Funding Management');
     const invOrg = snapshot.org?.trading_name || snapshot.org?.legal_name || 'The provider';
-    bodyPara(`${invOrg} will invoice:`, { size: 9 });
-    rowLine('Arrangement', snapshot.funding?.label);
+    bodyPara(`${invOrg} will invoice as follows:`, { size: 9 });
+    kvGrid([{ label: 'Arrangement', value: snapshot.funding?.label }], { cols: 1 });
 
     const fm = snapshot.funding?.plan_manager;
     if (snapshot.funding?.show_plan_manager && fm) {
       y += 4;
-      bodyPara(`${pl.plan_manager || 'Plan Manager Details'}`, { size: 10 });
-      rowLine('Organisation', fm.name);
-      rowLine('ABN', fm.abn);
-      rowLine('Email', fm.email);
-      rowLine('Phone', fm.phone);
-      rowLine('Address', fm.address);
+      subHeading(pl.plan_manager || 'Plan Manager Details');
+      kvGrid([
+        { label: 'Organisation', value: fm.name },
+        { label: 'ABN', value: fm.abn },
+        { label: 'Email', value: fm.email },
+        { label: 'Phone', value: fm.phone },
+        { label: 'Address', value: fm.address }
+      ]);
     }
 
-    /* Section 2 */
-    sectionBar(snapshot.section_titles?.s2 || 'Section 2 — Key Details');
+    /* Section 2 — Key Details */
+    sectionBar('Section 2 — Key Details');
     const s2 = snapshot.section2 || {};
-    rowLine('Date of Agreement', s2.agreement_date);
-    rowLine('Scheduled Review Date', s2.scheduled_review_date);
-    rowLine('Monitoring of Worker Frequency', s2.monitoring_worker_frequency);
-    rowLine('Other Provider Consultation Frequency', s2.other_provider_consultation_frequency);
-    rowLine('Communication Preferences', s2.communication_preferences);
+    kvGrid([
+      { label: 'Date of Agreement', value: s2.agreement_date },
+      { label: 'Scheduled Review Date', value: s2.scheduled_review_date },
+      { label: 'Monitoring of Worker Frequency', value: s2.monitoring_worker_frequency },
+      { label: 'Other Provider Consultation Frequency', value: s2.other_provider_consultation_frequency },
+      { label: 'Communication Preferences', value: s2.communication_preferences }
+    ]);
 
     y += 6;
-    bodyPara('Services and Supports Schedule', { size: 10 });
+    subHeading('Services and Supports Schedule');
     const rows = snapshot.schedule_rows || [];
     if (rows.length === 0) {
-      bodyPara('No schedule rows were loaded from implementations or intake; add allocations or intake schedule rows and regenerate.', {
+      bodyPara('No services were entered for this agreement; complete the Services & quote section in Nexus and regenerate.', {
         size: 8
       });
     } else {
       const tableTop = y;
-      doc.fontSize(8).font('Helvetica-Bold');
-      doc.fillColor('#0f172a');
-      const col = [margin, margin + 155, margin + 230, margin + 330, margin + 410];
-      doc.text('Support / Service', col[0], tableTop, { width: 145 });
-      doc.text('Price', col[1], tableTop, { width: 68 });
-      doc.text('Appointment times', col[2], tableTop, { width: 92 });
-      doc.text('Duration', col[3], tableTop, { width: 72 });
-      doc.text('Total', col[4], tableTop, { width: pageWidth - col[4] - margin });
-      y = tableTop + 14;
-      doc.font(font).fontSize(8);
-      rows.forEach((r) => {
+      const col = [margin, margin + 280, margin + 360, margin + 440];
+      // Branded header band using the org accent colour
+      doc.save();
+      doc.rect(margin, tableTop - 2, pageWidth - 2 * margin, 16)
+        .fill(`rgb(${accent.r},${accent.g},${accent.b})`);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8);
+      doc.text('SUPPORT / SERVICE', col[0] + 4, tableTop + 2, { width: 268, characterSpacing: 0.4 });
+      doc.text('HOURS', col[1] + 4, tableTop + 2, { width: 72, characterSpacing: 0.4, align: 'right' });
+      doc.text('RATE ($/HR)', col[2] + 4, tableTop + 2, { width: 72, characterSpacing: 0.4, align: 'right' });
+      doc.text('LINE TOTAL', col[3] + 4, tableTop + 2, { width: pageWidth - col[3] - margin - 4, characterSpacing: 0.4, align: 'right' });
+      doc.restore();
+      y = tableTop + 18;
+      doc.font(font).fontSize(9).fillColor('#0f172a');
+      rows.forEach((r, idx) => {
         const desc = r.description || '';
-        const h = Math.max(
-          14,
-          doc.heightOfString(desc, { width: 145 }),
-          doc.heightOfString(r.appointment_times || '', { width: 92 })
-        );
-        y = ensureSpace(doc, y, h + 4, margin, pageMaxY());
-        doc.text(desc, col[0], y, { width: 145 });
-        doc.text(r.price || r.rate || '', col[1], y, { width: 68 });
-        doc.text(r.appointment_times || '', col[2], y, { width: 92 });
-        doc.text(r.duration || r.hours || '', col[3], y, { width: 72 });
-        doc.text(r.budget || r.line_total_display || '', col[4], y, { width: pageWidth - col[4] - margin });
-        y += h + 4;
+        const h = Math.max(14, doc.heightOfString(desc, { width: 268 }));
+        y = ensureSpace(doc, y, h + 6, margin, pageMaxY());
+        // zebra striping for legibility
+        if (idx % 2 === 1) {
+          doc.save();
+          doc.rect(margin, y - 2, pageWidth - 2 * margin, h + 6).fill('#f8fafc');
+          doc.restore();
+          doc.fillColor('#0f172a');
+        }
+        doc.text(desc, col[0] + 4, y, { width: 268 });
+        doc.text(r.hours || r.duration || '', col[1] + 4, y, { width: 72, align: 'right' });
+        doc.text(r.rate || r.price || '', col[2] + 4, y, { width: 72, align: 'right' });
+        doc.text(r.budget || r.line_total_display || '', col[3] + 4, y, {
+          width: pageWidth - col[3] - margin - 4,
+          align: 'right'
+        });
+        y += h + 6;
       });
-      y += 4;
-      doc.font('Helvetica-Bold').text(`Total (estimated): $${Number(snapshot.schedule_total || 0).toFixed(2)}`, margin, y);
-      y += 16;
+      // Total row in primary colour
+      y = ensureSpace(doc, y, 22, margin, pageMaxY());
+      doc.save();
+      doc.rect(margin, y, pageWidth - 2 * margin, 18)
+        .fill(`rgb(${primary.r},${primary.g},${primary.b})`);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10);
+      doc.text('Total quote for the plan', margin + 4, y + 4, { width: 360 });
+      doc.text(`$${Number(snapshot.schedule_total || 0).toFixed(2)}`, margin + 360, y + 4, {
+        width: pageWidth - 2 * margin - 364,
+        align: 'right'
+      });
+      doc.restore();
+      y += 24;
     }
 
-    /* Section 3 Checklist */
-    sectionBar(snapshot.section_titles?.s3 || 'Section 3 — Agreement Checklist');
-    doc.font(font).fontSize(8);
-    const chkTop = y;
-    doc.font('Helvetica-Bold');
-    doc.text('Confirmation', margin, chkTop, { width: 280 });
-    doc.text('Yes', margin + 290, chkTop, { width: 28 });
-    doc.text('No', margin + 318, chkTop, { width: 28 });
-    doc.text('N/A', margin + 346, chkTop, { width: 28 });
-    doc.text('Notes', margin + 380, chkTop, { width: pageWidth - margin - 380 });
-    y = chkTop + 12;
-    doc.font(font);
-    (snapshot.checklist || []).forEach((item) => {
-      const txt = item.text || '';
-      const h = Math.max(22, doc.heightOfString(txt, { width: 270 }));
-      y = ensureSpace(doc, y, h + 6, margin, pageMaxY());
-      doc.rect(margin + 288, y, 14, 12).stroke('#94a3b8');
-      doc.rect(margin + 316, y, 14, 12).stroke('#94a3b8');
-      doc.rect(margin + 344, y, 14, 12).stroke('#94a3b8');
-      doc.rect(margin + 378, y, pageWidth - margin - 378, h).stroke('#e2e8f0');
-      doc.text(txt, margin, y + 2, { width: 270 });
-      y += h + 6;
-    });
-
-    /* Section 4 Terms */
-    sectionBar(snapshot.section_titles?.s4 || 'Section 4 — Terms of Agreement');
+    /* Section 3 — Terms of Agreement (was Section 4; the in-PDF checklist is intentionally
+       not printed on the signed copy. Admin verifies its items in Nexus before sending.) */
+    sectionBar('Section 3 — Terms of Agreement');
     (snapshot.clauses_rendered || []).forEach((c) => {
       const heading = `Clause ${c.number}: ${c.title}`;
       y = ensureSpace(doc, y, 22, margin, pageMaxY());
@@ -361,32 +424,81 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
       y += bh + 12;
     });
 
-    /* Signatures */
-    y += 8;
+    /* Execution — Signatures. All details are finalised in Nexus Core before sending,
+       so the signed PDF only has two interactive signature blocks (Provider + Client). */
+    y = ensureSpace(doc, y, 200, margin, pageMaxY());
+    y += 10;
     sectionBar('Execution — Signatures');
     bodyPara(
-      'Sign below to execute this Agreement. Pre-signature PDF for manual distribution; digital signing may be added later.',
+      'The agreement details above were reviewed in Nexus Core. The organisation admin signs the Provider box first; once signed, the participant receives the request to sign the Client box.',
       { size: 8 }
     );
 
+    const confirmBoxes = []; // intentionally empty — kept so signing_layout shape stays stable
+
     const sigBox = (label, x, width) => {
       const boxY = y;
-      doc.font('Helvetica-Bold').fontSize(9).text(label, x, boxY);
-      doc.rect(x, boxY + 14, width, 56).stroke('#64748b');
-      doc.font(font).fontSize(8).fillColor('#64748b');
-      doc.text('Signature', x + 4, boxY + 18);
-      doc.text('Printed name', x + 4, boxY + 34);
-      doc.text('Date', x + 4, boxY + 50);
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a').text(label, x, boxY);
+
+      const innerY = boxY + 14;
+      const sigInputH = 32;
+      const lineH = 16;
+      const lblH = 10;
+      const gap = 6;
+      const innerH = sigInputH + lineH + lineH + lblH * 3 + gap * 3 + 6;
+
+      doc.rect(x, innerY, width, innerH).stroke('#64748b');
+
+      let cy = innerY + 4;
+      doc.font(font).fontSize(7).fillColor('#64748b').text('Signature', x + 4, cy);
+      cy += lblH;
+      const sigField = { x: x + 4, y: cy, width: width - 8, height: sigInputH };
+      doc.rect(sigField.x, sigField.y, sigField.width, sigField.height).stroke('#e2e8f0');
+      cy += sigInputH + gap;
+
+      doc.font(font).fontSize(7).fillColor('#64748b').text('Printed name', x + 4, cy);
+      cy += lblH;
+      const nameField = { x: x + 4, y: cy, width: width - 8, height: lineH };
+      doc.moveTo(nameField.x, nameField.y + nameField.height)
+        .lineTo(nameField.x + nameField.width, nameField.y + nameField.height)
+        .stroke('#94a3b8');
+      cy += lineH + gap;
+
+      doc.font(font).fontSize(7).fillColor('#64748b').text('Date', x + 4, cy);
+      cy += lblH;
+      const dateField = { x: x + 4, y: cy, width: width - 8, height: lineH };
+      doc.moveTo(dateField.x, dateField.y + dateField.height)
+        .lineTo(dateField.x + dateField.width, dateField.y + dateField.height)
+        .stroke('#94a3b8');
+
+      return { boxY, x, width, innerH, signature: sigField, printedName: nameField, date: dateField };
     };
 
     y += 4;
     const colW = (pageWidth - 2 * margin - 16) / (snapshot.representative?.name ? 3 : 2);
-    sigBox('Provider (for and on behalf of the organisation)', margin, colW);
-    sigBox('Client', margin + colW + 8, colW);
+    const providerBox = sigBox('Provider (organisation admin)', margin, colW);
+    const clientBox = sigBox('Client (participant)', margin + colW + 8, colW);
     if (snapshot.representative?.name) {
       sigBox('Representative', margin + 2 * (colW + 8), colW);
     }
-    y += 88;
+
+    const signingPage = doc.bufferedPageRange().count;
+    snapshot.signing_layout = {
+      page: signingPage,
+      confirm_fields: confirmBoxes,
+      provider: {
+        signature: { page: signingPage, ...providerBox.signature },
+        printed_name: { page: signingPage, ...providerBox.printedName },
+        date: { page: signingPage, ...providerBox.date }
+      },
+      client: {
+        signature: { page: signingPage, ...clientBox.signature },
+        printed_name: { page: signingPage, ...clientBox.printedName },
+        date: { page: signingPage, ...clientBox.date }
+      }
+    };
+
+    y += 14 + clientBox.innerH + 12;
 
     // Snapshot the page range BEFORE drawing footers — lineBreak:false above stops
     // text() from auto-paginating, so this fixed bound is now safe.
