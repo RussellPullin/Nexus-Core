@@ -26,7 +26,11 @@ import {
   buildServiceAgreementDropboxFields,
   isServiceAgreementSnapshot
 } from '../services/serviceAgreementDropboxFields.service.js';
-import { buildPrivacyConsentDropboxFields } from '../services/privacyConsentDropboxFields.service.js';
+import {
+  buildCustomFormDropboxFields,
+  resolveOrgSignatoryForDropbox
+} from '../services/customFormDropboxFields.service.js';
+import { parseSigningLayout } from '../services/formTemplateSigningLayout.service.js';
 import { isPrivacyConsentSnapshot, buildPrivacyConsentSnapshot } from '../services/privacyConsentSnapshot.service.js';
 import { generatePrivacyConsentPdfBuffer } from '../services/privacyConsentPdf.service.js';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
@@ -360,7 +364,7 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
     if (!participant) return res.status(404).json({ error: 'Participant not found' });
 
     const form = db.prepare(`
-      SELECT pfi.*, ft.form_type, ft.display_name, ft.template_filename
+      SELECT pfi.*, ft.form_type, ft.display_name, ft.template_filename, ft.workflow, ft.mapping_json AS template_mapping_json
       FROM participant_form_instances pfi
       JOIN form_templates ft ON ft.id = pfi.form_template_id
       WHERE pfi.id = ? AND pfi.participant_onboarding_id = ?
@@ -493,6 +497,39 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
             { name: orgName || 'Organisation admin', email: orgEmail, order: 0, role: derived.org?.role || 'Organisation admin' },
             { name: participantName || 'Participant', email: participantEmail, order: 1, role: 'Participant' }
           ];
+        }
+      } else if (form.form_type === 'custom' && ext === 'pdf') {
+        let templateMapping = {};
+        try {
+          templateMapping =
+            typeof form.template_mapping_json === 'string'
+              ? JSON.parse(form.template_mapping_json)
+              : form.template_mapping_json || {};
+        } catch {
+          templateMapping = {};
+        }
+        const signingLayout = parseSigningLayout(templateMapping);
+        if (signingLayout?.fields?.length) {
+          const orgSignatory = resolveOrgSignatoryForDropbox(organisationId);
+          dropboxFieldOpts = buildCustomFormDropboxFields(signingLayout, {
+            workflow: form.workflow || 'participant_onboarding',
+            org: orgSignatory,
+            participant: { name: participant.name, email: participant.email },
+            staff: { name: participant.name, email: participant.email }
+          });
+          if (dropboxFieldOpts.signers?.length) {
+            const orgEmail = (dropboxFieldOpts.signers[0]?.email || '').trim();
+            const primaryEmail = (dropboxFieldOpts.signers[1]?.email || '').trim();
+            if (!orgEmail) {
+              return res
+                .status(400)
+                .json({ error: 'Set the default signatory email in Settings → Business for organisation signature fields.' });
+            }
+            if (!primaryEmail) {
+              return res.status(400).json({ error: 'Add a participant email before sending for signature.' });
+            }
+            twoSignerSigners = dropboxFieldOpts.signers;
+          }
         }
       }
       const transientId = await uploadTransientDocument(docBuffer, filename, organisationId, {

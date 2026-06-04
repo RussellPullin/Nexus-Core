@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 import express from 'express';
 import cors from 'cors';
 import session from 'express-session';
-import { mkdirSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, existsSync, readFileSync, copyFileSync, readdirSync, statSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import fileStoreFactory from 'session-file-store';
@@ -105,6 +105,41 @@ const dataDir = process.env.DATA_DIR || join(projectRoot, 'data');
 const uploadsDir = join(dataDir, 'uploads');
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
+for (const sub of [
+  join('forms', 'templates', 'custom'),
+  join('forms', 'signer-previews'),
+  join('forms', 'org-previews'),
+  join('forms', 'company-docs'),
+  join('onboarding', 'policies')
+]) {
+  const p = join(dataDir, sub);
+  if (!existsSync(p)) mkdirSync(p, { recursive: true });
+}
+
+/** One-time copy from ephemeral /app/data/forms into the Fly volume when DATA_DIR is set. */
+function migrateLegacyFormsIntoDataDir() {
+  if (!process.env.DATA_DIR) return;
+  const legacyForms = join(projectRoot, 'data', 'forms');
+  const targetForms = join(dataDir, 'forms');
+  if (!existsSync(legacyForms) || legacyForms === targetForms) return;
+
+  function copyTree(src, dest) {
+    if (!existsSync(src)) return;
+    mkdirSync(dest, { recursive: true });
+    for (const name of readdirSync(src)) {
+      const from = join(src, name);
+      const to = join(dest, name);
+      if (statSync(from).isDirectory()) copyTree(from, to);
+      else if (!existsSync(to)) copyFileSync(from, to);
+    }
+  }
+
+  for (const sub of ['templates/custom', 'signer-previews', 'org-previews']) {
+    copyTree(join(legacyForms, ...sub.split('/')), join(targetForms, ...sub.split('/')));
+  }
+}
+
+migrateLegacyFormsIntoDataDir();
 
 // Import routes after env is loaded (routes import db which uses DATABASE_PATH)
 import authRouter from './routes/auth.js';
@@ -126,6 +161,7 @@ import smartDefaultsRouter from './routes/smartDefaults.js';
 import onboardingRouter from './routes/onboarding.js';
 import formsRouter from './routes/forms.js';
 import companyDocumentsRouter from './routes/companyDocuments.js';
+import activityRiskAssessmentsRouter from './routes/activityRiskAssessments.js';
 import coordinatorTasksRouter from './routes/coordinatorTasks.js';
 import coordinatorCasesRouter from './routes/coordinatorCases.js';
 import billingRouter from './routes/billing.js';
@@ -232,6 +268,7 @@ app.use('/api/smart-defaults', requireAuth, smartDefaultsRouter);
 app.use('/api/onboarding', requireAuth, onboardingRouter);
 app.use('/api/forms', requireAuth, formsRouter);
 app.use('/api/company-documents', companyDocumentsRouter);
+app.use('/api/activity-risk-assessments', requireAuth, activityRiskAssessmentsRouter);
 app.use('/api/coordinator-tasks', requireAuth, coordinatorTasksRouter);
 app.use('/api/coordinator-cases', requireAuth, requireCoordinatorOrAdmin, coordinatorCasesRouter);
 app.use('/api/app-shifts', requireAuth, requireAgencyShell, appShiftsRouter);

@@ -85,8 +85,9 @@ router.post('/bulk-upload', requireAdminOrDelegate, bulkUpload.array('files', 10
 
     const syncFlag = req.body?.sync_to_onboarding;
     const result = ingestCompanyDocumentBatch(orgId, req.files, {
-      category: req.body?.category || null,
-      sync_to_onboarding: syncFlag === 'true' || syncFlag === true ? true : syncFlag === 'false' ? false : undefined
+      category: 'policy',
+      sync_to_onboarding: syncFlag === 'true' || syncFlag === true ? true : syncFlag === 'false' ? false : undefined,
+      policy_only: true
     });
     if (result.imported?.length) {
       try {
@@ -109,7 +110,7 @@ router.post('/bulk-upload-zip', requireAdminOrDelegate, bulkUpload.single('file'
     if (!/\.zip$/i.test(req.file.originalname || '')) {
       return res.status(400).json({ error: 'File must be a .zip archive.' });
     }
-    const result = ingestCompanyDocumentZip(orgId, req.file.buffer, {});
+    const result = ingestCompanyDocumentZip(orgId, req.file.buffer, { policy_only: true });
     if (result.imported?.length) {
       try {
         result.onboarding = await syncAllOnboardingPoliciesForOrg(orgId);

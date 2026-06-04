@@ -1,0 +1,349 @@
+.field-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  flex-direction: column;
+}
+
+.field-editor-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: #f1f5f9;
+  overflow: hidden;
+}
+
+.field-editor-shell--loading {
+  align-items: center;
+  justify-content: center;
+  max-width: 480px;
+  margin: auto;
+  padding: 2rem;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.field-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.85rem 1.25rem;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+.field-editor-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.field-editor-subtitle {
+  margin: 0.2rem 0 0;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.field-editor-header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.field-editor-tip {
+  padding: 0.55rem 1.25rem;
+  background: #eff6ff;
+  border-bottom: 1px solid #bfdbfe;
+  color: #1e3a8a;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.field-editor-body {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 280px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.field-editor-list,
+.field-editor-props {
+  background: #fff;
+  border-right: 1px solid #e2e8f0;
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+.field-editor-props {
+  border-right: 0;
+  border-left: 1px solid #e2e8f0;
+}
+
+.field-editor-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.field-editor-list-head h3,
+.field-editor-props h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.field-editor-empty {
+  font-size: 0.85rem;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.field-editor-list-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field-editor-list-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid #e2e8f0;
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.field-editor-list-item:hover {
+  background: #f8fafc;
+}
+
+.field-editor-list-item.is-selected {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.field-editor-list-num {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.field-editor-list-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.field-editor-list-text strong {
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.field-editor-list-text span {
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.field-editor-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #cbd5e1;
+}
+
+.field-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.field-editor-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.field-editor-toolbar-group .form-input {
+  width: auto;
+  min-width: 88px;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.82rem;
+}
+
+.field-editor-toolbar-meta {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.field-editor-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 1.25rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.field-editor-stage {
+  position: relative;
+  flex-shrink: 0;
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18);
+  background: #fff;
+}
+
+.field-editor-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.field-editor-overlay-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.field-editor-box {
+  position: absolute;
+  pointer-events: auto;
+  border: 2px solid;
+  border-radius: 4px;
+  box-sizing: border-box;
+  cursor: move;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.2rem 0.35rem;
+  overflow: hidden;
+  user-select: none;
+}
+
+.field-editor-box.is-selected {
+  z-index: 2;
+}
+
+.field-editor-box--cover {
+  opacity: 0.97;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+.field-editor-box-badge {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.field-editor-box-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.field-editor-box-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  background: #0f172a;
+  border-radius: 3px 0 0 0;
+  cursor: se-resize;
+}
+
+.field-editor-props-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.field-editor-coords {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.field-editor-coords .forms-label {
+  font-size: 0.78rem;
+}
+
+.field-editor-required {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.field-editor-delete {
+  color: #b91c1c !important;
+  align-self: flex-start;
+}
+
+.field-editor-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: #fff;
+  border-top: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+  .field-editor-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+  }
+
+  .field-editor-list {
+    max-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .field-editor-props {
+    max-height: 240px;
+    border-left: 0;
+    border-top: 1px solid #e2e8f0;
+  }
+}

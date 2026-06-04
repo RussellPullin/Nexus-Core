@@ -6,6 +6,8 @@ import { db } from '../db/index.js';
 import { getConsentFormPath, fillConsentForm, convertDocxToPdf, renderDocxTemplateBuffer } from './consentForm.service.js';
 import { getCustomTemplatePath, getCustomTemplateDir } from './formTemplatePath.service.js';
 import { applyContractPlaceholderMap, buildParticipantCustomMergeData, fillStaffContractPdfBuffer } from './staffContractFill.service.js';
+import { fillCustomFormFromLayout } from './customFormFillFromLayout.service.js';
+import { parseSigningLayout } from './formTemplateSigningLayout.service.js';
 import { embedRasterImageAsSinglePagePdf } from './imageToPdf.service.js';
 import { ensurePlanManagerOrg, buildOrgLookupMaps } from './organisations.service.js';
 import { fillServiceAgreement, fillSupportPlan, getServiceAgreementTemplatePath, getSupportPlanTemplatePath } from './formFill.service.js';
@@ -680,14 +682,20 @@ export async function generateFormPack({
       }
       const baseMerge = buildParticipantCustomMergeData(participant, plan, intake, providerOrgMerge);
       const data = applyContractPlaceholderMap(baseMerge, mapping.contract_field_map || {});
+      const signingLayout = parseSigningLayout(mapping);
+      const wf = template.workflow === 'staff_onboarding' ? 'staff_onboarding' : 'participant_onboarding';
       if (resolved.type === 'pdf') {
         const pdfBytes = readFileSync(resolved.path);
-        const filled = await fillStaffContractPdfBuffer(pdfBytes, data);
+        const filled = signingLayout?.fields?.length
+          ? await fillCustomFormFromLayout(pdfBytes, signingLayout, data, { workflow: wf })
+          : await fillStaffContractPdfBuffer(pdfBytes, data, { workflow: wf });
         draftPath = persistFilledDocument(participantId, template.form_type, version, filled, 'pdf');
       } else if (resolved.type === 'image') {
         const imgBytes = readFileSync(resolved.path);
         const pdfBytes = await embedRasterImageAsSinglePagePdf(imgBytes, resolved.path);
-        const filled = await fillStaffContractPdfBuffer(pdfBytes, data);
+        const filled = signingLayout?.fields?.length
+          ? await fillCustomFormFromLayout(pdfBytes, signingLayout, data, { workflow: wf })
+          : await fillStaffContractPdfBuffer(pdfBytes, data, { workflow: wf });
         draftPath = persistFilledDocument(participantId, template.form_type, version, filled, 'pdf');
       } else {
         const templateBuf = readFileSync(resolved.path);

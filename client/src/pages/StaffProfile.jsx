@@ -65,6 +65,8 @@ export default function StaffProfile() {
   const [staffOnboardingPackChoice, setStaffOnboardingPackChoice] = useState('');
   const [policyUploading, setPolicyUploading] = useState(false);
   const [renewalSending, setRenewalSending] = useState(false);
+  const [intakeViewing, setIntakeViewing] = useState(false);
+  const [intakePreview, setIntakePreview] = useState(null);
   const [complianceUploading, setComplianceUploading] = useState(false);
   const [newDocType, setNewDocType] = useState('first_aid');
   const [newDocFile, setNewDocFile] = useState(null);
@@ -226,6 +228,18 @@ export default function StaffProfile() {
     }
   };
 
+  const handleViewIntakeForm = async () => {
+    setIntakeViewing(true);
+    try {
+      const result = await staff.getIntakeForm(id);
+      setIntakePreview(result);
+    } catch (err) {
+      alert(err.message || 'Could not load staff intake form');
+    } finally {
+      setIntakeViewing(false);
+    }
+  };
+
   // Phase 3: one-click orchestrator. Runs readiness + library clone + ensures the
   // staff_onboarding row exists. Does NOT send the invite email — the existing
   // "Onboard" / "Resend onboarding email" buttons still drive that, and the
@@ -333,6 +347,31 @@ export default function StaffProfile() {
       car_insurance: 'Car insurance'
     };
     return labels[type] || type;
+  };
+
+  const formatIntakeValue = (field) => {
+    const raw = field?.value;
+    if (raw == null || raw === '') return '—';
+    if (field?.type === 'boolean') {
+      const s = String(raw).trim().toLowerCase();
+      if (s === 'true' || s === '1' || s === 'yes') return 'Yes';
+      if (s === 'false' || s === '0' || s === 'no') return 'No';
+    }
+    const text = String(raw);
+    if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) return parsed.length ? parsed.join(', ') : '—';
+        if (parsed && typeof parsed === 'object') {
+          return Object.entries(parsed)
+            .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`)
+            .join('; ');
+        }
+      } catch {
+        return text;
+      }
+    }
+    return text;
   };
 
   const COMPLIANCE_DOC_OPTIONS = [
@@ -550,6 +589,15 @@ export default function StaffProfile() {
               title="Prefilled employment contract (template-based forms coming soon)"
             >
               {contractDownloading ? 'Downloading…' : 'Download to sign'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleViewIntakeForm}
+              disabled={intakeViewing}
+              title="View the saved staff onboarding intake answers"
+            >
+              {intakeViewing ? 'Loading…' : 'View intake form'}
             </button>
             <button type="button" className="btn btn-primary" disabled title={NEXUS_CORE_SIGN_COMING_SOON_TITLE}>
               Sign with Nexus Core
@@ -967,6 +1015,52 @@ export default function StaffProfile() {
           </>
         )}
       </div>
+
+      {intakePreview && (
+        <div className="modal-overlay" onClick={() => setIntakePreview(null)}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '90vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+              <div>
+                <h3 style={{ marginTop: 0, marginBottom: '0.25rem' }}>Staff intake form</h3>
+                <p style={{ margin: 0, color: '#64748b' }}>
+                  {intakePreview.staff?.name || data.name}
+                  {intakePreview.onboarding?.status ? ` · ${intakePreview.onboarding.status.replace(/_/g, ' ')}` : ''}
+                  {intakePreview.onboarding?.completed_at ? ` · completed ${formatDate(intakePreview.onboarding.completed_at)}` : ''}
+                </p>
+              </div>
+              <button type="button" className="btn btn-secondary" onClick={() => setIntakePreview(null)}>
+                Close
+              </button>
+            </div>
+
+            {!intakePreview.onboarding ? (
+              <p style={{ color: '#64748b' }}>No staff onboarding record has been created for this staff member yet.</p>
+            ) : intakePreview.sections?.length === 0 ? (
+              <p style={{ color: '#64748b' }}>No intake answers have been saved yet.</p>
+            ) : (
+              <div style={{ display: 'grid', gap: '1rem' }}>
+                {intakePreview.sections.map((section) => (
+                  <section key={section.key} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.75rem' }}>
+                    <h4 style={{ marginTop: 0, marginBottom: '0.75rem' }}>{section.label}</h4>
+                    <div className="table-wrap">
+                      <table className="table">
+                        <tbody>
+                          {section.fields.map((field) => (
+                            <tr key={field.key}>
+                              <th style={{ width: '35%', verticalAlign: 'top' }}>{field.label}</th>
+                              <td style={{ whiteSpace: 'pre-wrap' }}>{formatIntakeValue(field)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

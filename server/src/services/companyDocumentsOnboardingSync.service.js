@@ -7,7 +7,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { ensureProviderProfile } from './onboarding.service.js';
 import { convertDocxToPdf } from './consentForm.service.js';
-import { renderLibraryDocument } from './documentLibraryRender.service.js';
 import {
   getOrgCompanyDocumentFile,
   getCompanyDocumentSettings,
@@ -19,22 +18,9 @@ import { createPack, setPackItems, listPacks } from './onboardingDocumentPacks.s
 const policyDir = join(projectRoot, 'data', 'onboarding', 'policies');
 
 async function resolvePolicyPdfBuffer(orgId, docRow) {
-  if (docRow.library_master_id) {
-    const rendered = renderLibraryDocument({ masterId: docRow.library_master_id, orgId });
-    if (rendered.mime === 'application/pdf' && rendered.buffer) {
-      return rendered.buffer;
-    }
-    if (rendered.mime?.includes('wordprocessingml') && rendered.buffer) {
-      return convertDocxToPdf(rendered.buffer);
-    }
-    if (rendered.html) {
-      throw new Error('HTML library templates cannot be attached to onboarding emails yet.');
-    }
-  }
-
   const { absPath } = getOrgCompanyDocumentFile(orgId, docRow.id);
   if (!absPath || !existsSync(absPath)) {
-    throw new Error('Template file missing on disk.');
+    throw new Error('Policy file missing on disk.');
   }
 
   const lower = absPath.toLowerCase();
@@ -42,9 +28,11 @@ async function resolvePolicyPdfBuffer(orgId, docRow) {
     return readFileSync(absPath);
   }
   if (lower.endsWith('.docx')) {
-    return convertDocxToPdf(readFileSync(absPath));
+    const converted = convertDocxToPdf(readFileSync(absPath));
+    if (!converted) throw new Error('Could not convert policy DOCX to PDF.');
+    return converted;
   }
-  throw new Error('Only PDF and DOCX documents can be synced to onboarding packs.');
+  throw new Error('Policies must be PDF (or DOCX convertible to PDF).');
 }
 
 /**

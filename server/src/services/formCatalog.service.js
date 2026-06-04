@@ -81,7 +81,7 @@ export function buildFormCatalog({ orgId, providerProfileId }) {
       if (row.form_type === 'custom') {
         has_template_file = Boolean(getCustomTemplatePath(row.id, row.template_filename));
         if (has_template_file) {
-          sample_url = `/api/forms/templates/${row.id}/recipient-preview.pdf`;
+          sample_url = `/api/forms/templates/${row.id}/signer-preview.pdf`;
         }
       } else if (CORE_SAMPLE_TYPES.has(row.form_type)) {
         has_template_file = coreTemplateHasFile(row.form_type, pathOpts);

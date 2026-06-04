@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { privacyPolicyPhrase, providerDisplayName, providerLegalPhrase } from '../lib/templateBranding.js';
 
 function ensureSpace(doc, y, needed, margin, pageMaxY) {
   if (y + needed > pageMaxY) {
@@ -48,10 +49,15 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
     const pageMaxY = () => doc.page.height - 60;
     let y = margin;
 
+    const org = snapshot?.org || null;
+    const providerName = providerDisplayName(org);
+    const providerPhrase = providerLegalPhrase(org);
+    const policyName = privacyPolicyPhrase(org);
+
     const title = 'Privacy Consent Form';
     doc.font('Helvetica-Bold').fontSize(18).fillColor('#0f172a').text(title, margin, y);
     y += 18;
-    doc.font('Helvetica').fontSize(10).fillColor('#334155').text('Pristine Lifestyle Solutions', margin, y);
+    doc.font('Helvetica').fontSize(10).fillColor('#334155').text(providerName, margin, y);
     y += 16;
 
     const para = (t) => {
@@ -63,7 +69,7 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
     };
 
     para(
-      'Pristine Lifestyle Solutions Pty Ltd (Pristine Lifestyle Solutions) respects your privacy. This statement explains why we collect and use your personal information and the parties to whom your information may be disclosed and obtains your consent to such collection, use and disclosure.'
+      `${providerPhrase} respects your privacy. This statement explains why we collect and use your personal information and the parties to whom your information may be disclosed and obtains your consent to such collection, use and disclosure.`
     );
     para(
       'The personal information we process about you will include information about you and your disability. This information may take many forms including as written by us and by other health professionals as well as photographs and videos of you and your condition taken by us or other health professionals.'
@@ -179,7 +185,7 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
 
     h2('Complaints and Incidents');
     para(
-      'The Pristine Lifestyle Solutions Privacy and Dignity Policy contains information about how you can access the personal information we hold about you, how you can make a complaint about a breach of your privacy or the Privacy Act and how we will deal with your complaint (in accordance with our Feedback and Complaints Management Policy).'
+      `The ${policyName} contains information about how you can access the personal information we hold about you, how you can make a complaint about a breach of your privacy or the Privacy Act and how we will deal with your complaint (in accordance with our Feedback and Complaints Management Policy).`
     );
     para(
       'Any breach or alleged breach of your privacy will be taken seriously and managed in accordance with our Incident Management and Reporting Policy.'

@@ -16,6 +16,7 @@ import { orchestrateStaffOnboarding } from '../services/staffOnboardingOrchestra
 import { generateStaffContractBuffers } from '../services/staffContractFill.service.js';
 import { buildPolicyAttachmentsForEmail } from '../services/onboardingDocumentPacks.service.js';
 import { getStaffIntakeFieldMap, mergeStaffIntakeForProfile } from '../services/staffOnboardingSync.service.js';
+import { STAFF_ONBOARDING_FIELD_DEFS } from '../../../shared/onboardingFieldRegistry.js';
 import {
   getShifterFieldsByStaffId,
   setShifterEnabledForStaffEmail,
@@ -40,6 +41,16 @@ const staffUploadsDir = join(dataDir, 'uploads', 'staff');
 const DOCUMENT_TYPES = ['drivers_licence_front', 'drivers_licence_back', 'blue_card', 'yellow_card', 'first_aid', 'car_insurance'];
 
 const PAY_RATE_OVERRIDE_KEYS = ['weekday', 'saturday', 'sunday', 'public_holiday', 'evening'];
+const STAFF_INTAKE_FIELD_META = new Map(STAFF_ONBOARDING_FIELD_DEFS.map((def, order) => [def.key, { ...def, order }]));
+const STAFF_INTAKE_SECTION_ORDER = ['personal', 'employment', 'documents', 'policy', 'tax', 'other'];
+const STAFF_INTAKE_SECTION_LABELS = {
+  personal: 'Personal details',
+  employment: 'Employment and payroll',
+  documents: 'Compliance documents',
+  policy: 'Policy acknowledgement',
+  tax: 'Tax declaration',
+  other: 'Other details',
+};
 
 /** @returns {string|null} JSON string, or null if all keys empty. */
 function payRatesJsonFromBody(payRates) {
@@ -602,6 +613,61 @@ router.get('/:id', async (req, res) => {
   } catch (e) {
     console.error('[staff get] shifter enrich failed:', e);
     return res.json({ ...s, ...shifterDefaults, shifter_enrich_error: true });
+  }
+});
+
+router.get('/:id/intake-form', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(req.params.id, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+
+    const onboarding = db
+      .prepare('SELECT id, status, current_step, started_at, completed_at, last_activity_at FROM staff_onboarding WHERE staff_id = ?')
+      .get(req.params.id);
+    if (!onboarding) {
+      return res.json({
+        staff: { id: s.id, name: s.name, email: s.email },
+        onboarding: null,
+        sections: []
+      });
+    }
+
+    const rows = db
+      .prepare('SELECT field_key, field_value, source, created_at, updated_at FROM staff_intake_fields WHERE staff_onboarding_id = ? ORDER BY field_key')
+      .all(onboarding.id);
+
+    const sectionsByKey = new Map();
+    for (const row of rows) {
+      const meta = STAFF_INTAKE_FIELD_META.get(row.field_key);
+      const sectionKey = meta?.section || (row.field_key === 'documents' ? 'documents' : 'other');
+      if (!sectionsByKey.has(sectionKey)) sectionsByKey.set(sectionKey, []);
+      sectionsByKey.get(sectionKey).push({
+        key: row.field_key,
+        label: meta?.label || row.field_key.replace(/[._]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        value: row.field_value,
+        type: meta?.type || 'text',
+        order: meta?.order ?? 999,
+        source: row.source,
+        updated_at: row.updated_at
+      });
+    }
+
+    const sections = STAFF_INTAKE_SECTION_ORDER
+      .filter((sectionKey) => sectionsByKey.has(sectionKey))
+      .map((sectionKey) => ({
+        key: sectionKey,
+        label: STAFF_INTAKE_SECTION_LABELS[sectionKey] || sectionKey,
+        fields: sectionsByKey.get(sectionKey).sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+      }));
+
+    res.json({
+      staff: { id: s.id, name: s.name, email: s.email },
+      onboarding,
+      sections
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

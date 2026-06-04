@@ -6,16 +6,18 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { db } from '../db/index.js';
 import { getCustomTemplatePath } from './formTemplatePath.service.js';
 import { renderDocxTemplateBuffer, convertDocxToPdf } from './consentForm.service.js';
+import { suggestContractFieldMap } from './contractTemplateAnalyze.service.js';
 import {
   composeStaffDisplayName,
   composeParticipantLegalName,
   splitParticipantNameFromFull
 } from '../../../shared/onboardingFieldRegistry.js';
 import { embedRasterImageAsSinglePagePdf } from './imageToPdf.service.js';
+import { mergeStaffIntakeForProfile } from './staffOnboardingSync.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -57,6 +59,63 @@ export function applyContractPlaceholderMap(baseData, contractFieldMap) {
     renderData[placeholderKey] = baseData[sk];
   }
   return renderData;
+}
+
+function workflowKindForFill(options = {}) {
+  const w = options.workflow || options.workflowKind || 'participant';
+  if (w === 'staff' || w === 'staff_onboarding') return 'staff';
+  return 'participant';
+}
+
+/**
+ * Resolve a PDF AcroForm field name to a merge value (exact key, normalised key, or synonym map).
+ * @param {Record<string, string>} mergeData
+ * @param {string} fieldName
+ * @param {{ workflow?: string, workflowKind?: string }} [options]
+ */
+export function resolvePdfFieldMergeValue(mergeData, fieldName, options = {}) {
+  if (!mergeData || !fieldName) return null;
+  const tryKey = (k) => {
+    if (k == null || k === '') return null;
+    const v = mergeData[k];
+    if (v != null && String(v).trim() !== '') return String(v);
+    return null;
+  };
+
+  let hit = tryKey(fieldName);
+  if (hit) return hit;
+
+  const variants = [
+    fieldName.replace(/\s+/g, '_'),
+    fieldName.replace(/_/g, ' '),
+    fieldName
+      .replace(/\[\d+\]/g, '')
+      .replace(/\.+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '')
+  ];
+  for (const variant of variants) {
+    hit = tryKey(variant);
+    if (hit) return hit;
+  }
+
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const target = norm(fieldName);
+  if (target) {
+    for (const [k, val] of Object.entries(mergeData)) {
+      if (val == null || String(val).trim() === '') continue;
+      if (norm(k) === target) return String(val);
+    }
+  }
+
+  const suggested = suggestContractFieldMap([fieldName], workflowKindForFill(options));
+  const mergeKey = suggested[fieldName];
+  if (mergeKey) {
+    hit = tryKey(mergeKey);
+    if (hit) return hit;
+  }
+
+  return null;
 }
 
 /**
@@ -145,8 +204,9 @@ export function getStaffContractTemplate(providerProfileId) {
  * Fill PDF AcroForm fields using merge keys (and mapped aliases from contract_field_map).
  * @param {Buffer} pdfBytes
  * @param {Record<string, string>} mergeData - includes standard keys plus any PDF field names set by applyContractPlaceholderMap
+ * @param {{ workflow?: string, workflowKind?: string, flatten?: boolean }} [options]
  */
-export async function fillStaffContractPdfBuffer(pdfBytes, mergeData) {
+export async function fillStaffContractPdfBuffer(pdfBytes, mergeData, options = {}) {
   const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   let form;
   try {
@@ -155,15 +215,22 @@ export async function fillStaffContractPdfBuffer(pdfBytes, mergeData) {
     return Buffer.from(await doc.save());
   }
 
+  const font = await doc.embedFont(StandardFonts.Helvetica);
   const fields = form.getFields();
   for (const field of fields) {
     const name = field.getName();
-    const value = mergeData[name];
+    const value = resolvePdfFieldMergeValue(mergeData, name, options);
     if (value == null || value === '') continue;
     const str = String(value);
 
     try {
-      form.getTextField(name).setText(str);
+      const tf = form.getTextField(name);
+      tf.setText(str);
+      try {
+        tf.updateAppearances(font);
+      } catch {
+        /* some widgets cannot regenerate appearance */
+      }
       continue;
     } catch {
       /* not a text field */
@@ -184,15 +251,31 @@ export async function fillStaffContractPdfBuffer(pdfBytes, mergeData) {
 
     try {
       form.getRadioGroup(name).select(str);
+      continue;
+    } catch {
+      /* not radio */
+    }
+
+    try {
+      const cb = form.getCheckBox(name);
+      if (/^(yes|true|1|x|checked|on)$/i.test(str.trim())) cb.check();
     } catch {
       /* skip */
     }
   }
 
   try {
-    form.flatten();
+    form.updateFieldAppearances(font);
   } catch {
-    /* leave editable if flatten fails */
+    /* optional whole-form pass */
+  }
+
+  if (options.flatten !== false) {
+    try {
+      form.flatten();
+    } catch {
+      /* leave editable if flatten fails */
+    }
   }
   return Buffer.from(await doc.save());
 }
@@ -277,14 +360,14 @@ export async function generateStaffContractBuffers(staffRow, intakeMap, provider
 
   if (tpl.type === 'pdf') {
     const pdfBytes = readFileSync(tpl.path);
-    const pdf = await fillStaffContractPdfBuffer(pdfBytes, data);
+    const pdf = await fillStaffContractPdfBuffer(pdfBytes, data, { workflow: 'staff_onboarding' });
     return { docx: null, pdf, templateMeta };
   }
 
   if (tpl.type === 'image') {
     const imgBytes = readFileSync(tpl.path);
     const pdfBytes = await embedRasterImageAsSinglePagePdf(imgBytes, tpl.path);
-    const pdf = await fillStaffContractPdfBuffer(pdfBytes, data);
+    const pdf = await fillStaffContractPdfBuffer(pdfBytes, data, { workflow: 'staff_onboarding' });
     return { docx: null, pdf, templateMeta };
   }
 

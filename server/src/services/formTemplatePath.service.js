@@ -13,7 +13,15 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
-const TEMPLATES_DIR = join(projectRoot, 'data', 'forms', 'templates');
+
+/** Persistent data root — honours DATA_DIR on Fly/Railway so uploads survive redeploys. */
+export function getDataRoot() {
+  const raw = process.env.DATA_DIR?.trim();
+  if (!raw) return join(projectRoot, 'data');
+  return raw.startsWith('/') ? raw : join(projectRoot, raw);
+}
+
+const TEMPLATES_DIR = join(getDataRoot(), 'forms', 'templates');
 
 /** form_type (DB) -> directory name under templates/ */
 const FORM_TYPE_DIR = {

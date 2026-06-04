@@ -138,6 +138,20 @@ export const companyDocuments = {
     fetchApi('/company-documents/onedrive-import/sync', { method: 'POST', body: JSON.stringify(data || {}) })
 };
 
+/** Org catalogue of activity (health & safety) risk assessment blank PDFs. */
+export const activityRiskAssessments = {
+  list: () => fetchApi('/activity-risk-assessments'),
+  create: (activity_name) =>
+    fetchApi('/activity-risk-assessments', { method: 'POST', body: JSON.stringify({ activity_name }) }),
+  delete: (id) => fetchApi(`/activity-risk-assessments/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  fileUrl: (id) => `${API}/activity-risk-assessments/${encodeURIComponent(id)}/file`,
+  assignToParticipant: (templateId, participantId) =>
+    fetchApi(`/activity-risk-assessments/${encodeURIComponent(templateId)}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ participant_id: participantId })
+    })
+};
+
 export const auth = {
   me: () => fetchApi('/auth/me'),
   setActiveProduct: (active_product) =>
@@ -614,6 +628,7 @@ export const staff = {
     body: JSON.stringify({ provider_organisation_id: providerOrganisationId || null })
   }),
   onboardingRunStatus: (staffId) => fetchApi(`/staff/${staffId}/onboarding/status`),
+  getIntakeForm: (staffId) => fetchApi(`/staff/${staffId}/intake-form`),
   getComplianceDocuments: (staffId) => fetchApi(`/staff/${staffId}/compliance-documents`),
   updateComplianceDocumentExpiry: (staffId, docId, expiryDate) =>
     fetchApi(`/staff/${staffId}/compliance-documents/${docId}`, { method: 'PATCH', body: JSON.stringify({ expiry_date: expiryDate || null }) }),
@@ -1092,7 +1107,51 @@ export const forms = {
     fetchApi('/forms/onboarding-document-packs-defaults', { method: 'PATCH', body: JSON.stringify(data || {}) }),
   templateDocumentUrl: (templateId) =>
     `${API}/forms/templates/${encodeURIComponent(templateId)}/document`,
+  signerPreviewPdfUrl: (templateId) =>
+    `${API}/forms/templates/${encodeURIComponent(templateId)}/signer-preview.pdf`,
+  /** @deprecated Use signerPreviewPdfUrl */
   recipientPreviewPdfUrl: (templateId) =>
-    `${API}/forms/templates/${encodeURIComponent(templateId)}/recipient-preview.pdf`,
-  mergePreviewRows: (templateId) => fetchApi(`/forms/templates/${encodeURIComponent(templateId)}/merge-preview-rows`)
+    `${API}/forms/templates/${encodeURIComponent(templateId)}/signer-preview.pdf`,
+  /** @deprecated Use signerPreviewPdfUrl */
+  templateOrgPreviewUrl: (templateId) =>
+    `${API}/forms/templates/${encodeURIComponent(templateId)}/signer-preview.pdf`,
+  mergePreviewRows: (templateId) => fetchApi(`/forms/templates/${encodeURIComponent(templateId)}/merge-preview-rows`),
+  getSigningLayout: (templateId) => fetchApi(`/forms/templates/${encodeURIComponent(templateId)}/signing-layout`),
+  saveSigningLayout: (templateId, signingLayout) =>
+    fetchApi(`/forms/templates/${encodeURIComponent(templateId)}/signing-layout`, {
+      method: 'PUT',
+      body: JSON.stringify({ signing_layout: signingLayout })
+    }),
+  bulkUploadTemplates: async (files, options = {}) => {
+    const form = new FormData();
+    for (const f of files) form.append('files', f);
+    if (options.workflow) form.append('workflow', options.workflow);
+    const res = await fetch(`${API}/forms/templates/bulk-upload`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Upload failed');
+    }
+    return text ? JSON.parse(text) : null;
+  },
+  bulkUploadTemplatesZip: async (file, options = {}) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (options.workflow) form.append('workflow', options.workflow);
+    const res = await fetch(`${API}/forms/templates/bulk-upload-zip`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'ZIP upload failed');
+    }
+    return text ? JSON.parse(text) : null;
+  }
 };

@@ -2061,6 +2061,25 @@ try {
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('org_company_documents migration:', e.message);
   }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS activity_risk_assessment_templates (
+        id TEXT PRIMARY KEY,
+        organisation_id TEXT NOT NULL,
+        activity_name TEXT NOT NULL,
+        stored_filename TEXT NOT NULL,
+        is_default_blank INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (organisation_id) REFERENCES organisations(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_activity_risk_templates_org
+        ON activity_risk_assessment_templates(organisation_id);
+    `);
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('activity_risk_assessment_templates migration:', e.message);
+  }
 } catch (err) {
   console.warn('Migration error:', err.message);
 }

@@ -27,9 +27,9 @@ import {
 } from '../services/contractTemplateAnalyze.service.js';
 import {
   buildMergePreviewRows,
-  buildRecipientPreviewPdfBuffer,
   buildSampleRenderData
 } from '../services/formTemplateRecipientPreview.service.js';
+import { buildSignerPreviewPdfBuffer } from '../services/formTemplateSignerPreview.service.js';
 import {
   buildFormCatalog,
   formCatalogContextForUser
@@ -45,10 +45,27 @@ import {
   setPackItems,
   setProviderPackDefaults
 } from '../services/onboardingDocumentPacks.service.js';
+import {
+  ingestFormTemplateBatch,
+  ingestFormTemplateZip,
+  generateSignerPreviewPdf,
+  enrichCustomTemplateRow
+} from '../services/formTemplateBulkUpload.service.js';
+import {
+  parseSigningLayout,
+  validateSigningLayout,
+  contractFieldMapFromLayout,
+  suggestSigningLayoutForTemplateFile
+} from '../services/formTemplateSigningLayout.service.js';
+import {
+  participantContractMergeKeyOptions,
+  staffContractMergeKeyOptions
+} from '../../../shared/contractFormMergeKeys.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
 const memoryUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB
+const bulkFormUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024, files: 100 } });
 const policyDir = join(projectRoot, 'data', 'onboarding', 'policies');
 
 const ROUTER = Router();
@@ -73,6 +90,46 @@ function parseMappingJson(val) {
   } catch {
     return {};
   }
+}
+
+async function serveSignerPreviewPdf(req, res, downloadName = 'form-signer-preview.pdf') {
+  const { profile, organisation_id: orgId } = getProviderProfileForUser(req.session.user.id);
+  if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+  const row = db
+    .prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?')
+    .get(req.params.id, profile.id);
+  if (!row || row.form_type !== 'custom') {
+    return res.status(404).json({ error: 'Custom form template not found.' });
+  }
+  const resolved = getCustomTemplatePath(row.id, row.template_filename);
+  if (!resolved) {
+    const msg = row.template_filename
+      ? 'Template PDF is missing from server storage (often after a deploy). Re-upload the form on the Forms page.'
+      : 'No template file uploaded yet.';
+    return res.status(404).json({ error: msg });
+  }
+  if (resolved.type !== 'pdf') {
+    return res.status(400).json({ error: 'Signer preview is only available for PDF templates.' });
+  }
+  const mapping = parseMappingJson(row.mapping_json);
+  const workflow = row.workflow === 'staff_onboarding' ? 'staff_onboarding' : 'participant_onboarding';
+  const pdfBytes = readFileSync(resolved.path);
+  const { pdfBuffer: preview } = await buildSignerPreviewPdfBuffer(
+    pdfBytes,
+    mapping.contract_field_map,
+    workflow,
+    parseSigningLayout(mapping)
+  );
+  if (orgId) {
+    try {
+      await generateSignerPreviewPdf(orgId, row.id);
+    } catch {
+      /* cache optional */
+    }
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${downloadName}"`);
+  res.send(preview);
 }
 
 function unlinkOtherCustomTemplateFiles(dir, templateId, keepBasename) {
@@ -202,8 +259,11 @@ ROUTER.get('/templates', (req, res) => {
         templateFiles[t.id] = found ? { filename: found.path.split(/[/\\]/).pop(), has_file: true } : { has_file: false };
       }
     });
+    const enrichedTemplates = coverage.templates.map((t) =>
+      enrichCustomTemplateRow(t, orgId)
+    );
     res.json({
-      templates: coverage.templates,
+      templates: enrichedTemplates,
       template_files: templateFiles,
       missing_core_types: coverage.missing_core_types || []
     });
@@ -262,49 +322,132 @@ ROUTER.get('/templates/:id/merge-preview-rows', async (req, res) => {
       profile.organisation_id &&
       db.prepare('SELECT name, abn, address, email, phone FROM organisations WHERE id = ?').get(profile.organisation_id);
     const renderData = buildSampleRenderData(row.workflow, mapping.contract_field_map, orgRow || null);
-    const rows = buildMergePreviewRows(mapping.contract_field_map || {}, renderData);
     const resolved = getCustomTemplatePath(row.id, row.template_filename);
     let acro_field_count = null;
+    let acroFieldNames = [];
     let file_type = null;
     if (resolved) {
       file_type = resolved.type;
       if (resolved.type === 'pdf') {
         const buf = readFileSync(resolved.path);
-        acro_field_count = (await extractPdfAcroFieldNames(buf)).length;
+        acroFieldNames = await extractPdfAcroFieldNames(buf);
+        acro_field_count = acroFieldNames.length;
       }
     }
+    const rows = buildMergePreviewRows(mapping.contract_field_map || {}, renderData, acroFieldNames, row.workflow);
     res.json({ rows, acro_field_count, file_type });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /api/forms/templates/:id/recipient-preview.pdf — template + appendix with fictitious merge values
-ROUTER.get('/templates/:id/recipient-preview.pdf', async (req, res) => {
+// GET /api/forms/templates/:id/signing-layout — field box layout for Dropbox Sign + pre-fill
+ROUTER.get('/templates/:id/signing-layout', async (req, res) => {
   try {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
-    const { profile } = getProviderProfileForUser(req.session.user.id);
+    const { profile, organisation_id: orgId } = getProviderProfileForUser(req.session.user.id);
     if (!profile) return res.status(400).json({ error: 'No organisation set.' });
-    const row = db.prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?').get(req.params.id, profile.id);
+    const row = db
+      .prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?')
+      .get(req.params.id, profile.id);
     if (!row || row.form_type !== 'custom') {
       return res.status(404).json({ error: 'Custom form template not found.' });
     }
-    const resolved = getCustomTemplatePath(row.id, row.template_filename);
-    if (!resolved) return res.status(404).json({ error: 'No template file uploaded yet.' });
     const mapping = parseMappingJson(row.mapping_json);
-    const orgRow =
-      profile.organisation_id &&
-      db.prepare('SELECT name, abn, address, email, phone FROM organisations WHERE id = ?').get(profile.organisation_id);
-    const { pdfBuffer, note } = await buildRecipientPreviewPdfBuffer(
-      resolved,
-      row.workflow,
-      mapping.contract_field_map,
-      orgRow || null
+    const workflow = row.workflow === 'staff_onboarding' ? 'staff_onboarding' : 'participant_onboarding';
+    let signing_layout = parseSigningLayout(mapping);
+    const resolved = getCustomTemplatePath(row.id, row.template_filename);
+    if (!signing_layout?.fields?.length && resolved?.type === 'pdf') {
+      signing_layout = await suggestSigningLayoutForTemplateFile(
+        resolved.path,
+        mapping.contract_field_map || {},
+        workflow
+      );
+    }
+    const merge_key_options =
+      workflow === 'staff_onboarding' ? staffContractMergeKeyOptions() : participantContractMergeKeyOptions();
+    res.json({
+      template_id: row.id,
+      display_name: row.display_name,
+      workflow,
+      signing_layout: signing_layout || { page_width: 595, page_height: 842, page_count: 1, fields: [] },
+      merge_key_options,
+      document_url: `/api/forms/templates/${row.id}/document`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/forms/templates/:id/signing-layout — save edited field boxes
+ROUTER.put('/templates/:id/signing-layout', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile, organisation_id: orgId } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
+    const row = db
+      .prepare('SELECT * FROM form_templates WHERE id = ? AND provider_profile_id = ?')
+      .get(req.params.id, profile.id);
+    if (!row || row.form_type !== 'custom') {
+      return res.status(404).json({ error: 'Custom form template not found.' });
+    }
+    const incoming = req.body?.signing_layout;
+    if (!incoming) return res.status(400).json({ error: 'signing_layout is required.' });
+    validateSigningLayout(incoming);
+    const mapping = parseMappingJson(row.mapping_json);
+    const layoutMap = contractFieldMapFromLayout(incoming);
+    const mergedMap = mergeContractFieldMapSuggestions(mapping.contract_field_map || {}, layoutMap);
+    const nextMapping = {
+      ...mapping,
+      signing_layout: incoming,
+      contract_field_map: mergedMap
+    };
+    db.prepare(`UPDATE form_templates SET mapping_json = ?, updated_at = datetime('now') WHERE id = ?`).run(
+      JSON.stringify(nextMapping),
+      row.id
     );
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="recipient-preview-sample.pdf"');
-    if (note) res.setHeader('X-Preview-Note', encodeURIComponent(note.slice(0, 400)));
-    res.send(pdfBuffer);
+    if (orgId) {
+      try {
+        await generateSignerPreviewPdf(orgId, row.id);
+      } catch (previewErr) {
+        console.warn('[forms] signing layout preview regen failed:', previewErr?.message);
+      }
+    }
+    res.json({
+      ok: true,
+      signing_layout: incoming,
+      mapped_field_count: incoming.fields?.length || 0,
+      preview_url: `/api/forms/templates/${row.id}/signer-preview.pdf`
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// GET /api/forms/templates/:id/signer-preview.pdf — highlighted empty fields with merge labels (Dropbox Sign view)
+ROUTER.get('/templates/:id/signer-preview.pdf', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    await serveSignerPreviewPdf(req, res, 'form-signer-preview.pdf');
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Preview failed' });
+  }
+});
+
+// Legacy URLs — same signer-view preview
+ROUTER.get('/templates/:id/recipient-preview.pdf', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    await serveSignerPreviewPdf(req, res, 'form-signer-preview.pdf');
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Preview failed' });
+  }
+});
+
+ROUTER.get('/templates/:id/org-preview.pdf', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    await serveSignerPreviewPdf(req, res, 'form-signer-preview.pdf');
   } catch (err) {
     res.status(400).json({ error: err.message || 'Preview failed' });
   }
@@ -351,6 +494,52 @@ ROUTER.post('/templates', (req, res) => {
     const wf = workflow === 'staff_onboarding' ? 'staff_onboarding' : 'participant_onboarding';
     const created = createFormTemplateService(profile.id, { display_name: name, workflow: wf });
     res.status(201).json(created);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/forms/templates/bulk-upload — PDF form templates for workflow automation
+ROUTER.post('/templates/bulk-upload', bulkFormUpload.array('files', 100), async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile, organisation_id: orgId } = getProviderProfileForUser(req.session.user.id);
+    if (!profile || !orgId) return res.status(400).json({ error: 'No organisation set.' });
+    if (!req.files?.length) return res.status(400).json({ error: 'No files uploaded.' });
+
+    let items = [];
+    if (req.body?.items) {
+      try {
+        items = typeof req.body.items === 'string' ? JSON.parse(req.body.items) : req.body.items;
+      } catch {
+        items = [];
+      }
+    }
+
+    const result = await ingestFormTemplateBatch(profile.id, orgId, req.files, {
+      workflow: req.body?.workflow,
+      items: Array.isArray(items) ? items : []
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/forms/templates/bulk-upload-zip
+ROUTER.post('/templates/bulk-upload-zip', bulkFormUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { profile, organisation_id: orgId } = getProviderProfileForUser(req.session.user.id);
+    if (!profile || !orgId) return res.status(400).json({ error: 'No organisation set.' });
+    if (!req.file?.buffer) return res.status(400).json({ error: 'Upload a .zip file.' });
+    if (!/\.zip$/i.test(req.file.originalname || '')) {
+      return res.status(400).json({ error: 'File must be a .zip archive.' });
+    }
+    const result = await ingestFormTemplateZip(profile.id, orgId, req.file.buffer, {
+      workflow: req.body?.workflow
+    });
+    res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

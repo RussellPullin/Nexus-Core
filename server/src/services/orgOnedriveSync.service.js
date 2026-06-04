@@ -8,7 +8,10 @@ import ExcelJS from 'exceljs';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { db } from '../db/index.js';
-import { buildTemplateDataBySheet } from './registerSnapshots.service.js';
+import {
+  buildTemplateDataBySheet,
+  RISK_REGISTER_ACTIVITY_SECTION
+} from './registerSnapshots.service.js';
 import {
   getOnedriveLinkRow,
   getRefreshToken,
@@ -48,6 +51,7 @@ function participantCategoryFolder(category) {
   if (c.includes('plan') || c.includes('ndis plan')) return 'Plans';
   if (c.includes('archive')) return 'Archived';
   if (c.includes('service') || c.includes('agreement') || c.includes('consent')) return 'Service agreements';
+  if (c.includes('risk assessment') || c.includes('risk assessments')) return 'Risk assessments';
   return 'Other';
 }
 
@@ -459,6 +463,40 @@ function writeRows(ws, startRow, rows) {
   }
 }
 
+function cellPlainText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (value.richText) return value.richText.map((t) => t.text).join('');
+  if (value.text) return String(value.text);
+  if (value.result != null) return String(value.result);
+  return '';
+}
+
+/** Append participant activity risk rows without clearing the org's existing Risk register content. */
+function appendRiskRegisterActivityRows(ws, rows) {
+  if (!rows?.length) return;
+
+  let sectionRow = null;
+  const scanMax = Math.max(ws.rowCount, 90) + 30;
+  for (let r = 1; r <= scanMax; r++) {
+    const v = cellPlainText(ws.getRow(r).getCell(1).value);
+    if (v.includes(RISK_REGISTER_ACTIVITY_SECTION)) {
+      sectionRow = r;
+      break;
+    }
+  }
+
+  let dataStart;
+  if (sectionRow) {
+    clearRows(ws, sectionRow + 1);
+    dataStart = sectionRow + 1;
+  } else {
+    dataStart = Math.max(ws.rowCount, 81) + 2;
+    ws.getRow(dataStart - 1).getCell(1).value = RISK_REGISTER_ACTIVITY_SECTION;
+  }
+  writeRows(ws, dataStart, rows);
+}
+
 export async function syncTemplateRegistersNow(organizationId, suppliedAccessToken = null) {
   if (!REGISTERS_TEMPLATE_PATH || !existsSync(REGISTERS_TEMPLATE_PATH)) return null;
   const accessToken = suppliedAccessToken || (await getValidAccessToken(organizationId));
@@ -495,11 +533,15 @@ export async function syncTemplateRegistersNow(organizationId, suppliedAccessTok
     replaceTemplateBranding(outWs, orgName);
     const startRow = dataStartBySheet[src.name];
     const rows = sheetData[src.name] || [];
-    if (startRow) {
-      clearRows(outWs, startRow);
-    }
-    if (startRow && rows.length) {
-      writeRows(outWs, startRow, rows);
+    if (src.name === 'Risk register') {
+      appendRiskRegisterActivityRows(outWs, rows);
+    } else {
+      if (startRow) {
+        clearRows(outWs, startRow);
+      }
+      if (startRow && rows.length) {
+        writeRows(outWs, startRow, rows);
+      }
     }
     const out = await outWb.xlsx.writeBuffer();
     const fileName = `${src.name}.xlsx`;

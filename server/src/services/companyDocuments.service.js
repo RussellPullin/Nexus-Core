@@ -126,6 +126,9 @@ function relPathFromAbs(absPath) {
 export function ingestCompanyDocumentFile(orgId, file, opts = {}) {
   const original = String(file.originalname || 'document').replace(/[/\\]/g, '_');
   const ext = extname(original).toLowerCase();
+  if (opts.policy_only && ext !== '.pdf') {
+    throw new Error('Policy uploads must be PDF files (already branded).');
+  }
   if (!ALLOWED_EXT.has(ext)) {
     throw new Error(`Unsupported file type "${ext}". Use .pdf, .docx, or .html.`);
   }
@@ -133,7 +136,7 @@ export function ingestCompanyDocumentFile(orgId, file, opts = {}) {
 
   const settings = getCompanyDocumentSettings(orgId);
   const displayName = (opts.display_name || original.replace(/\.(pdf|docx|html)$/i, '') || 'Document').trim();
-  const category = inferCategory(original, opts.category);
+  const category = opts.policy_only ? 'policy' : inferCategory(original, opts.category);
   const engine = inferEngine(original);
   const slug = uniqueSlug(orgId, slugifyName(displayName));
   const sync =
@@ -188,7 +191,8 @@ export function ingestCompanyDocumentBatch(orgId, files, options = {}) {
       const row = ingestCompanyDocumentFile(orgId, file, {
         category: defaultCategory || undefined,
         sync_to_onboarding: defaultSync,
-        source: options.source || 'upload'
+        source: options.source || 'upload',
+        policy_only: Boolean(options.policy_only)
       });
       results.imported.push({ id: row.id, slug: row.slug, display_name: row.display_name });
     } catch (e) {
@@ -205,10 +209,13 @@ export function ingestCompanyDocumentZip(orgId, zipBuffer, options = {}) {
   for (const entry of entries) {
     const name = basename(entry.entryName);
     const ext = extname(name).toLowerCase();
+    if (options.policy_only && ext !== '.pdf') continue;
     if (!ALLOWED_EXT.has(ext)) continue;
     files.push({ originalname: name, buffer: entry.getData() });
   }
-  if (!files.length) throw new Error('ZIP contains no .pdf, .docx, or .html files.');
+  if (!files.length) {
+    throw new Error(options.policy_only ? 'ZIP contains no PDF files.' : 'ZIP contains no .pdf, .docx, or .html files.');
+  }
   return ingestCompanyDocumentBatch(orgId, files, { ...options, source: options.source || 'upload' });
 }
 
@@ -314,7 +321,8 @@ export function mirrorLibraryMastersToOrgDocuments(orgId) {
       .get(orgId, master.id);
 
     const syncDefault =
-      settings.default_sync_to_onboarding && (master.category === 'policy' || master.category === 'procedure');
+      settings.default_sync_to_onboarding &&
+      (master.category === 'policy' || master.category === 'procedure');
 
     if (existing?.id) {
       db.prepare(

@@ -1,4 +1,5 @@
 import { db } from '../db/index.js';
+import { getOrgRenderContext } from './orgContext.service.js';
 
 function formatAusDate(iso) {
   if (!iso || typeof iso !== 'string') return '';
@@ -97,9 +98,18 @@ export function buildPrivacyConsentSnapshot({ participantId, participantOnboardi
     audio_visual_recordings: normalizeBool(checkboxes.audio_visual_recordings)
   };
 
+  const orgCtx = participant.provider_org_id ? getOrgRenderContext(participant.provider_org_id) : null;
+
   const snapshot = {
     kind: 'privacy_consent_form_v1',
     generated_at_iso: new Date().toISOString(),
+    org: orgCtx?.org
+      ? {
+          trading_name: orgCtx.org.tradingName,
+          legal_name: orgCtx.org.legalName,
+          abn: orgCtx.org.abn
+        }
+      : null,
     participant: {
       id: participant.id,
       full_legal_name: fullLegalName,

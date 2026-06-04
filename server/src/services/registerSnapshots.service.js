@@ -213,6 +213,28 @@ const REGISTER_UI_HEADERS = {
     '—'
   ],
   'Policy register': ['Policy name', 'Title', 'Reference', 'Version', 'Owner', 'Reviewer', 'Effective date', 'Notes'],
+  'Risk register': [
+    'Hazard / activity',
+    'Hazard 2',
+    'Hazard 3',
+    'Hazard 4',
+    'Hazard 5',
+    'Hazard 6',
+    'Hazard 7',
+    'Harm',
+    'Harm (detail)',
+    'Likelihood',
+    'Likelihood 2',
+    'Likelihood 3',
+    'Risk level',
+    'Risk level 2',
+    'Risk level 3',
+    'Risk level 4',
+    'Risk level 5',
+    'Controls',
+    'Controls (detail)',
+    'Source'
+  ],
   'Incident register': [
     '#',
     'Ref',
@@ -235,6 +257,66 @@ const REGISTER_UI_HEADERS = {
     '—'
   ]
 };
+
+/** Marker row in Registers.xlsx "Risk register" sheet for Nexus-appended participant activity rows. */
+export const RISK_REGISTER_ACTIVITY_SECTION = 'Activity risk assessments (Nexus Core)';
+
+function parseActivityRiskDocMeta(metadataJson) {
+  if (!metadataJson) return {};
+  try {
+    return JSON.parse(metadataJson);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Rows appended to the org Risk register (participant activity health & safety assessments).
+ */
+export function buildActivityRiskRegisterRows(organizationId) {
+  const docs = db
+    .prepare(
+      `SELECT pd.id, pd.filename, pd.created_at, pd.metadata_json, p.name AS participant_name
+       FROM participant_documents pd
+       JOIN participants p ON p.id = pd.participant_id
+       WHERE p.provider_org_id = ?
+         AND pd.category = 'Risk assessment'
+       ORDER BY datetime(pd.created_at) DESC`
+    )
+    .all(organizationId);
+
+  return docs.map((doc) => {
+    const meta = parseActivityRiskDocMeta(doc.metadata_json);
+    const activity = String(meta.activity_name || 'Activity').trim() || 'Activity';
+    const participant = doc.participant_name || '';
+    const hazard = `${activity} — ${participant}`.trim();
+    const harm = `Health & safety activity risk assessment on file (${doc.filename || 'PDF'}). Complete the assessment in the participant Risk assessments folder.`;
+    const assigned = fmtDate(doc.created_at);
+    const controls = `Assessment assigned ${assigned}. Managed in Nexus Core / OneDrive. Document ID: ${doc.id}`;
+    return [
+      hazard,
+      hazard,
+      hazard,
+      hazard,
+      hazard,
+      hazard,
+      hazard,
+      harm,
+      harm,
+      'See assessment',
+      'See assessment',
+      'See assessment',
+      'See assessment',
+      'See assessment',
+      'See assessment',
+      'See assessment',
+      'See assessment',
+      controls,
+      controls,
+      'Nexus Core (activity risk assessment)'
+    ];
+  });
+}
 
 /** Sheets that appear in the template but have no Nexus data pipeline yet — show placeholder in UI. */
 export const PENDING_REGISTER_DATA_SOURCES = {
@@ -556,12 +638,15 @@ export function buildTemplateDataBySheet(organizationId) {
       'Nexus Core'
     ]);
 
+  const activityRiskRegisterRows = buildActivityRiskRegisterRows(organizationId);
+
   return {
     Complaints: complaintsRows,
     'Document Register': docRows,
     'Feedback and complaints': feedbackRows,
     'HR role register': hrRoleRows,
     'Significant risk factor': sigRiskRows,
+    'Risk register': activityRiskRegisterRows,
     'Training and Development': trainingRows,
     'Policy register': policyRows,
     'Incident register': incidentRows
@@ -580,6 +665,11 @@ const REGISTER_DISPLAY_ORDER = [
     sheetKey: 'Significant risk factor',
     title: 'Significant risk factors (intake risk assessment)',
     source: 'participant_intake_clinical'
+  },
+  {
+    sheetKey: 'Risk register',
+    title: 'Risk register — activity assessments',
+    source: 'participant_activity_risk_assessments'
   },
   { sheetKey: 'Conflict of interest register', title: 'Conflict of interest register', source: null },
   { sheetKey: 'Emergency test register', title: 'Emergency test register', source: null },

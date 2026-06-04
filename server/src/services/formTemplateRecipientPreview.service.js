@@ -10,49 +10,155 @@ import {
   applyContractPlaceholderMap,
   buildParticipantCustomMergeData,
   buildStaffContractMergeData,
-  fillStaffContractPdfBuffer
+  fillStaffContractPdfBuffer,
+  resolvePdfFieldMergeValue
 } from './staffContractFill.service.js';
 import { renderDocxTemplateBuffer, convertDocxToPdf } from './consentForm.service.js';
 import { embedRasterImageAsSinglePagePdf } from './imageToPdf.service.js';
 import { extractPdfAcroFieldNames } from './contractTemplateAnalyze.service.js';
 import { participantEmptyIntake } from '../../../shared/onboardingFieldRegistry.js';
 
-function wrapChunks(str, maxLen) {
-  const s = String(str ?? '');
-  if (!s) return [''];
-  const lines = [];
-  let i = 0;
-  while (i < s.length) {
-    lines.push(s.slice(i, i + maxLen));
-    i += maxLen;
+/** pdf-lib StandardFonts only support WinAnsi — strip/replace common Unicode before drawText. */
+function toPdfSafeText(str) {
+  return String(str ?? '')
+    .replace(/\u2192/g, '->')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[^\t\n\r\x20-\x7E]/g, '?');
+}
+
+/**
+ * @param {Record<string, string>} contractFieldMap
+ * @param {Record<string, string>} renderData
+ * @param {string[]} [acroFieldNames]
+ * @param {'participant_onboarding'|'staff_onboarding'} [workflow]
+ */
+export function buildFullFieldMappingRows(contractFieldMap, renderData, acroFieldNames = [], workflow = 'participant_onboarding') {
+  const map = contractFieldMap && typeof contractFieldMap === 'object' ? contractFieldMap : {};
+  const wf = workflow === 'staff_onboarding' ? 'staff_onboarding' : 'participant_onboarding';
+  const rows = [];
+  const seen = new Set();
+
+  for (const fieldName of acroFieldNames || []) {
+    const name = String(fieldName || '').trim();
+    if (!name) continue;
+    const mergeKey = map[name] ? String(map[name]).trim() : '';
+    const sample = resolvePdfFieldMergeValue(renderData, name, { workflow: wf }) || '';
+    rows.push({
+      pdf_field: name,
+      merge_key: mergeKey || '(not mapped)',
+      sample_value: sample || '(empty)',
+      mapped: Boolean(mergeKey)
+    });
+    seen.add(name);
   }
-  return lines;
+
+  for (const [placeholder, mergeKeyRaw] of Object.entries(map)) {
+    if (seen.has(placeholder)) continue;
+    const mergeKey = String(mergeKeyRaw || '').trim();
+    if (!mergeKey) continue;
+    const sample =
+      renderData[placeholder] != null && renderData[placeholder] !== ''
+        ? String(renderData[placeholder])
+        : renderData[mergeKey] != null
+          ? String(renderData[mergeKey])
+          : '';
+    rows.push({
+      pdf_field: String(placeholder),
+      merge_key: mergeKey,
+      sample_value: sample || '(empty)',
+      mapped: true,
+      ocr_only: true
+    });
+  }
+
+  rows.sort((a, b) => a.pdf_field.localeCompare(b.pdf_field));
+  return rows;
 }
 
 /**
  * @param {Record<string, string>} contractFieldMap
  * @param {Record<string, string>} renderData
  */
-export function buildMergePreviewRows(contractFieldMap, renderData) {
-  const map = contractFieldMap && typeof contractFieldMap === 'object' ? contractFieldMap : {};
-  const rows = [];
-  for (const [placeholder, mergeKey] of Object.entries(map)) {
-    const sk = String(mergeKey || '').trim();
-    if (!sk) continue;
-    const v =
-      renderData[placeholder] != null && renderData[placeholder] !== ''
-        ? String(renderData[placeholder])
-        : renderData[sk] != null
-          ? String(renderData[sk])
-          : '';
-    rows.push({
-      placeholder: String(placeholder),
-      merge_key: sk,
-      sample_value: v
+export function buildMergePreviewRows(contractFieldMap, renderData, acroFieldNames = [], workflow = 'participant_onboarding') {
+  return buildFullFieldMappingRows(contractFieldMap, renderData, acroFieldNames, workflow).map((r) => ({
+    placeholder: r.pdf_field,
+    merge_key: r.merge_key,
+    sample_value: r.sample_value === '(empty)' ? '' : r.sample_value,
+    mapped: r.mapped
+  }));
+}
+
+async function appendFieldMappingPages(outDoc, rows, { appendixOnly = false } = {}) {
+  const font = await outDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await outDoc.embedFont(StandardFonts.HelveticaBold);
+  const pageW = 595;
+  const pageH = 842;
+  const margin = 40;
+  const lineH = 11;
+  const col1 = margin;
+  const col2 = margin + 185;
+  const col3 = margin + 310;
+  const fontSize = 8;
+
+  let page = outDoc.addPage([pageW, pageH]);
+  let y = pageH - margin;
+
+  const title = appendixOnly
+    ? 'Field mapping reference (no fillable PDF fields detected)'
+    : 'Field mapping reference (read this first)';
+  page.drawText(toPdfSafeText(title), { x: margin, y: y - 12, size: 12, font: fontBold });
+  y -= 22;
+  page.drawText(toPdfSafeText('PDF field name'), { x: col1, y, size: 9, font: fontBold });
+  page.drawText(toPdfSafeText('Mapped to'), { x: col2, y, size: 9, font: fontBold });
+  page.drawText(toPdfSafeText('Sample value'), { x: col3, y, size: 9, font: fontBold });
+  y -= lineH + 4;
+
+  if (!rows.length) {
+    page.drawText(toPdfSafeText('No fields detected or mapped yet. Re-upload the PDF or edit field links in Forms.'), {
+      x: margin,
+      y,
+      size: fontSize,
+      font
+    });
+    return;
+  }
+
+  for (const row of rows) {
+    if (y < margin + 20) {
+      page = outDoc.addPage([pageW, pageH]);
+      y = pageH - margin;
+      page.drawText(toPdfSafeText('PDF field name'), { x: col1, y, size: 9, font: fontBold });
+      page.drawText(toPdfSafeText('Mapped to'), { x: col2, y, size: 9, font: fontBold });
+      page.drawText(toPdfSafeText('Sample value'), { x: col3, y, size: 9, font: fontBold });
+      y -= lineH + 4;
+    }
+    page.drawText(toPdfSafeText(String(row.pdf_field || '').slice(0, 30)), { x: col1, y, size: fontSize, font });
+    page.drawText(toPdfSafeText(String(row.merge_key || '').slice(0, 24)), { x: col2, y, size: fontSize, font });
+    page.drawText(toPdfSafeText(String(row.sample_value || '(empty)').slice(0, 38)), {
+      x: col3,
+      y,
+      size: fontSize,
+      font
+    });
+    y -= lineH;
+  }
+
+  if (!appendixOnly) {
+    if (y < margin + 30) {
+      page = outDoc.addPage([pageW, pageH]);
+      y = pageH - margin;
+    } else {
+      y -= 8;
+    }
+    page.drawText(toPdfSafeText('--- Filled form preview follows on next page(s) ---'), {
+      x: margin,
+      y,
+      size: 9,
+      font: fontBold
     });
   }
-  rows.sort((a, b) => a.placeholder.localeCompare(b.placeholder));
-  return rows;
 }
 
 /** Fictitious participant/plan/intake used for admin sample previews. */
@@ -158,29 +264,22 @@ export function buildSampleRenderData(workflow, contractFieldMap, organisation) 
 export async function buildRecipientPreviewPdfBuffer(resolved, workflow, contractFieldMap, organisation) {
   const wf = workflow === 'staff_onboarding' ? 'staff_onboarding' : 'participant_onboarding';
   const renderData = buildSampleRenderData(wf, contractFieldMap, organisation);
-  const rows = buildMergePreviewRows(contractFieldMap || {}, renderData);
-  const appendixLines = [
-    'Sample data preview (fictitious) — appendix for administrators.',
-    'Placeholder / PDF field name → merge key: sample value as merged for onboarding.',
-    '',
-    ...rows.map((r) => `${r.placeholder}  →  ${r.merge_key}:  ${r.sample_value || '(empty)'}`)
-  ];
 
   let basePdfBytes;
   let acroCount = 0;
+  let acroFieldNames = [];
   let appendixOnly = false;
   let note = null;
 
   if (resolved.type === 'pdf') {
     const buf = readFileSync(resolved.path);
-    acroCount = (await extractPdfAcroFieldNames(buf)).length;
-    if (acroCount > 0) {
-      basePdfBytes = await fillStaffContractPdfBuffer(buf, renderData);
-    } else {
-      basePdfBytes = buf;
+    acroFieldNames = await extractPdfAcroFieldNames(buf);
+    acroCount = acroFieldNames.length;
+    basePdfBytes = await fillStaffContractPdfBuffer(buf, renderData, { workflow: wf });
+    if (acroCount === 0) {
       appendixOnly = true;
       note =
-        'This PDF has no fillable fields; values cannot be drawn on the original pages. The appendix lists what would merge for Word/fillable PDFs or future overlays.';
+        'This PDF has no fillable fields detected; sample values are listed in the mapping table. If your PDF uses XFA or non-standard widgets, export a standard AcroForm PDF from your editor.';
     }
   } else if (resolved.type === 'docx') {
     const buf = readFileSync(resolved.path);
@@ -201,37 +300,21 @@ export async function buildRecipientPreviewPdfBuffer(resolved, workflow, contrac
     throw new Error('Unsupported template type.');
   }
 
-  const pdfDoc = await PDFDocument.load(basePdfBytes);
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const pageW = 595;
-  const pageH = 842;
-  const margin = 44;
-  const fontSize = 8.2;
-  const lineH = 10;
-  const maxChars = 92;
+  const mappingRows = buildFullFieldMappingRows(contractFieldMap || {}, renderData, acroFieldNames, wf);
 
-  let page = pdfDoc.addPage([pageW, pageH]);
-  let y = pageH - margin;
-  const title = appendixOnly ? 'Sample merge values (flat template)' : 'Sample merge values (reference)';
-  page.drawText(title, { x: margin, y: y - 12, size: 11, font: fontBold });
-  y -= 26;
+  const outDoc = await PDFDocument.create();
+  await appendFieldMappingPages(outDoc, mappingRows, { appendixOnly });
 
-  const flatLines = appendixLines.flatMap((line) => wrapChunks(line, maxChars));
-  for (const line of flatLines) {
-    if (y < margin + 24) {
-      page = pdfDoc.addPage([pageW, pageH]);
-      y = pageH - margin;
-    }
-    page.drawText(line, { x: margin, y, size: fontSize, font });
-    y -= lineH;
-  }
+  const templateDoc = await PDFDocument.load(basePdfBytes);
+  const copiedPages = await outDoc.copyPages(templateDoc, templateDoc.getPageIndices());
+  for (const p of copiedPages) outDoc.addPage(p);
 
-  const out = await pdfDoc.save();
+  const out = await outDoc.save();
   return {
     pdfBuffer: Buffer.from(out),
     acro_field_count: acroCount,
     appendix_only: appendixOnly,
-    note
+    note,
+    mapping_rows: mappingRows
   };
 }

@@ -3,7 +3,9 @@ import { forms, onboarding } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import ServiceAgreementTemplateEditor from '../components/ServiceAgreementTemplateEditor';
 import OrgFormsCatalog from '../components/OrgFormsCatalog';
-import CompanyDocumentsPanel from '../components/CompanyDocumentsPanel';
+import PolicyLibraryPanel from '../components/PolicyLibraryPanel';
+import FormTemplatesBulkPanel from '../components/FormTemplatesBulkPanel';
+import ActivityRiskAssessmentsPanel from '../components/ActivityRiskAssessmentsPanel';
 
 function workflowLabel(w) {
   if (w === 'staff_onboarding') return 'Staff only';
@@ -243,8 +245,18 @@ export default function FormsPage() {
       {context?.message && <p className="forms-muted">{context.message}</p>}
 
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <h2 className="forms-section-heading">Company documents</h2>
-        <CompanyDocumentsPanel onMessage={(msg, isError) => setMessage(msg)} />
+        <h2 className="forms-section-heading">Activity risk assessments</h2>
+        <ActivityRiskAssessmentsPanel onMessage={(msg, isError) => setMessage(msg)} />
+      </section>
+
+      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
+        <h2 className="forms-section-heading">Your forms for signing (upload)</h2>
+        <FormTemplatesBulkPanel onMessage={(msg, isError) => setMessage(msg)} />
+      </section>
+
+      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
+        <h2 className="forms-section-heading">Policy library</h2>
+        <PolicyLibraryPanel onMessage={(msg, isError) => setMessage(msg)} />
       </section>
 
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>

@@ -6,6 +6,7 @@ import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { participants, organisations, ndis, smartDefaults, onboarding, formTemplates } from '../lib/api';
 import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useDropboxSignEnabled } from '../lib/featureFlags.js';
 import CopyableField from '../components/CopyableField';
+import ActivityRiskAssessmentAssign from '../components/ActivityRiskAssessmentAssign';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate, toInputDate } from '../lib/dateUtils';
 import { normalizeFundReleaseSchedule, splitAnnualAmount, splitAnnualHours } from '../lib/fundReleaseSchedule.js';
@@ -2820,6 +2821,7 @@ export default function ParticipantProfile() {
           ) : (
             <p>No documents. Use the upload form to add documents.</p>
           )}
+          <ActivityRiskAssessmentAssign participantId={id} onAssigned={load} />
           <DocumentUpload participantId={id} onUpload={load} />
         </div>
       )}

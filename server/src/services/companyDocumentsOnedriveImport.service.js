@@ -107,13 +107,13 @@ export async function syncCompanyDocumentsFromOnedrive(orgId, options = {}) {
   async function importItem(item, subpath) {
     const name = item.name || 'document';
     const lower = name.toLowerCase();
-    if (!lower.endsWith('.pdf') && !lower.endsWith('.docx')) {
-      skipped.push({ name, reason: 'unsupported type' });
+    if (!lower.endsWith('.pdf')) {
+      skipped.push({ name, reason: 'unsupported type (policies must be PDF)' });
       return;
     }
     try {
       const buffer = await downloadItem(accessToken, item);
-      const displayName = name.replace(/\.(pdf|docx)$/i, '');
+      const displayName = name.replace(/\.pdf$/i, '');
       const existing = db
         .prepare('SELECT id FROM org_company_documents WHERE org_id = ? AND onedrive_item_id = ?')
         .get(orgId, item.id);
@@ -126,8 +126,7 @@ export async function syncCompanyDocumentsFromOnedrive(orgId, options = {}) {
         }
         const dir = join(companyDocsRoot(orgId), docRow.slug);
         mkdirSync(dir, { recursive: true });
-        const ext = name.toLowerCase().endsWith('.docx') ? '.docx' : '.pdf';
-        const templateFilename = `template${ext}`;
+        const templateFilename = 'template.pdf';
         const absPath = join(dir, templateFilename);
         writeFileSync(absPath, buffer);
         db.prepare(
@@ -147,7 +146,9 @@ export async function syncCompanyDocumentsFromOnedrive(orgId, options = {}) {
         {
           source: 'onedrive',
           onedrive_item_id: item.id,
-          onedrive_path: subpath
+          onedrive_path: subpath,
+          policy_only: true,
+          category: 'policy'
         }
       );
       imported.push({ id: row.id, name: row.display_name });
