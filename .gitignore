@@ -12,6 +12,8 @@ client/dist/
 
 # Data (often contains PII)
 data/
+# But track source-code data directories (not runtime data)
+!server/src/data/
 
 # OS / editor
 .DS_Store
