@@ -11,6 +11,8 @@ ENV VITE_PREFER_LOCAL_LOGIN=$VITE_PREFER_LOCAL_LOGIN
 
 COPY . /app
 
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+
 RUN npm ci
 RUN npm ci --prefix client
 RUN npm run build
