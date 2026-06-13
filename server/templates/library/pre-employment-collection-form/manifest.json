@@ -1,0 +1,18 @@
+{
+  "slug": "pre-employment-collection-form",
+  "display_name": "Pre Employment Collection Form",
+  "category": "form",
+  "form_type": "form",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "staff_onboarding",
+  "placeholders": [
+    "org.abn",
+    "org.name"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true
+}

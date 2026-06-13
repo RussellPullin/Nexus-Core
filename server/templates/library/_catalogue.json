@@ -1,0 +1,1985 @@
+[
+  {
+    "slug": "accommodation-tenancy-assistance-position-description",
+    "display_name": "Accommodation _ Tenancy Assistance Position Description",
+    "category": "guide",
+    "form_type": "guide",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "administering-medication-checklist-medication-chart",
+    "display_name": "Administering Medication Checklist _ Medication Chart",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name",
+      "org.phone"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "administration-business-development-position-description",
+    "display_name": "Administration _ Business Development Position Description",
+    "category": "guide",
+    "form_type": "guide",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "advocacy-of-support-person-request-form",
+    "display_name": "Advocacy of Support Person Request Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 1,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "business-continuity-and-disaster-management-plan",
+    "display_name": "Business Continuity and Disaster Management Plan",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.legal_name",
+      "org.name",
+      "org.phone",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "covid-19-pandemic-management-policy",
+    "display_name": "COVID-19 Pandemic Management Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "change-of-supports",
+    "display_name": "Change of Supports",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 1,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "choice-advocacy-and-control-policy",
+    "display_name": "Choice Advocacy and Control Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "client-cash-reconciliation",
+    "display_name": "Client Cash Reconciliation",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "client-emergency-plan",
+    "display_name": "Client Emergency Plan",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "client-induction-checklist",
+    "display_name": "Client Induction Checklist",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "participant_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "client-information-booklet-easy-read",
+    "display_name": "Client Information Booklet (Easy Read)",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.name",
+      "org.phone"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "client-information-booklet",
+    "display_name": "Client Information Booklet",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.name",
+      "org.phone"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "client-intake-form",
+    "display_name": "Client Intake Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "participant_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 1,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "client-money-and-property-policy",
+    "display_name": "Client Money and Property Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "client-support-plan",
+    "display_name": "Client Support Plan",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "client-survey",
+    "display_name": "Client Survey",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "collection-storage-of-medicine-register",
+    "display_name": "Collection _ Storage of Medicine Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "complaints-register",
+    "display_name": "Complaints Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "conflict-of-interest-declaration",
+    "display_name": "Conflict of Interest Declaration",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 1,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "conflict-of-interest-policy",
+    "display_name": "Conflict of Interest Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "conflict-of-interest-register",
+    "display_name": "Conflict of Interest Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "continuous-improvement-register",
+    "display_name": "Continuous Improvement Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "delegation-of-authority",
+    "display_name": "Delegation of Authority",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "disability-support-worker-employment-consultant-position-description",
+    "display_name": "Disability Support Worker (Employment Consultant) Position Description",
+    "category": "guide",
+    "form_type": "guide",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "disability-support-worker-position-description-travel-and-transport",
+    "display_name": "Disability Support Worker Position Description (Travel and Transport)",
+    "category": "guide",
+    "form_type": "guide",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "disability-support-worker-position-description",
+    "display_name": "Disability Support Worker Position Description",
+    "category": "guide",
+    "form_type": "guide",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "diversity-policy",
+    "display_name": "Diversity Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "document-register",
+    "display_name": "Document Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "emergency-test-register",
+    "display_name": "Emergency Test Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "emergency-waste-management-plan",
+    "display_name": "Emergency Waste Management Plan",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "emergency-and-disaster-preparedness-policy",
+    "display_name": "Emergency and Disaster Preparedness Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "exit-interview-form",
+    "display_name": "Exit Interview Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "exit-and-transition-form",
+    "display_name": "Exit and Transition Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 1,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "feedback-and-complaints-assessment-investigation-and-resolution-considerations",
+    "display_name": "Feedback and Complaints Assessment, Investigation and Resolution Considerations",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "feedback-and-complaints-criteria-for-complaint-manager-or-incident-manager",
+    "display_name": "Feedback and Complaints Criteria for Complaint Manager or Incident Manager",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "feedback-and-complaints-form",
+    "display_name": "Feedback and Complaints Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.name",
+      "org.phone"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "feedback-and-complaints-policy",
+    "display_name": "Feedback and Complaints Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.legal_name",
+      "org.name",
+      "org.phone",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "feedback-and-complaints-procedural-fairness-considerations",
+    "display_name": "Feedback and Complaints Procedural Fairness Considerations",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "feedback-and-complaints-summary",
+    "display_name": "Feedback and Complaints Summary",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.name",
+      "org.phone"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "feedback-and-compliments-register",
+    "display_name": "Feedback and Compliments Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "governance-policy",
+    "display_name": "Governance Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "hr-performance-appraisal",
+    "display_name": "HR Performance Appraisal",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "human-resources-management-policy",
+    "display_name": "Human Resources Management Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "incident-management-register",
+    "display_name": "Incident Management Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "incident-management-and-reporting-policy",
+    "display_name": "Incident Management and Reporting Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "incident-report-form",
+    "display_name": "Incident Report Form",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "independent-contractor-agreement-including-cover-letter-induction-checklists-and-worker-declarations",
+    "display_name": "Independent Contractor Agreement (including cover letter, induction checklists and worker declarations)",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "infection-control-policy",
+    "display_name": "Infection Control Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "information-management-policy",
+    "display_name": "Information Management Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "interview-report-pro-forma",
+    "display_name": "Interview Report Pro Forma",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "legislation-register",
+    "display_name": "Legislation Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "letter-of-engagement-casual-employee",
+    "display_name": "Letter of Engagement Casual Employee",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.phone",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 2,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "management-meeting-agenda",
+    "display_name": "Management Meeting Agenda",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "management-of-medication-policy",
+    "display_name": "Management of Medication Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "managing-and-reducing-known-risks-matrix",
+    "display_name": "Managing and Reducing Known Risks Matrix",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "mealtime-management-plan",
+    "display_name": "Mealtime Management Plan",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "mealtime-management-policy",
+    "display_name": "Mealtime Management Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "money-and-property-declaration",
+    "display_name": "Money and Property Declaration",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.phone",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "my-ndis-support-record",
+    "display_name": "My NDIS Support Record",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "policy-register",
+    "display_name": "Policy Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "position-description-template-director",
+    "display_name": "Position Description Template Director",
+    "category": "guide",
+    "form_type": "guide",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "position-description-template",
+    "display_name": "Position Description Template",
+    "category": "guide",
+    "form_type": "guide",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "potential-staff-reference-check-form",
+    "display_name": "Potential Staff Reference Check Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "pre-employment-collection-form",
+    "display_name": "Pre Employment Collection Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "preventing-and-responding-to-violence-abuse-neglect-exploitation-and-discrimination-policy",
+    "display_name": "Preventing and Responding to Violence, Abuse, Neglect, Exploitation and Discrimination Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "privacy-consent-form",
+    "display_name": "Privacy Consent Form",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "participant_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 1,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "privacy-policy",
+    "display_name": "Privacy Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "progress-notes-template",
+    "display_name": "Progress Notes Template",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "promoting-and-protecting-rights",
+    "display_name": "Promoting and Protecting Rights",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "provision-of-supports-policy",
+    "display_name": "Provision of Supports Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "quality-management-and-continuous-improvement-policy",
+    "display_name": "Quality Management and Continuous Improvement Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "risk-assessed-role-register",
+    "display_name": "Risk Assessed Role Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "risk-assessment-form",
+    "display_name": "Risk Assessment Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "risk-management-policy",
+    "display_name": "Risk Management Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "risk-register",
+    "display_name": "Risk Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "risk-taking-form",
+    "display_name": "Risk Taking Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.phone"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "sda-and-sil-collaboration-agreement",
+    "display_name": "SDA and SIL Collaboration Agreement",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 2,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "service-schedule",
+    "display_name": "Service Schedule",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "participant_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "service-schedule",
+    "display_name": "Service Schedule",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "participant_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "services-agreement-sil",
+    "display_name": "Services Agreement (SIL)",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "participant_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.legal_name",
+      "org.name",
+      "org.phone",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 2,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "services-agreement",
+    "display_name": "Services Agreement",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "participant_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.legal_name",
+      "org.name",
+      "org.phone",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 2,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "services-agreement",
+    "display_name": "Services Agreement",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "participant_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.legal_name",
+      "org.name",
+      "org.phone",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 2,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "services-medication-and-participant-details",
+    "display_name": "Services Medication and Participant Details",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name",
+      "org.phone"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "staff-exit-checklist",
+    "display_name": "Staff Exit Checklist",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "staff-file-checklist",
+    "display_name": "Staff File Checklist",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "staff-induction-checklist",
+    "display_name": "Staff Induction Checklist",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "staff-performance-improvement-plan",
+    "display_name": "Staff Performance Improvement Plan",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "subject-to-a-significant-risk-factor-register",
+    "display_name": "Subject to a Significant Risk Factor Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "support-coordination-policy",
+    "display_name": "Support Coordination Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "support-coordination-services-agreement",
+    "display_name": "Support Coordination Services Agreement",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "participant_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.email",
+      "org.legal_name",
+      "org.name",
+      "org.phone",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 2,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "support-coordinator-position-description",
+    "display_name": "Support Coordinator Position Description",
+    "category": "guide",
+    "form_type": "guide",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "supported-independent-living-policy",
+    "display_name": "Supported Independent Living Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "training-feedback-form",
+    "display_name": "Training Feedback Form",
+    "category": "form",
+    "form_type": "form",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "training-and-development-register",
+    "display_name": "Training and Development Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "waste-management-plan",
+    "display_name": "Waste Management Plan",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "waste-management-policy",
+    "display_name": "Waste Management Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "waste-management-report",
+    "display_name": "Waste Management Report",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "waste-removal-records-register",
+    "display_name": "Waste Removal Records Register",
+    "category": "register",
+    "form_type": "register",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "compliance_register",
+    "placeholders": [],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "work-health-and-safety-checklist",
+    "display_name": "Work Health and Safety Checklist",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "work-health-and-safety-policy",
+    "display_name": "Work Health and Safety Policy",
+    "category": "policy",
+    "form_type": "policy",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.legal_name",
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  },
+  {
+    "slug": "worker-conflict-of-interest-declaration",
+    "display_name": "Worker Conflict of Interest Declaration",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "worker-declarations",
+    "display_name": "Worker Declarations",
+    "category": "contract",
+    "form_type": "contract",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "staff_onboarding",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": "participant",
+    "signature_count": 1,
+    "renewal_days": 365,
+    "is_active": true
+  },
+  {
+    "slug": "worker-supervision-record",
+    "display_name": "Worker Supervision Record",
+    "category": "procedure",
+    "form_type": "procedure",
+    "engine": "pdf-acroform",
+    "version": "1.0.0",
+    "template_file": "template.pdf",
+    "pack": "policy_library",
+    "placeholders": [
+      "org.abn",
+      "org.name"
+    ],
+    "required_signer_role": null,
+    "signature_count": 0,
+    "renewal_days": null,
+    "is_active": true
+  }
+]

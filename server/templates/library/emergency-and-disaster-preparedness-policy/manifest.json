@@ -1,0 +1,22 @@
+{
+  "slug": "emergency-and-disaster-preparedness-policy",
+  "display_name": "Emergency and Disaster Preparedness Policy",
+  "category": "policy",
+  "form_type": "policy",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "policy_library",
+  "placeholders": [
+    "org.abn",
+    "org.email",
+    "org.legal_name",
+    "org.name",
+    "org.primary_contact.name",
+    "org.signatory.name"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true
+}

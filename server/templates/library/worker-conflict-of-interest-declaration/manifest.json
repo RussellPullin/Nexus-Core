@@ -1,0 +1,18 @@
+{
+  "slug": "worker-conflict-of-interest-declaration",
+  "display_name": "Worker Conflict of Interest Declaration",
+  "category": "contract",
+  "form_type": "contract",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "policy_library",
+  "placeholders": [
+    "org.abn",
+    "org.name"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": 365,
+  "is_active": true
+}

@@ -1,0 +1,19 @@
+{
+  "slug": "policy-register",
+  "display_name": "Policy Register",
+  "category": "register",
+  "form_type": "register",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "compliance_register",
+  "placeholders": [
+    "org.abn",
+    "org.legal_name",
+    "org.name"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true
+}

@@ -1,0 +1,23 @@
+{
+  "slug": "services-agreement-sil",
+  "display_name": "Services Agreement (SIL)",
+  "category": "contract",
+  "form_type": "contract",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "participant_onboarding",
+  "placeholders": [
+    "org.abn",
+    "org.email",
+    "org.legal_name",
+    "org.name",
+    "org.phone",
+    "org.primary_contact.name",
+    "org.signatory.name"
+  ],
+  "required_signer_role": "participant",
+  "signature_count": 2,
+  "renewal_days": 365,
+  "is_active": true
+}

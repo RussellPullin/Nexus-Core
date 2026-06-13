@@ -1,0 +1,18 @@
+{
+  "slug": "disability-support-worker-position-description",
+  "display_name": "Disability Support Worker Position Description",
+  "category": "guide",
+  "form_type": "guide",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "staff_onboarding",
+  "placeholders": [
+    "org.abn",
+    "org.name"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true
+}

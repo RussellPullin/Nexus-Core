@@ -1,0 +1,19 @@
+{
+  "slug": "advocacy-of-support-person-request-form",
+  "display_name": "Advocacy of Support Person Request Form",
+  "category": "form",
+  "form_type": "form",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "policy_library",
+  "placeholders": [
+    "org.abn",
+    "org.legal_name",
+    "org.name"
+  ],
+  "required_signer_role": "participant",
+  "signature_count": 1,
+  "renewal_days": null,
+  "is_active": true
+}

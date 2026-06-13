@@ -1,0 +1,20 @@
+{
+  "slug": "feedback-and-complaints-summary",
+  "display_name": "Feedback and Complaints Summary",
+  "category": "policy",
+  "form_type": "policy",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "policy_library",
+  "placeholders": [
+    "org.abn",
+    "org.email",
+    "org.name",
+    "org.phone"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true
+}

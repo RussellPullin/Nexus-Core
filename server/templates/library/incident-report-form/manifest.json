@@ -1,0 +1,18 @@
+{
+  "slug": "incident-report-form",
+  "display_name": "Incident Report Form",
+  "category": "procedure",
+  "form_type": "procedure",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "policy_library",
+  "placeholders": [
+    "org.abn",
+    "org.name"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true
+}

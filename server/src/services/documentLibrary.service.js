@@ -35,7 +35,7 @@ import { unknownPlaceholders } from '../lib/templateTokens.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
 const defaultLibraryRoot = process.env.DOCUMENT_LIBRARY_DIR
-  || join(projectRoot, 'data', 'forms', 'templates', 'library');
+  || join(projectRoot, 'templates', 'library');
 
 const VALID_ENGINES = new Set(['docxtemplater', 'pdf-acroform', 'html']);
 const VALID_CATEGORIES = new Set(['policy', 'procedure', 'register', 'contract', 'form', 'guide']);

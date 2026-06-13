@@ -1,0 +1,18 @@
+{
+  "slug": "worker-declarations",
+  "display_name": "Worker Declarations",
+  "category": "contract",
+  "form_type": "contract",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "staff_onboarding",
+  "placeholders": [
+    "org.abn",
+    "org.name"
+  ],
+  "required_signer_role": "participant",
+  "signature_count": 1,
+  "renewal_days": 365,
+  "is_active": true
+}

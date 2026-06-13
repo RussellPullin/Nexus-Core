@@ -1,0 +1,18 @@
+{
+  "slug": "managing-and-reducing-known-risks-matrix",
+  "display_name": "Managing and Reducing Known Risks Matrix",
+  "category": "policy",
+  "form_type": "policy",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "policy_library",
+  "placeholders": [
+    "org.abn",
+    "org.name"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true
+}

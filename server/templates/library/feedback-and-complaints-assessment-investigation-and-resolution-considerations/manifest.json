@@ -1,0 +1,19 @@
+{
+  "slug": "feedback-and-complaints-assessment-investigation-and-resolution-considerations",
+  "display_name": "Feedback and Complaints Assessment, Investigation and Resolution Considerations",
+  "category": "policy",
+  "form_type": "policy",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "policy_library",
+  "placeholders": [
+    "org.abn",
+    "org.legal_name",
+    "org.name"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true
+}

@@ -1,0 +1,18 @@
+{
+  "slug": "client-induction-checklist",
+  "display_name": "Client Induction Checklist",
+  "category": "procedure",
+  "form_type": "procedure",
+  "engine": "pdf-acroform",
+  "version": "1.0.0",
+  "template_file": "template.pdf",
+  "pack": "participant_onboarding",
+  "placeholders": [
+    "org.abn",
+    "org.name"
+  ],
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true
+}
