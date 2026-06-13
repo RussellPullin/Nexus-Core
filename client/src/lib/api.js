@@ -42,7 +42,20 @@ export const users = {
 };
 
 export const registers = {
-  snapshot: () => fetchApi('/registers/snapshot')
+  snapshot: () => fetchApi('/registers/snapshot'),
+  incidents: () => fetchApi('/registers/incidents'),
+  createIncident: (data) => fetchApi('/registers/incidents', { method: 'POST', body: JSON.stringify(data || {}) }),
+  updateIncident: (id, data) =>
+    fetchApi(`/registers/incidents/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data || {}) }),
+  deleteIncident: (id) => fetchApi(`/registers/incidents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  exportUrl: ({ view, format = 'csv', from, to } = {}) => {
+    const q = new URLSearchParams();
+    if (view) q.set('view', view);
+    if (format) q.set('format', format);
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    return `${API}/registers/export?${q.toString()}`;
+  }
 };
 
 export const admin = {
@@ -182,8 +195,11 @@ export const auth = {
   disconnectEmail: () => fetchApi('/email/oauth/disconnect', { method: 'POST' }),
   supabasePublicConfig: () =>
     fetch(`${API}/auth/supabase/public-config`, { credentials: 'include' }).then((r) => r.json()),
-  supabaseSession: (access_token) =>
-    fetchApi('/auth/supabase/session', { method: 'POST', body: JSON.stringify({ access_token }) }),
+  supabaseSession: (access_token, options = {}) =>
+    fetchApi('/auth/supabase/session', {
+      method: 'POST',
+      body: JSON.stringify({ access_token, restore: options.restore === true })
+    }),
   supabaseRegisterOrg: (access_token, organization_name, products) =>
     fetchApi('/auth/supabase/register-org', {
       method: 'POST',
@@ -241,23 +257,26 @@ export async function fetchApi(path, options = {}) {
   let res = await runRequest();
   const isAuthPath = path.includes('/auth/');
   if (res.status === 401 && !isAuthPath) {
-    const restored = await tryRestoreExpressSessionFromSupabase();
+    const authPayload = await readResponseJsonClone(res);
+    const restored = authPayload?.code === 'SESSION_REPLACED'
+      ? false
+      : await tryRestoreExpressSessionFromSupabase();
     if (restored) res = await runRequest();
   }
   const text = await res.text();
   if (!res.ok) {
+    const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
     if (res.status === 401 && !isAuthPath) {
       // Avoid hard reload loops (flash-then-disappear). Let AuthProvider/ProtectedRoute
       // handle redirect by clearing user state.
       try {
         if (typeof window !== 'undefined' && window.dispatchEvent) {
-          window.dispatchEvent(new CustomEvent('nexus:auth-required', { detail: { path } }));
+          window.dispatchEvent(new CustomEvent('nexus:auth-required', { detail: { path, code: err?.code || null } }));
         }
       } catch {
         // ignore
       }
     }
-    const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
     const msg = err?.error || text || res.statusText;
     const extra = err?.errorDetail || err?.detail;
     const msgStr = String(msg);
@@ -273,6 +292,16 @@ export async function fetchApi(path, options = {}) {
   return parseJsonSafe(text);
 }
 
+async function readResponseJsonClone(res) {
+  try {
+    const text = await res.clone().text();
+    if (!text.trim()) return null;
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * When Express session is missing but Supabase still has a session (e.g. server restart, new API instance),
  * re-post the access token so cookie-based API calls work again.
@@ -285,7 +314,7 @@ export async function tryRestoreExpressSessionFromSupabase() {
     if (error || !data?.session?.access_token) return false;
     await fetchApi('/auth/supabase/session', {
       method: 'POST',
-      body: JSON.stringify({ access_token: data.session.access_token })
+      body: JSON.stringify({ access_token: data.session.access_token, restore: true })
     });
     return true;
   } catch {
@@ -296,8 +325,11 @@ export async function tryRestoreExpressSessionFromSupabase() {
 async function postMultipartWithSessionRetry(path, formData) {
   const url = `${API}${path}`;
   let res = await fetch(url, { method: 'POST', body: formData, credentials: 'include' });
-  if (res.status === 401 && (await tryRestoreExpressSessionFromSupabase())) {
-    res = await fetch(url, { method: 'POST', body: formData, credentials: 'include' });
+  if (res.status === 401) {
+    const authPayload = await readResponseJsonClone(res);
+    if (authPayload?.code !== 'SESSION_REPLACED' && (await tryRestoreExpressSessionFromSupabase())) {
+      res = await fetch(url, { method: 'POST', body: formData, credentials: 'include' });
+    }
   }
   return res;
 }
@@ -465,6 +497,28 @@ export const participants = {
 export const formTemplates = {
   masters: () => fetchApi('/form-templates/masters'),
   master: (id) => fetchApi(`/form-templates/masters/${id}`),
+  cloneMasterToOrg: (id) => fetchApi(`/form-templates/masters/${encodeURIComponent(id)}/clone`, { method: 'POST' }),
+  orgTemplates: () => fetchApi('/form-templates/org'),
+  orgTemplate: (id) => fetchApi(`/form-templates/org/${encodeURIComponent(id)}`),
+  updateOrgTemplate: (id, data) =>
+    fetchApi(`/form-templates/org/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data || {}) }),
+  orgTemplatePreviewUrl: (id) => `${API}/form-templates/org/${encodeURIComponent(id)}/preview`,
+  generateOrgTemplatePdf: (id, participantId) =>
+    fetchApi(`/form-templates/org/${encodeURIComponent(id)}/generate`, {
+      method: 'POST',
+      body: JSON.stringify({ participant_id: participantId })
+    }),
+  orgTemplateDownloadUrl: (id, docId) =>
+    `${API}/form-templates/org/${encodeURIComponent(id)}/download/${encodeURIComponent(docId)}`,
+  previewOrgTemplateBlob: async (id) => {
+    const res = await fetch(`${API}/form-templates/org/${encodeURIComponent(id)}/preview`, { credentials: 'include' });
+    if (!res.ok) {
+      const text = await res.text();
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Preview failed');
+    }
+    return res.blob();
+  },
   instances: () => fetchApi('/form-templates/instances'),
   cloneInstance: (data) => fetchApi('/form-templates/instances', { method: 'POST', body: JSON.stringify(data || {}) }),
   updateInstance: (id, data) => fetchApi(`/form-templates/instances/${id}`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
@@ -632,11 +686,14 @@ export const staff = {
   getComplianceDocuments: (staffId) => fetchApi(`/staff/${staffId}/compliance-documents`),
   updateComplianceDocumentExpiry: (staffId, docId, expiryDate) =>
     fetchApi(`/staff/${staffId}/compliance-documents/${docId}`, { method: 'PATCH', body: JSON.stringify({ expiry_date: expiryDate || null }) }),
-  uploadComplianceDocument: async (staffId, file, documentType, expiryDate) => {
+  deleteComplianceDocument: (staffId, docId) =>
+    fetchApi(`/staff/${staffId}/compliance-documents/${docId}`, { method: 'DELETE' }),
+  uploadComplianceDocument: async (staffId, file, documentType, expiryDate, displayName) => {
     const form = new FormData();
     form.append('file', file);
     form.append('document_type', documentType);
     if (expiryDate) form.append('expiry_date', expiryDate);
+    if (displayName) form.append('display_name', displayName);
     const res = await fetch(`${API}/staff/${staffId}/compliance-documents`, {
       method: 'POST',
       credentials: 'include',

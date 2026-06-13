@@ -569,6 +569,27 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_participant ON audit_events(particip
 CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_onboarding_renewal_tasks_due ON onboarding_renewal_tasks(due_at);
 
+CREATE TABLE IF NOT EXISTS incident_register_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  org_id TEXT NOT NULL,
+  incident_date TEXT,
+  participant_id INTEGER REFERENCES participants(id),
+  staff_id INTEGER REFERENCES staff(id),
+  location TEXT,
+  description TEXT,
+  immediate_actions TEXT,
+  follow_up TEXT,
+  reported_by TEXT,
+  reported_to TEXT,
+  outcome TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_incident_register_entries_org ON incident_register_entries(org_id, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_incident_register_entries_date ON incident_register_entries(incident_date);
+
 -- Staff onboarding (care support worker platform)
 -- staff table extended via migrations: role, employment_type, hourly_rate, pay_rates_json (JSON overrides: saturday, sunday, public_holiday, evening, optional weekday), onboarding_status, onboarding_token, onboarding_token_expires_at, manager_id, abn, address, date_of_birth, emergency_contact_name, emergency_contact_phone, availability_json
 
@@ -715,6 +736,11 @@ CREATE TABLE IF NOT EXISTS nexus_form_template_masters (
   version_label TEXT,
   definition_json TEXT NOT NULL,
   variable_schema_json TEXT NOT NULL,
+  branding_slots_json TEXT,
+  variable_slots_json TEXT,
+  sections_json TEXT,
+  page_layout_json TEXT,
+  category TEXT DEFAULT 'custom' CHECK (category IN ('service_agreement', 'privacy_consent', 'intake', 'staff_contract', 'incident_report', 'risk_assessment', 'custom')),
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -725,6 +751,11 @@ CREATE TABLE IF NOT EXISTS nexus_org_form_templates (
   label TEXT,
   variable_values_json TEXT,
   branding_json TEXT,
+  branding_slots_json TEXT,
+  variable_slots_json TEXT,
+  sections_json TEXT,
+  page_layout_json TEXT,
+  category TEXT DEFAULT 'custom' CHECK (category IN ('service_agreement', 'privacy_consent', 'intake', 'staff_contract', 'incident_report', 'risk_assessment', 'custom')),
   metadata_json TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),

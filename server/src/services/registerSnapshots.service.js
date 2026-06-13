@@ -82,6 +82,377 @@ function dedupeIncidentProgressNotes(rows) {
   return out;
 }
 
+function tableExists(name) {
+  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+}
+
+function safeJson(raw) {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeDocType(v) {
+  return String(v || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '');
+}
+
+function docLabel(doc) {
+  return doc?.display_name || doc?.document_type || doc?.filename || '';
+}
+
+function docDate(doc) {
+  return fmtDate(doc?.expiry_date || doc?.uploaded_at || doc?.created_at);
+}
+
+function findLatestDoc(docs, match) {
+  return [...docs]
+    .filter((doc) => match(normalizeDocType(doc.document_type), doc))
+    .sort((a, b) => {
+      const da = new Date(a.expiry_date || a.uploaded_at || a.created_at || 0).getTime();
+      const dbb = new Date(b.expiry_date || b.uploaded_at || b.created_at || 0).getTime();
+      return dbb - da;
+    })[0];
+}
+
+function complianceStatus(expiryDates, requiredMissing = []) {
+  const validDates = expiryDates.map((d) => fmtDate(d)).filter(Boolean);
+  if (requiredMissing.length || validDates.length === 0) return 'Missing';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const soon = new Date(today);
+  soon.setDate(soon.getDate() + 60);
+  const parsed = validDates.map((d) => new Date(d));
+  if (parsed.some((d) => !Number.isNaN(d.getTime()) && d < today)) return 'Expired';
+  if (parsed.some((d) => !Number.isNaN(d.getTime()) && d <= soon)) return 'Expiring Soon';
+  return 'Current';
+}
+
+function earliestExpiry(expiryDates) {
+  const sorted = expiryDates
+    .map((d) => fmtDate(d))
+    .filter(Boolean)
+    .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+  return sorted[0] || '';
+}
+
+function staffComplianceRows(organizationId) {
+  const staffRows = db
+    .prepare(
+      `SELECT id, name, role, created_at, onboarding_status, archived_at
+       FROM staff
+       WHERE org_id = ?
+       ORDER BY lower(name)`
+    )
+    .all(organizationId);
+  const docs = db
+    .prepare(
+      `SELECT scd.*
+       FROM staff_compliance_documents scd
+       JOIN staff s ON s.id = scd.staff_id
+       WHERE s.org_id = ?`
+    )
+    .all(organizationId);
+  const byStaff = new Map();
+  for (const doc of docs) {
+    if (!byStaff.has(doc.staff_id)) byStaff.set(doc.staff_id, []);
+    byStaff.get(doc.staff_id).push(doc);
+  }
+
+  return staffRows.map((s) => {
+    const staffDocs = byStaff.get(s.id) || [];
+    const wwcc = findLatestDoc(staffDocs, (t) => t.includes('wwcc') || t.includes('blue_card') || t.includes('yellow_card') || t.includes('working_with_children'));
+    const firstAid = findLatestDoc(staffDocs, (t) => t.includes('first_aid') || t.includes('firstaid'));
+    const police = findLatestDoc(staffDocs, (t) => t.includes('police'));
+    const induction = findLatestDoc(staffDocs, (t) => t.includes('induction'));
+    const knownIds = new Set([wwcc?.id, firstAid?.id, police?.id, induction?.id].filter(Boolean));
+    const otherCerts = staffDocs
+      .filter((doc) => !knownIds.has(doc.id))
+      .map((doc) => `${docLabel(doc)}${doc.expiry_date ? ` exp ${fmtDate(doc.expiry_date)}` : ''}`)
+      .filter(Boolean)
+      .join('; ');
+    const missing = [];
+    if (!wwcc) missing.push('WWCC');
+    if (!firstAid) missing.push('First Aid');
+    if (!police) missing.push('Police Check');
+    if (!induction) missing.push('Induction');
+    const expiries = [wwcc?.expiry_date, firstAid?.expiry_date, ...staffDocs.map((doc) => doc.expiry_date)].filter(Boolean);
+    const status = complianceStatus(expiries, missing);
+    return [
+      s.name || '',
+      s.role || '',
+      docLabel(wwcc),
+      fmtDate(wwcc?.expiry_date),
+      fmtDate(firstAid?.expiry_date),
+      docDate(police),
+      docDate(induction),
+      otherCerts,
+      status,
+      earliestExpiry(expiries),
+      missing.join(', ')
+    ];
+  });
+}
+
+function auditIncidentRows(organizationId) {
+  const rows = db
+    .prepare(
+      `SELECT ae.id, ae.participant_id, ae.actor_id, ae.event_type, ae.entity_type, ae.entity_id, ae.new_value_json,
+              ae.metadata_json, ae.created_at, p.name AS participant_name, u.name AS actor_name
+       FROM audit_events ae
+       LEFT JOIN participants p ON p.id = ae.participant_id
+       LEFT JOIN users u ON u.id = ae.actor_id
+       WHERE lower(ae.event_type) LIKE 'incident%'
+         AND (
+           p.provider_org_id = ?
+           OR u.org_id = ?
+         )
+       ORDER BY datetime(ae.created_at) DESC`
+    )
+    .all(organizationId, organizationId);
+
+  return rows.map((r) => {
+    const meta = { ...safeJson(r.metadata_json), ...safeJson(r.new_value_json) };
+    const shiftId = meta.shift_id || meta.shiftId || (String(r.entity_type || '').includes('shift') ? r.entity_id : '');
+    return {
+      key: `audit:${r.id}`,
+      shift_id: shiftId || '',
+      row: [
+        fmtDate(meta.incident_date || meta.date || r.created_at),
+        r.participant_name || meta.participant_name || '',
+        meta.staff_name || '',
+        meta.location || '',
+        meta.description || meta.summary || r.event_type,
+        meta.immediate_actions || '',
+        meta.follow_up || '',
+        meta.reported_by || r.actor_name || '',
+        meta.reported_to || '',
+        meta.outcome || '',
+        'Audit',
+        fmtDate(r.created_at),
+        '',
+        shiftId || ''
+      ]
+    };
+  });
+}
+
+function manualIncidentRows(organizationId) {
+  if (!tableExists('incident_register_entries')) return [];
+  return db
+    .prepare(
+      `SELECT ire.*, p.name AS participant_name, s.name AS staff_name, u.name AS created_by_name
+       FROM incident_register_entries ire
+       LEFT JOIN participants p ON p.id = ire.participant_id
+       LEFT JOIN staff s ON s.id = ire.staff_id
+       LEFT JOIN users u ON u.id = ire.created_by
+       WHERE ire.org_id = ?
+         AND ire.deleted_at IS NULL
+       ORDER BY datetime(COALESCE(ire.incident_date, ire.created_at)) DESC`
+    )
+    .all(organizationId)
+    .map((r) => ({
+      key: `manual:${r.id}`,
+      shift_id: '',
+      row: [
+        fmtDate(r.incident_date),
+        r.participant_name || '',
+        r.staff_name || '',
+        r.location || '',
+        r.description || '',
+        r.immediate_actions || '',
+        r.follow_up || '',
+        r.reported_by || r.created_by_name || '',
+        r.reported_to || '',
+        r.outcome || '',
+        'Manual',
+        fmtDate(r.created_at),
+        r.id,
+        ''
+      ]
+    }));
+}
+
+function incidentRows(organizationId) {
+  const progressRows = dedupeIncidentProgressNotes(
+    db
+      .prepare(
+        `SELECT pn.id, pn.shift_id, pn.support_date, pn.start_time, pn.incidents, pn.session_details, pn.created_at,
+                p.name AS participant_name, p.email AS participant_email, s.name AS staff_name
+         FROM progress_notes pn
+         JOIN participants p ON p.id = pn.participant_id
+         LEFT JOIN staff s ON s.id = pn.staff_id
+         WHERE p.provider_org_id = ?
+           AND pn.incidents IS NOT NULL
+           AND trim(pn.incidents) <> ''
+         ORDER BY datetime(pn.created_at) DESC`
+      )
+      .all(organizationId)
+      .filter((r) => isIncidentTicketYes(r.incidents))
+  ).map((r) => {
+    const when = `${fmtDate(r.support_date)}${r.start_time ? ` ${r.start_time}` : ''}`.trim();
+    const narrative = incidentRegisterNarrative(r.incidents, r.session_details);
+    return {
+      key: `progress:${r.id}`,
+      shift_id: r.shift_id || '',
+      row: [
+        when,
+        r.participant_name || '',
+        r.staff_name || '',
+        '',
+        narrative,
+        r.session_details || '',
+        '',
+        r.staff_name || 'Nexus Core',
+        '',
+        '',
+        'Shifter',
+        fmtDate(r.created_at),
+        '',
+        r.shift_id || ''
+      ]
+    };
+  });
+
+  const combined = [...progressRows, ...auditIncidentRows(organizationId), ...manualIncidentRows(organizationId)];
+  const seenShifts = new Set();
+  const out = [];
+  for (const item of combined) {
+    const sid = String(item.shift_id || '').trim();
+    if (sid) {
+      if (seenShifts.has(sid)) continue;
+      seenShifts.add(sid);
+    }
+    out.push(item.row);
+  }
+  return out.sort((a, b) => new Date(b[0] || b[11] || 0).getTime() - new Date(a[0] || a[11] || 0).getTime());
+}
+
+function riskAssessmentRows(organizationId) {
+  if (RISK_ASSESSMENT_FIELD_KEYS.length === 0) return [];
+  const participants = db
+    .prepare(
+      `SELECT p.id, p.name, po.id AS onboarding_id
+       FROM participants p
+       LEFT JOIN participant_onboarding po ON po.participant_id = p.id
+       WHERE p.provider_org_id = ?
+         AND (p.archived_at IS NULL OR p.archived_at = '')
+       ORDER BY lower(p.name)`
+    )
+    .all(organizationId);
+  const ids = participants.map((p) => p.onboarding_id).filter(Boolean);
+  const fieldsByOnboarding = new Map();
+  if (ids.length) {
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = db
+      .prepare(
+        `SELECT participant_onboarding_id, field_key, field_value
+         FROM participant_intake_fields
+         WHERE participant_onboarding_id IN (${placeholders})
+           AND field_key IN (${RISK_ASSESSMENT_FIELD_KEYS.map(() => '?').join(', ')})`
+      )
+      .all(...ids, ...RISK_ASSESSMENT_FIELD_KEYS);
+    for (const row of rows) {
+      if (!fieldsByOnboarding.has(row.participant_onboarding_id)) fieldsByOnboarding.set(row.participant_onboarding_id, {});
+      fieldsByOnboarding.get(row.participant_onboarding_id)[row.field_key] = row.field_value;
+    }
+  }
+  return participants.map((p) => {
+    const fields = fieldsByOnboarding.get(p.onboarding_id) || {};
+    return [
+      p.name || '',
+      ...RISK_ASSESSMENT_FIELD_KEYS.map((key) => {
+        const value = String(fields[key] ?? '').trim();
+        return value || 'Not recorded';
+      })
+    ];
+  });
+}
+
+function participantRegisterRows(organizationId) {
+  return db
+    .prepare(
+      `WITH latest_plan AS (
+         SELECT np.*,
+                row_number() OVER (PARTITION BY np.participant_id ORDER BY date(np.end_date) DESC, date(np.start_date) DESC) AS rn
+         FROM ndis_plans np
+       ),
+       last_shift AS (
+         SELECT participant_id, MAX(date(start_time)) AS last_shift_date
+         FROM shifts
+         GROUP BY participant_id
+       ),
+       coordinator AS (
+         SELECT up.participant_id, GROUP_CONCAT(u.name, ', ') AS coordinator_names
+         FROM user_participants up
+         JOIN users u ON u.id = up.user_id
+         GROUP BY up.participant_id
+       ),
+       primary_contact AS (
+         SELECT pc.participant_id,
+                c.name || COALESCE(' ' || NULLIF(c.phone, ''), '') || COALESCE(' ' || NULLIF(c.email, ''), '') AS contact_text,
+                row_number() OVER (PARTITION BY pc.participant_id ORDER BY pc.is_starred DESC, pc.created_at ASC) AS rn
+         FROM participant_contacts pc
+         JOIN contacts c ON c.id = pc.contact_id
+       )
+       SELECT p.name, p.ndis_number, lp.start_date, lp.end_date, pc.contact_text, c.coordinator_names,
+              po.status AS onboarding_status, ls.last_shift_date, p.archived_at
+       FROM participants p
+       LEFT JOIN latest_plan lp ON lp.participant_id = p.id AND lp.rn = 1
+       LEFT JOIN participant_onboarding po ON po.participant_id = p.id
+       LEFT JOIN last_shift ls ON ls.participant_id = p.id
+       LEFT JOIN coordinator c ON c.participant_id = p.id
+       LEFT JOIN primary_contact pc ON pc.participant_id = p.id AND pc.rn = 1
+       WHERE p.provider_org_id = ?
+       ORDER BY lower(p.name)`
+    )
+    .all(organizationId)
+    .map((r) => [
+      r.name || '',
+      r.ndis_number || '',
+      fmtDate(r.start_date),
+      fmtDate(r.end_date),
+      r.contact_text || '',
+      r.coordinator_names || '',
+      r.onboarding_status || '',
+      fmtDate(r.last_shift_date),
+      r.archived_at ? 'Inactive' : 'Active'
+    ]);
+}
+
+function staffRegisterRows(organizationId, complianceRows = null) {
+  const complianceByName = new Map((complianceRows || staffComplianceRows(organizationId)).map((r) => [r[0], r[8]]));
+  return db
+    .prepare(
+      `WITH last_shift AS (
+         SELECT staff_id, MAX(date(start_time)) AS last_shift_date
+         FROM shifts
+         GROUP BY staff_id
+       )
+       SELECT s.name, s.role, s.created_at, s.onboarding_status, ls.last_shift_date, s.archived_at
+       FROM staff s
+       LEFT JOIN last_shift ls ON ls.staff_id = s.id
+       WHERE s.org_id = ?
+       ORDER BY lower(s.name)`
+    )
+    .all(organizationId)
+    .map((r) => [
+      r.name || '',
+      r.role || '',
+      fmtDate(r.created_at),
+      r.onboarding_status || '',
+      complianceByName.get(r.name) || 'Missing',
+      fmtDate(r.last_shift_date),
+      r.archived_at ? 'Inactive' : 'Active'
+    ]);
+}
+
 function buildRiskAssessmentNarrative(fieldMap) {
   const parts = [];
   for (const key of RISK_ASSESSMENT_FIELD_KEYS) {
@@ -100,7 +471,36 @@ function truncateForCell(s, maxLen) {
 }
 
 /** Human-readable columns for in-app tables (pad with "Column n" if row wider). */
-const REGISTER_UI_HEADERS = {
+export const REGISTER_UI_HEADERS = {
+  'Staff Compliance Register': [
+    'Staff',
+    'Role',
+    'WWCC number',
+    'WWCC expiry',
+    'First Aid expiry',
+    'Police Check date',
+    'Induction date',
+    'Other certificates',
+    'Status',
+    'Next expiry',
+    'Missing items'
+  ],
+  'Risk Assessment Register': [
+    'Participant',
+    ...PARTICIPANT_INTAKE_FIELD_DEFS.filter((d) => d.section === 'clinical').map((d) => d.label)
+  ],
+  'Participant Register': [
+    'Name',
+    'NDIS number',
+    'Plan start',
+    'Plan end',
+    'Primary contact',
+    'Coordinator assigned',
+    'Onboarding status',
+    'Last shift date',
+    'Status'
+  ],
+  'Staff Register': ['Name', 'Role', 'Start date', 'Onboarding status', 'Compliance status', 'Last shift date', 'Status'],
   Complaints: [
     '#',
     'Ref',
@@ -236,25 +636,20 @@ const REGISTER_UI_HEADERS = {
     'Source'
   ],
   'Incident register': [
-    '#',
-    'Ref',
     'When',
-    'Participant / persons',
-    'Notifiable',
+    'Participant',
     'Staff',
-    'Incident',
-    'Further action',
-    'Session / actions',
+    'Location',
+    'Description',
+    'Immediate actions',
+    'Follow-up',
+    'Reported by',
+    'Reported to',
+    'Outcome',
     'Source',
-    '—',
-    '—',
-    '—',
-    '—',
     'Logged date',
-    'Logged by',
-    '—',
-    '—',
-    '—'
+    'Manual ID',
+    'Shift ID'
   ]
 };
 
@@ -364,48 +759,11 @@ export function buildTemplateDataBySheet(organizationId) {
       return [label, label, label, 1, 'Nexus Core', 'Nexus Core', fmtDate(r.created_at), fmtDate(r.created_at), ''];
     });
 
-  const incidentRows = dedupeIncidentProgressNotes(
-    db
-      .prepare(
-        `SELECT pn.id, pn.shift_id, pn.support_date, pn.start_time, pn.incidents, pn.session_details, pn.created_at,
-                p.name AS participant_name, p.email AS participant_email, s.name AS staff_name
-         FROM progress_notes pn
-         JOIN participants p ON p.id = pn.participant_id
-         LEFT JOIN staff s ON s.id = pn.staff_id
-         WHERE p.provider_org_id = ?
-           AND pn.incidents IS NOT NULL
-           AND trim(pn.incidents) <> ''
-         ORDER BY datetime(pn.created_at) DESC`
-      )
-      .all(organizationId)
-      .filter((r) => isIncidentTicketYes(r.incidents))
-  ).map((r, i) => {
-      const when = `${fmtDate(r.support_date)}${r.start_time ? ` ${r.start_time}` : ''}`.trim();
-      const persons = `${r.participant_name || ''}${r.participant_email ? ` (${r.participant_email})` : ''}`;
-      const narrative = incidentRegisterNarrative(r.incidents, r.session_details);
-      return [
-        i + 1,
-        i + 1,
-        when,
-        persons,
-        'N',
-        r.staff_name || '',
-        narrative,
-        'N',
-        r.session_details || '',
-        'Logged from Nexus progress notes',
-        '',
-        '',
-        '',
-        '',
-        '',
-        fmtDate(r.created_at),
-        r.staff_name || 'Nexus Core',
-        '',
-        '',
-        ''
-      ];
-    });
+  const staffCompliance = staffComplianceRows(organizationId);
+  const incidentRegisterRows = incidentRows(organizationId);
+  const riskRegisterRows = riskAssessmentRows(organizationId);
+  const participantRows = participantRegisterRows(organizationId);
+  const staffRows = staffRegisterRows(organizationId, staffCompliance);
 
   const riskKeyPlaceholders = RISK_ASSESSMENT_FIELD_KEYS.map(() => '?').join(', ');
   const sigRiskRows = (() => {
@@ -498,30 +856,21 @@ export function buildTemplateDataBySheet(organizationId) {
     return out;
   })();
 
-  const trainingRows = db
-    .prepare(
-      `SELECT scd.document_type, scd.uploaded_at, scd.expiry_date, scd.status, s.name AS staff_name
-       FROM staff_compliance_documents scd
-       JOIN staff s ON s.id = scd.staff_id
-       WHERE s.org_id = ?
-       ORDER BY datetime(scd.uploaded_at) DESC`
-    )
-    .all(organizationId)
-    .map((r) => [
-      `${r.document_type} (${r.staff_name})`,
-      `Compliance evidence for ${r.staff_name}`,
-      'Internal',
-      '',
-      'Nexus Core',
-      fmtDate(r.expiry_date),
-      fmtDate(r.uploaded_at),
-      '',
-      r.status || '',
-      fmtDate(r.expiry_date),
-      '',
-      '',
-      ''
-    ]);
+  const trainingRows = staffCompliance.map((r) => [
+    `${r[0]} compliance summary`,
+    `Compliance evidence for ${r[0]}`,
+    'Internal',
+    '',
+    'Nexus Core',
+    r[9] || '',
+    '',
+    '',
+    r[8] || '',
+    r[9] || '',
+    r[10] || '',
+    r[7] || '',
+    ''
+  ]);
 
   const hrRoleRows = Array.from(
     new Set(
@@ -641,6 +990,10 @@ export function buildTemplateDataBySheet(organizationId) {
   const activityRiskRegisterRows = buildActivityRiskRegisterRows(organizationId);
 
   return {
+    'Staff Compliance Register': staffCompliance,
+    'Risk Assessment Register': riskRegisterRows,
+    'Participant Register': participantRows,
+    'Staff Register': staffRows,
     Complaints: complaintsRows,
     'Document Register': docRows,
     'Feedback and complaints': feedbackRows,
@@ -649,33 +1002,16 @@ export function buildTemplateDataBySheet(organizationId) {
     'Risk register': activityRiskRegisterRows,
     'Training and Development': trainingRows,
     'Policy register': policyRows,
-    'Incident register': incidentRows
+    'Incident register': incidentRegisterRows
   };
 }
 
 const REGISTER_DISPLAY_ORDER = [
-  { sheetKey: 'Document Register', title: 'Document register', source: 'documents_synced' },
-  { sheetKey: 'Policy register', title: 'Policy register', source: 'company_policy_files' },
-  { sheetKey: 'HR role register', title: 'HR role register', source: 'staff_roles' },
-  { sheetKey: 'Training and Development', title: 'Training & compliance', source: 'staff_compliance_documents' },
-  { sheetKey: 'Incident register', title: 'Incident register', source: 'progress_notes_incidents' },
-  { sheetKey: 'Complaints', title: 'Complaints', source: 'case_notes_complaints' },
-  { sheetKey: 'Feedback and complaints', title: 'Feedback & compliments', source: 'case_notes_feedback' },
-  {
-    sheetKey: 'Significant risk factor',
-    title: 'Significant risk factors (intake risk assessment)',
-    source: 'participant_intake_clinical'
-  },
-  {
-    sheetKey: 'Risk register',
-    title: 'Risk register — activity assessments',
-    source: 'participant_activity_risk_assessments'
-  },
-  { sheetKey: 'Conflict of interest register', title: 'Conflict of interest register', source: null },
-  { sheetKey: 'Emergency test register', title: 'Emergency test register', source: null },
-  { sheetKey: 'Collection and storage of Med', title: 'Collection & storage of medication', source: null },
-  { sheetKey: 'Continuous improvment', title: 'Continuous improvement', source: null },
-  { sheetKey: 'Waste removal Register', title: 'Waste removal register', source: null }
+  { sheetKey: 'Staff Compliance Register', title: 'Staff Compliance', source: 'staff_compliance_documents' },
+  { sheetKey: 'Incident register', title: 'Incidents', source: 'progress_notes_audit_events_manual_incidents' },
+  { sheetKey: 'Risk Assessment Register', title: 'Risk Assessments', source: 'participant_intake_clinical' },
+  { sheetKey: 'Participant Register', title: 'Participants', source: 'participants' },
+  { sheetKey: 'Staff Register', title: 'Staff', source: 'staff' }
 ];
 
 function headersForSheet(sheetKey, rows) {
@@ -693,6 +1029,43 @@ function normalizeRows(rows) {
   return rows.map((r) => r.map(cellStr));
 }
 
+function withinNextDays(dateValue, days) {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(today);
+  end.setDate(end.getDate() + days);
+  return d >= today && d <= end;
+}
+
+function isSameMonth(dateValue, ref = new Date()) {
+  const d = new Date(dateValue);
+  return !Number.isNaN(d.getTime()) && d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth();
+}
+
+function buildRegisterSummary(views) {
+  const byId = new Map(views.map((v) => [v.id, v]));
+  const staffCompliance = byId.get('staff_compliance_register')?.rows || [];
+  const incidents = byId.get('incident_register')?.rows || [];
+  const risk = byId.get('risk_assessment_register')?.rows || [];
+  const participants = byId.get('participant_register')?.rows || [];
+  return {
+    staff_expiring_certs_60_days: staffCompliance.filter((r) => r[8] === 'Expiring Soon').length,
+    incidents_this_month: incidents.filter((r) => isSameMonth(r[0] || r[11])).length,
+    participants_missing_risk_assessment: risk.filter((r) => r.slice(1).every((v) => v === 'Not recorded')).length,
+    participants_plan_expiring_60_days: participants.filter((r) => withinNextDays(r[3], 60)).length
+  };
+}
+
+const VIEW_METADATA = {
+  staff_compliance_register: { date_column: 'Next expiry', status_column: 'Status' },
+  incident_register: { date_column: 'When', source_column: 'Source', manual_id_column: 'Manual ID' },
+  risk_assessment_register: { date_column: null },
+  participant_register: { date_column: 'Plan end', status_column: 'Status' },
+  staff_register: { date_column: 'Last shift date', status_column: 'Status' }
+};
+
 /**
  * JSON payload for GET /api/registers/snapshot — same underlying rows as OneDrive template sync.
  */
@@ -706,8 +1079,9 @@ export function buildRegisterSnapshotForOrg(organizationId) {
     const rawRows = sheetData[def.sheetKey] || [];
     const rows = normalizeRows(rawRows);
     const columns = headersForSheet(def.sheetKey, rows);
+    const id = def.sheetKey.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
     views.push({
-      id: def.sheetKey.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+      id,
       sheet_key: def.sheetKey,
       title: def.title,
       data_source: def.source,
@@ -715,13 +1089,15 @@ export function buildRegisterSnapshotForOrg(organizationId) {
       roadmap_note: pendingNote || null,
       row_count: rows.length,
       columns,
-      rows
+      rows,
+      ...(VIEW_METADATA[id] || {})
     });
   }
 
   return {
     generated_at: generatedAt,
     organisation_id: organizationId,
+    summary: buildRegisterSummary(views),
     views,
     hint:
       'Rows mirror what is pushed to OneDrive Register/*.xlsx when connected. Extend registerSnapshots.service.js when new Nexus features supply register data.'

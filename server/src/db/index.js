@@ -26,6 +26,66 @@ try {
   console.warn('Could not load schema:', err.message);
 }
 
+function tableExists(name) {
+  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+}
+
+function ensureScheduleCoreTables() {
+  if (!tableExists('shifts')) {
+    db.exec(`
+      CREATE TABLE shifts (
+        id TEXT PRIMARY KEY,
+        participant_id TEXT NOT NULL,
+        staff_id TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        status TEXT DEFAULT 'scheduled',
+        notes TEXT,
+        roster_sent_at TEXT,
+        recurring_group_id TEXT,
+        expenses REAL DEFAULT 0,
+        shifter_shift_id TEXT,
+        line_items_locked INTEGER NOT NULL DEFAULT 0,
+        billing_invoice_id TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+      );
+    `);
+  }
+
+  if (!tableExists('shift_line_items')) {
+    db.exec(`
+      CREATE TABLE shift_line_items (
+        id TEXT PRIMARY KEY,
+        shift_id TEXT NOT NULL,
+        ndis_line_item_id TEXT NOT NULL,
+        quantity REAL NOT NULL,
+        unit_price REAL NOT NULL,
+        claim_type TEXT DEFAULT 'standard',
+        FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+        FOREIGN KEY (ndis_line_item_id) REFERENCES ndis_line_items(id)
+      );
+    `);
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_shifts_participant ON shifts(participant_id);
+    CREATE INDEX IF NOT EXISTS idx_shifts_staff ON shifts(staff_id);
+    CREATE INDEX IF NOT EXISTS idx_shifts_start ON shifts(start_time);
+    CREATE INDEX IF NOT EXISTS idx_shifts_recurring_group ON shifts(recurring_group_id);
+    CREATE INDEX IF NOT EXISTS idx_shifts_shifter_shift_id ON shifts(shifter_shift_id);
+    CREATE INDEX IF NOT EXISTS idx_shift_line_items_shift ON shift_line_items(shift_id);
+  `);
+}
+
+try {
+  ensureScheduleCoreTables();
+} catch (err) {
+  console.warn('Could not ensure schedule core tables:', err.message);
+}
+
 // Parse rate_type from description for migration backfill
 function parseRateTypeFromDescription(desc) {
   if (!desc || typeof desc !== 'string') return null;
@@ -385,6 +445,12 @@ try {
     }
     if (!userCols.some(c => c.name === 'email_reconnect_required')) {
       db.exec('ALTER TABLE users ADD COLUMN email_reconnect_required INTEGER DEFAULT 0');
+    }
+    if (!userCols.some(c => c.name === 'active_session_id')) {
+      db.exec('ALTER TABLE users ADD COLUMN active_session_id TEXT');
+    }
+    if (!userCols.some(c => c.name === 'active_session_started_at')) {
+      db.exec('ALTER TABLE users ADD COLUMN active_session_started_at TEXT');
     }
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('users migration:', e.message);
@@ -770,6 +836,37 @@ try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at)');
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('audit_events migration:', e.message);
+  }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS incident_register_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org_id TEXT NOT NULL,
+        incident_date TEXT,
+        participant_id INTEGER REFERENCES participants(id),
+        staff_id INTEGER REFERENCES staff(id),
+        location TEXT,
+        description TEXT,
+        immediate_actions TEXT,
+        follow_up TEXT,
+        reported_by TEXT,
+        reported_to TEXT,
+        outcome TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        deleted_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_incident_register_entries_org ON incident_register_entries(org_id, deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_incident_register_entries_date ON incident_register_entries(incident_date);
+    `);
+    const incidentCols = db.prepare('PRAGMA table_info(incident_register_entries)').all();
+    if (!incidentCols.some((c) => c.name === 'deleted_at')) {
+      db.exec('ALTER TABLE incident_register_entries ADD COLUMN deleted_at TEXT');
+    }
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('incident_register_entries migration:', e.message);
   }
 
   try {
@@ -1391,6 +1488,7 @@ try {
         id TEXT PRIMARY KEY,
         staff_id TEXT NOT NULL,
         document_type TEXT NOT NULL,
+        display_name TEXT,
         file_path TEXT NOT NULL,
         onedrive_item_id TEXT,
         onedrive_web_url TEXT,
@@ -1442,6 +1540,9 @@ try {
       }
       if (!staffDocCols.some((c) => c.name === 'onedrive_web_url')) {
         db.exec('ALTER TABLE staff_compliance_documents ADD COLUMN onedrive_web_url TEXT');
+      }
+      if (!staffDocCols.some((c) => c.name === 'display_name')) {
+        db.exec('ALTER TABLE staff_compliance_documents ADD COLUMN display_name TEXT');
       }
     } catch (e) {
       if (!e.message?.includes('duplicate column')) console.warn('staff_compliance_documents OneDrive migration:', e.message);
@@ -1960,6 +2061,11 @@ try {
         version_label TEXT,
         definition_json TEXT NOT NULL,
         variable_schema_json TEXT NOT NULL,
+        branding_slots_json TEXT,
+        variable_slots_json TEXT,
+        sections_json TEXT,
+        page_layout_json TEXT,
+        category TEXT DEFAULT 'custom',
         created_at TEXT DEFAULT (datetime('now'))
       );
       CREATE TABLE IF NOT EXISTS nexus_org_form_templates (
@@ -1969,6 +2075,11 @@ try {
         label TEXT,
         variable_values_json TEXT,
         branding_json TEXT,
+        branding_slots_json TEXT,
+        variable_slots_json TEXT,
+        sections_json TEXT,
+        page_layout_json TEXT,
+        category TEXT DEFAULT 'custom',
         metadata_json TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
@@ -1996,11 +2107,28 @@ try {
       CREATE INDEX IF NOT EXISTS idx_nexus_generated_org_participant ON nexus_generated_form_documents(org_id, participant_id);
       CREATE INDEX IF NOT EXISTS idx_nexus_generated_participant ON nexus_generated_form_documents(participant_id);
     `);
+    const addNexusCol = (table, col, def) => {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+      if (!cols.some((c) => c.name === col)) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+      }
+    };
+    for (const [col, def] of [
+      ['branding_slots_json', 'TEXT'],
+      ['variable_slots_json', 'TEXT'],
+      ['sections_json', 'TEXT'],
+      ['page_layout_json', 'TEXT'],
+      ['category', "TEXT DEFAULT 'custom'"]
+    ]) {
+      addNexusCol('nexus_form_template_masters', col, def);
+      addNexusCol('nexus_org_form_templates', col, def);
+    }
     try {
       db.prepare(
         `UPDATE nexus_form_template_masters
          SET template_key = 'service_agreement_standard_v3',
-             title = 'Standard NDIS Services Agreement (Version 3 structure)'
+             title = 'Standard NDIS Services Agreement (Version 3 structure)',
+             category = CASE WHEN category IS NULL OR category = 'custom' THEN 'service_agreement' ELSE category END
          WHERE template_key = 'service_agreement_spring2_v3'`
       ).run();
     } catch (e) {
