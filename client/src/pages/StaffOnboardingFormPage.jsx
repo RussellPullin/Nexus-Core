@@ -26,6 +26,28 @@ const DOCUMENT_TYPES = [
 
 const ATO_TFD_URL = 'https://www.ato.gov.au/forms-and-instructions/tfn-declaration';
 
+function createExtraDocument() {
+  return { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, display_name: '', file: null, expiry_date: '' };
+}
+
+function cleanStr(v) {
+  return v == null ? '' : String(v).trim();
+}
+
+function composeAddress(fields) {
+  return [fields.street_address, fields.suburb_city, fields.state, fields.postcode]
+    .map(cleanStr)
+    .filter(Boolean)
+    .join(', ');
+}
+
+function assertRequired(fields, requiredKeys, labels) {
+  const missing = requiredKeys.filter((key) => !cleanStr(fields[key]));
+  if (missing.length) {
+    throw new Error(`Please complete: ${missing.map((key) => labels[key] || key).join(', ')}`);
+  }
+}
+
 export default function StaffOnboardingFormPage() {
   const { token } = useParams();
   const [context, setContext] = useState(null);
@@ -41,12 +63,17 @@ export default function StaffOnboardingFormPage() {
     full_legal_name: '',
     date_of_birth: '',
     address: '',
+    street_address: '',
+    suburb_city: '',
+    state: '',
+    postcode: '',
     phone: '',
     emergency_contact_name: '',
     emergency_contact_phone: ''
   });
   const [step2, setStep2] = useState({ role: '', employment_type: 'employee', hourly_rate: '', abn: '', tfn: '', super_fund_name: '', super_member_number: '', bank_bsb: '', bank_account: '' });
   const [complianceDocs, setComplianceDocs] = useState({});
+  const [extraDocuments, setExtraDocuments] = useState(() => [createExtraDocument()]);
   const [policyAck, setPolicyAck] = useState(false);
   const [signature, setSignature] = useState('');
   const [tfdConfirmed, setTfdConfirmed] = useState(false);
@@ -72,6 +99,10 @@ export default function StaffOnboardingFormPage() {
             full_legal_name: inf.full_legal_name || '',
             date_of_birth: inf.date_of_birth || '',
             address: inf.address || '',
+            street_address: inf.street_address || inf.address || '',
+            suburb_city: inf.suburb_city || '',
+            state: inf.state || '',
+            postcode: inf.postcode || '',
             phone: inf.phone || data.staff.phone || '',
             emergency_contact_name: inf.emergency_contact_name || '',
             emergency_contact_phone: inf.emergency_contact_phone || ''
@@ -120,11 +151,12 @@ export default function StaffOnboardingFormPage() {
     }
   };
 
-  const uploadDocument = async (documentType, file, expiryDate) => {
+  const uploadDocument = async (documentType, file, expiryDate, displayName) => {
     const form = new FormData();
     form.append('file', file);
     form.append('document_type', documentType);
     if (expiryDate) form.append('expiry_date', expiryDate);
+    if (displayName) form.append('display_name', displayName);
     const res = await fetch(`${API}/public/staff-onboarding/${token}/upload-document`, {
       method: 'POST',
       credentials: 'include',
@@ -138,40 +170,82 @@ export default function StaffOnboardingFormPage() {
   };
 
   const handleNext = async () => {
-    if (step === 1) await saveStep(1, step1);
-    if (step === 2) await saveStep(2, step2);
-    if (step === 3) {
-      for (const { key } of DOCUMENT_TYPES) {
-        const entry = complianceDocs[key];
-        if (entry?.file) {
-          await uploadDocument(key, entry.file, entry.expiry_date || undefined);
-        }
+    try {
+      if (step === 1) {
+        const nextStep1 = { ...step1, address: composeAddress(step1) };
+        assertRequired(nextStep1, ['first_name', 'last_name', 'date_of_birth', 'street_address', 'suburb_city', 'state', 'postcode', 'phone', 'emergency_contact_name', 'emergency_contact_phone'], STAFF_LABELS);
+        await saveStep(1, nextStep1);
       }
-      await saveStep(3, { documents: Object.keys(complianceDocs).filter((k) => complianceDocs[k]?.file) });
-    }
-    if (step === 4) await saveStep(4, { policy_acknowledged: policyAck, signature });
-    if (step === 5) {
-      await saveStep(5, { tfd_confirmed: tfdConfirmed });
-      setSaving(true);
-      try {
-        const res = await fetch(`${API}/public/staff-onboarding/${token}/submit`, { method: 'POST', credentials: 'include' });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || 'Submit failed');
-        }
-        setSubmitSuccess(true);
-      } finally {
-        setSaving(false);
+      if (step === 2) {
+        const required = ['role', 'hourly_rate', 'bank_bsb', 'bank_account'];
+        if (step2.employment_type === 'subcontractor') required.push('abn');
+        assertRequired(step2, required, STAFF_LABELS);
+        await saveStep(2, step2);
       }
-      return;
+      if (step === 3) {
+        const uploadedDocuments = [];
+        for (const { key, label } of DOCUMENT_TYPES) {
+          const entry = complianceDocs[key];
+          if (entry?.file) {
+            await uploadDocument(key, entry.file, entry.expiry_date || undefined, label);
+            uploadedDocuments.push(key);
+          }
+        }
+        const uploadedExtraDocuments = [];
+        for (const doc of extraDocuments) {
+          const name = cleanStr(doc.display_name);
+          const hasAnyValue = name || doc.file || doc.expiry_date;
+          if (!hasAnyValue) continue;
+          if (!name) throw new Error('Please name each additional document before continuing.');
+          if (!doc.file) throw new Error(`Please choose a file for "${name}".`);
+          await uploadDocument('other', doc.file, doc.expiry_date || undefined, name);
+          uploadedExtraDocuments.push(name);
+        }
+        await saveStep(3, { documents: uploadedDocuments, extra_documents: uploadedExtraDocuments });
+      }
+      if (step === 4) {
+        if (!policyAck) throw new Error('Please confirm you have read and understood all policies and procedures.');
+        assertRequired({ signature }, ['signature'], { signature: 'Digital signature' });
+        await saveStep(4, { policy_acknowledged: policyAck, signature });
+      }
+      if (step === 5) {
+        if (!tfdConfirmed) throw new Error('Please confirm you have completed and submitted your Tax File Declaration.');
+        await saveStep(5, { tfd_confirmed: tfdConfirmed });
+        setSaving(true);
+        try {
+          const res = await fetch(`${API}/public/staff-onboarding/${token}/submit`, { method: 'POST', credentials: 'include' });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Submit failed');
+          }
+          setSubmitSuccess(true);
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
+      setStep((s) => Math.min(5, s + 1));
+    } catch (err) {
+      alert(err.message || 'Please complete all required fields.');
     }
-    setStep((s) => Math.min(5, s + 1));
   };
 
   const handleBack = () => setStep((s) => Math.max(1, s - 1));
 
   const setCompliance = (key, field, value) => {
     setComplianceDocs((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), [field]: value } }));
+  };
+
+  const setExtraDocument = (id, field, value) => {
+    setExtraDocuments((prev) => prev.map((doc) => (doc.id === id ? { ...doc, [field]: value } : doc)));
+  };
+
+  const addExtraDocument = () => {
+    setExtraDocuments((prev) => [...prev, createExtraDocument()]);
+  };
+
+  const removeExtraDocument = (id) => {
+    setExtraDocuments((prev) => (prev.length > 1 ? prev.filter((doc) => doc.id !== id) : [createExtraDocument()]));
   };
 
   const docStatus = (expiryDate) => {
@@ -271,8 +345,22 @@ export default function StaffOnboardingFormPage() {
               <input type="date" className="form-input" value={step1.date_of_birth} onChange={(e) => setStep1({ ...step1, date_of_birth: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>Address *</label>
-              <input className="form-input" value={step1.address} onChange={(e) => setStep1({ ...step1, address: e.target.value })} />
+              <label>{STAFF_LABELS.street_address} *</label>
+              <input className="form-input" value={step1.street_address} onChange={(e) => setStep1({ ...step1, street_address: e.target.value })} placeholder="Unit / street number and street" />
+            </div>
+            <div className="form-group">
+              <label>{STAFF_LABELS.suburb_city} *</label>
+              <input className="form-input" value={step1.suburb_city} onChange={(e) => setStep1({ ...step1, suburb_city: e.target.value })} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div className="form-group">
+                <label>{STAFF_LABELS.state} *</label>
+                <input className="form-input" value={step1.state} onChange={(e) => setStep1({ ...step1, state: e.target.value })} placeholder="e.g. QLD" />
+              </div>
+              <div className="form-group">
+                <label>{STAFF_LABELS.postcode} *</label>
+                <input className="form-input" value={step1.postcode} onChange={(e) => setStep1({ ...step1, postcode: e.target.value })} inputMode="numeric" />
+              </div>
             </div>
             <div className="form-group">
               <label>{STAFF_LABELS.phone} *</label>
@@ -326,11 +414,11 @@ export default function StaffOnboardingFormPage() {
               <input className="form-input" value={step2.super_member_number} onChange={(e) => setStep2({ ...step2, super_member_number: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>{STAFF_LABELS.bank_bsb} (for payroll)</label>
+              <label>{STAFF_LABELS.bank_bsb} (for payroll) *</label>
               <input className="form-input" value={step2.bank_bsb} onChange={(e) => setStep2({ ...step2, bank_bsb: e.target.value })} placeholder="e.g. 000-000" />
             </div>
             <div className="form-group">
-              <label>{STAFF_LABELS.bank_account}</label>
+              <label>{STAFF_LABELS.bank_account} *</label>
               <input className="form-input" type="password" autoComplete="off" value={step2.bank_account} onChange={(e) => setStep2({ ...step2, bank_account: e.target.value })} placeholder="Stored securely" />
             </div>
           </>
@@ -368,6 +456,55 @@ export default function StaffOnboardingFormPage() {
                 )}
               </div>
             ))}
+            <div className="card" style={{ marginBottom: '1rem', padding: '1rem' }}>
+              <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Additional files</h4>
+              <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+                Add certificates, training records, or any other file your employer needs. Name each file so it is easy to identify.
+              </p>
+              {extraDocuments.map((doc, index) => (
+                <div key={doc.id} style={{ borderTop: index === 0 ? 'none' : '1px solid #e2e8f0', paddingTop: index === 0 ? 0 : '1rem', marginTop: index === 0 ? 0 : '1rem' }}>
+                  <div className="form-group">
+                    <label>File name</label>
+                    <input
+                      className="form-input"
+                      value={doc.display_name}
+                      onChange={(e) => setExtraDocument(doc.id, 'display_name', e.target.value)}
+                      placeholder="e.g. Certificate III, Manual handling certificate"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>File</label>
+                    <input
+                      type="file"
+                      accept="image/*,.pdf"
+                      onChange={(e) => setExtraDocument(doc.id, 'file', e.target.files?.[0] || null)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Expiry date (if applicable)</label>
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={doc.expiry_date || ''}
+                      onChange={(e) => setExtraDocument(doc.id, 'expiry_date', e.target.value)}
+                    />
+                  </div>
+                  {doc.expiry_date && (
+                    <span style={{ fontSize: '0.85rem', fontWeight: 500, color: docStatus(doc.expiry_date)?.class === 'expired' ? '#dc2626' : docStatus(doc.expiry_date)?.class === 'expiring' ? '#d97706' : '#16a34a' }}>
+                      {docStatus(doc.expiry_date)?.label}
+                    </span>
+                  )}
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <button type="button" className="btn btn-secondary" onClick={() => removeExtraDocument(doc.id)}>
+                      Remove file
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <button type="button" className="btn btn-secondary" onClick={addExtraDocument} style={{ marginTop: '1rem' }}>
+                Add another file
+              </button>
+            </div>
           </>
         )}
 

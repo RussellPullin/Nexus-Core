@@ -200,6 +200,7 @@ export default function CaseTasksPage() {
       await coordinatorCases.addTask(addingTaskCaseId, payload);
       setAddingTaskCaseId(null);
       setTaskForm(emptyTaskForm);
+      setTaskTitleFromList(true);
       loadCaseWithTasks(addingTaskCaseId);
       loadCases();
       coordinatorCases.suggestedTaskTitles().then((data) => setSuggestedTaskTitles(Array.isArray(data?.titles) ? data.titles : [])).catch(() => {});
@@ -489,7 +490,7 @@ export default function CaseTasksPage() {
                               <>
                                 <select
                                   className="form-input"
-                                  value={taskTitleFromList && suggestedTaskTitles.some((t) => t.title === taskForm.title) ? taskForm.title : '__custom__'}
+                                  value={taskTitleFromList ? taskForm.title : '__custom__'}
                                   onChange={(e) => {
                                     const v = e.target.value;
                                     if (v === '__custom__') {
@@ -562,7 +563,7 @@ export default function CaseTasksPage() {
                         </div>
                         <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
                           <button type="submit" className="btn btn-primary" style={{ fontSize: '0.85rem' }}>Add task</button>
-                          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.85rem' }} onClick={() => { setAddingTaskCaseId(null); setTaskForm(emptyTaskForm); }}>Cancel</button>
+                          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.85rem' }} onClick={() => { setAddingTaskCaseId(null); setTaskForm(emptyTaskForm); setTaskTitleFromList(true); }}>Cancel</button>
                         </div>
                       </form>
                     ) : (

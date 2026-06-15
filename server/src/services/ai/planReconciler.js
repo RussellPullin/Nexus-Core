@@ -75,6 +75,25 @@ function isStatedSupportBudget(raw) {
   return STATED_SUPPORT_RE.test(text);
 }
 
+function normalizeWhitespace(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function findEvidencePosition(textLower, evidenceLower) {
+  const exactPos = textLower.indexOf(evidenceLower);
+  if (exactPos >= 0) return exactPos;
+
+  const normalizedEvidence = normalizeWhitespace(evidenceLower);
+  if (!normalizedEvidence || normalizedEvidence.length < 6) return -1;
+  const escaped = normalizedEvidence
+    .split(' ')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('\\s+');
+  const flexible = new RegExp(escaped);
+  const match = flexible.exec(textLower);
+  return match?.index ?? -1;
+}
+
 function normalizeDeterministicBudgets(budgets) {
   return (Array.isArray(budgets) ? budgets : [])
     .map((b) => {
@@ -125,7 +144,7 @@ function tryValidateLlmRow(textLower, raw, dropped) {
     return null;
   }
 
-  const evidencePos = textLower.indexOf(evidenceLower);
+  const evidencePos = findEvidencePosition(textLower, evidenceLower);
   if (evidencePos < 0) {
     dropped.push({ category, reason: 'evidence_not_found_in_document' });
     return null;
@@ -236,6 +255,16 @@ export function reconcilePlanExtraction({
     const existing = byCategory.get(category);
 
     if (!existing) {
+      if (total != null) {
+        const currentSum = merged.reduce((s, b) => s + b.amount, 0);
+        const currentErr = Math.abs(currentSum - total);
+        const nextSum = currentSum + amount;
+        const nextErr = Math.abs(nextSum - total);
+        if (nextErr >= currentErr) {
+          dropped.push({ category, reason: 'llm_missing_category_would_worsen_total_match' });
+          continue;
+        }
+      }
       const statedSupport = isStatedSupportBudget(raw);
       const next = withCanonicalName({
         category,

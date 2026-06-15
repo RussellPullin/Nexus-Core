@@ -35,11 +35,18 @@ function normalizeAttachmentsForRelay(attachments) {
   });
 }
 
+export function formatEmailFromWithDisplayName(displayName, emailAddress) {
+  const email = String(emailAddress || '').trim().replace(/[\r\n<>]/g, '');
+  const name = String(displayName || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!email || !name) return email;
+  return `"${name.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}" <${email}>`;
+}
+
 /**
  * Send via Azure Function using user's OAuth token.
  * @param {string} userId
  */
-export async function sendEmailViaRelay(userId, to, subject, text, from, attachments) {
+export async function sendEmailViaRelay(userId, to, subject, text, from, attachments, fromName) {
   const rawRelay = process.env.AZURE_EMAIL_FUNCTION_URL || '';
   if (relayHostLooksLikeDocPlaceholder(rawRelay)) {
     const e = new Error(
@@ -112,7 +119,7 @@ export async function sendEmailViaRelay(userId, to, subject, text, from, attachm
     to: Array.isArray(to) ? to : to,
     subject,
     text,
-    from: from || cfg.from,
+    from: fromName ? formatEmailFromWithDisplayName(fromName, from || cfg.from) : (from || cfg.from),
     attachments: normalizeAttachmentsForRelay(attachments || [])
   };
   let res;

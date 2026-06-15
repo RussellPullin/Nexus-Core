@@ -3,7 +3,7 @@
  * Resize shift cards to extend duration in 30-minute increments.
  * Notes on shifts are sent to workers when roster is sent.
  */
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { formatDate } from '../lib/dateUtils';
 
 const SLOTS_PER_HOUR = 2; // 30-minute increments
@@ -46,6 +46,66 @@ function formatSlotTime(slotIndex) {
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
+function buildShiftLayouts(shifts, dateStr) {
+  const sorted = shifts
+    .map((shift) => {
+      const startSlot = slotIndexFromTime(dateStr, shift.start_time);
+      const rawEndSlot = slotIndexFromTime(dateStr, shift.end_time);
+      const endSlot = Math.min(TOTAL_SLOTS, Math.max(startSlot + 1, rawEndSlot));
+      return { shift, startSlot, endSlot };
+    })
+    .sort((a, b) => (
+      a.startSlot - b.startSlot ||
+      a.endSlot - b.endSlot ||
+      String(a.shift.id).localeCompare(String(b.shift.id))
+    ));
+
+  const layouts = new Map();
+  let cluster = [];
+  let clusterEnd = -1;
+
+  const finishCluster = () => {
+    if (!cluster.length) return;
+
+    const laneEnds = [];
+    const clusterLayouts = [];
+
+    cluster.forEach((item) => {
+      let lane = laneEnds.findIndex((end) => end <= item.startSlot);
+      if (lane === -1) {
+        lane = laneEnds.length;
+      }
+      laneEnds[lane] = item.endSlot;
+      clusterLayouts.push({ ...item, lane });
+    });
+
+    const laneCount = Math.max(1, laneEnds.length);
+    clusterLayouts.forEach((item) => {
+      layouts.set(item.shift.id, {
+        lane: item.lane,
+        laneCount,
+        startSlot: item.startSlot,
+        endSlot: item.endSlot
+      });
+    });
+  };
+
+  sorted.forEach((item) => {
+    if (!cluster.length || item.startSlot < clusterEnd) {
+      cluster.push(item);
+      clusterEnd = Math.max(clusterEnd, item.endSlot);
+      return;
+    }
+
+    finishCluster();
+    cluster = [item];
+    clusterEnd = item.endSlot;
+  });
+
+  finishCluster();
+  return layouts;
+}
+
 export default function WeekPlanner({
   weekStart,
   shiftList,
@@ -56,11 +116,11 @@ export default function WeekPlanner({
   onDeleteShift,
   onEditShift
 }) {
-  const days = Array.from({ length: 7 }, (_, i) => {
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart);
     d.setDate(weekStart.getDate() + i);
     return d;
-  });
+  }), [weekStart]);
 
   const [zoom, setZoom] = useState(0.75);
   const [dragging, setDragging] = useState(null);
@@ -81,10 +141,22 @@ export default function WeekPlanner({
     ? participantsList.filter((p) => p.name.toLowerCase().includes(clientSearch.toLowerCase()))
     : participantsList;
 
-  const getShiftsForDay = useCallback((day) => {
-    const dayStr = toLocalDateStr(day);
-    return shiftList.filter((s) => s.start_time?.startsWith(dayStr));
-  }, [shiftList]);
+  const shiftsByDay = useMemo(() => {
+    const byDay = new Map();
+    days.forEach((day) => {
+      const dateStr = toLocalDateStr(day);
+      byDay.set(dateStr, shiftList.filter((s) => s.start_time?.startsWith(dateStr)));
+    });
+    return byDay;
+  }, [days, shiftList]);
+
+  const shiftLayoutsByDay = useMemo(() => {
+    const byDay = new Map();
+    shiftsByDay.forEach((shifts, dateStr) => {
+      byDay.set(dateStr, buildShiftLayouts(shifts, dateStr));
+    });
+    return byDay;
+  }, [shiftsByDay]);
 
   const handleDragStart = (e, type, id, name) => {
     e.dataTransfer.setData('application/json', JSON.stringify({ type, id, name }));
@@ -159,6 +231,56 @@ export default function WeekPlanner({
         } else {
           setPendingDrop({ dateStr, slotIndex, participant_id: data.id, participant_name: client.name, start_time: startTime, end_time: endTime });
         }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDragging(null);
+    }
+  };
+
+  const handleShiftCardDrop = async (e, targetShift) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTarget(null);
+
+    try {
+      const data = JSON.parse(e.dataTransfer.getData('application/json') || '{}');
+      if (!data.type) return;
+
+      if (data.type === 'shift') {
+        const { shiftId, durationSlots } = data;
+        const dateStr = targetShift.start_time?.slice(0, 10);
+        if (!shiftId || !dateStr) return;
+        const startSlot = slotIndexFromTime(dateStr, targetShift.start_time);
+        const duration = Math.max(1, Number(durationSlots) || 1);
+        await onUpdateShift(shiftId, {
+          start_time: toSlotTime(dateStr, startSlot),
+          end_time: toSlotTime(dateStr, startSlot + duration)
+        });
+        return;
+      }
+
+      if (!data.id) return;
+
+      if (data.type === 'worker' && targetShift.participant_id) {
+        await onCreateShift({
+          participant_id: targetShift.participant_id,
+          staff_id: data.id,
+          start_time: targetShift.start_time,
+          end_time: targetShift.end_time,
+          notes: ''
+        });
+        setPendingDrop(null);
+      } else if (data.type === 'client' && targetShift.staff_id) {
+        await onCreateShift({
+          participant_id: data.id,
+          staff_id: targetShift.staff_id,
+          start_time: targetShift.start_time,
+          end_time: targetShift.end_time,
+          notes: ''
+        });
+        setPendingDrop(null);
       }
     } catch (err) {
       console.error(err);
@@ -243,23 +365,34 @@ export default function WeekPlanner({
     setDragging({ type: 'shift', id: shift.id });
   };
 
-  const renderShiftCard = (shift, day) => {
+  const renderShiftCard = (shift, day, layout) => {
     const dateStr = toLocalDateStr(day);
     const startSlot = slotIndexFromTime(dateStr, shift.start_time);
     const endSlot = slotIndexFromTime(dateStr, shift.end_time);
     const span = Math.max(1, endSlot - startSlot);
     const height = span * slotHeight - 2;
+    const laneCount = layout?.laneCount || 1;
+    const lane = layout?.lane || 0;
+    const laneGap = laneCount > 1 ? 2 : 0;
+    const width = laneCount > 1 ? `calc(${100 / laneCount}% - ${laneGap}px)` : undefined;
+    const left = laneCount > 1 ? `calc(${lane * (100 / laneCount)}% + ${lane ? laneGap / 2 : 0}px)` : '2px';
 
     return (
       <div
         key={shift.id}
         className={`week-planner-shift-card ${dragging?.type === 'shift' && dragging?.id === shift.id ? 'dragging' : ''} ${shift.roster_sent_at ? 'week-planner-shift-sent' : ''}`}
         style={{
+          left,
+          right: laneCount > 1 ? 'auto' : '2px',
+          width,
           top: '2px',
           height: `${height}px`,
           minHeight: Math.max(18, slotHeight - 2)
         }}
         draggable
+        onDragOver={(e) => handleDragOver(e, dateStr, startSlot)}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => handleShiftCardDrop(e, shift)}
         onDragStart={(e) => handleShiftDragStart(e, shift, day)}
         onDragEnd={handleDragEnd}
         onClick={(e) => {
@@ -400,7 +533,8 @@ export default function WeekPlanner({
               </div>
               {days.map((day) => {
                 const dateStr = toLocalDateStr(day);
-                const shifts = getShiftsForDay(day);
+                const shifts = shiftsByDay.get(dateStr) || [];
+                const layouts = shiftLayoutsByDay.get(dateStr);
                 const isDropTarget =
                   dropTarget?.dateStr === dateStr && dropTarget?.slotIndex === slotIndex;
 
@@ -430,7 +564,7 @@ export default function WeekPlanner({
                         const sEnd = slotIndexFromTime(dateStr, s.end_time);
                         return slotIndex >= sStart && slotIndex < sEnd && slotIndex === sStart;
                       })
-                      .map((s) => renderShiftCard(s, day))}
+                      .map((s) => renderShiftCard(s, day, layouts?.get(s.id)))}
                   </div>
                 );
               })}

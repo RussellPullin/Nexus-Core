@@ -24,6 +24,17 @@ function parseHourlyRate(raw) {
   return Number.isFinite(n) ? n : null;
 }
 
+function composeAddress(intakeMap) {
+  const address = cleanStr(intakeMap?.address);
+  if (address) return address;
+  return [
+    cleanStr(intakeMap?.street_address),
+    cleanStr(intakeMap?.suburb_city),
+    cleanStr(intakeMap?.state),
+    cleanStr(intakeMap?.postcode)
+  ].filter(Boolean).join(', ');
+}
+
 /**
  * Merge normalized personal + intake map (same shape as client onboarding hydration).
  * @param {Record<string, string>} intakeMap
@@ -52,7 +63,7 @@ export function mergeStaffIntakeForProfile(intakeMap, staffNameFallback = '') {
     last_name: last,
     full_legal_name: fullLegal,
     date_of_birth: m.date_of_birth || '',
-    address: m.address || '',
+    address: composeAddress(m),
     phone: m.phone || '',
     emergency_contact_name: m.emergency_contact_name || '',
     emergency_contact_phone: m.emergency_contact_phone || ''

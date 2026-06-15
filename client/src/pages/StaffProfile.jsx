@@ -411,6 +411,16 @@ export default function StaffProfile() {
     }
   };
 
+  const handleDeleteComplianceDocument = async (docId) => {
+    if (!confirm('Remove this compliance document?')) return;
+    try {
+      await staff.deleteComplianceDocument(id, docId);
+      setComplianceDocs((prev) => prev.filter((doc) => doc.id !== docId));
+    } catch (err) {
+      alert(err.message || 'Failed to remove document');
+    }
+  };
+
   const addAvailabilitySlot = (dayKey) => {
     setEditForm((f) => ({
       ...f,
@@ -830,7 +840,7 @@ export default function StaffProfile() {
               <tbody>
                 {complianceDocs.map((d) => (
                   <tr key={d.id}>
-                    <td>{docTypeLabel(d.document_type)}</td>
+                    <td>{d.display_name || docTypeLabel(d.document_type)}</td>
                     <td>
                       {editingExpiryDocId === d.id ? (
                         <span style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
@@ -860,6 +870,9 @@ export default function StaffProfile() {
                     </td>
                     <td>
                       <a href={`/api/staff/${id}/compliance-documents/${d.id}/file`} target="_blank" rel="noopener noreferrer" className="btn btn-secondary" style={{ fontSize: '0.8rem' }}>View</a>
+                      <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem', marginLeft: '0.35rem' }} onClick={() => handleDeleteComplianceDocument(d.id)}>
+                        Remove
+                      </button>
                     </td>
                   </tr>
                 ))}

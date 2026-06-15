@@ -27,6 +27,7 @@ import {
   persistStaffContractFile
 } from '../services/staffContractFill.service.js';
 import { listPoliciesForStaffOnboarding } from '../services/onboardingDocumentPacks.service.js';
+import { upsertStaffComplianceDocument } from '../services/staffComplianceDocuments.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -36,6 +37,14 @@ const staffUploadsDir = join(dataDir, 'uploads', 'staff');
 const router = Router();
 
 const documentTypes = ['drivers_licence_front', 'drivers_licence_back', 'blue_card', 'yellow_card', 'first_aid', 'car_insurance'];
+const documentTypeLabels = {
+  drivers_licence_front: "Driver's licence (front)",
+  drivers_licence_back: "Driver's licence (back)",
+  blue_card: 'Blue Card (Working With Children Check)',
+  yellow_card: 'Yellow Card (Disability Worker Screening)',
+  first_aid: 'First Aid Certificate',
+  car_insurance: 'Car insurance certificate',
+};
 
 function mimeForStaffUpload(filePath) {
   const ext = (filePath || '').split('.').pop()?.toLowerCase();
@@ -58,21 +67,49 @@ function getOnboarding(staffId) {
   return db.prepare('SELECT * FROM staff_onboarding WHERE staff_id = ?').get(staffId);
 }
 
+function cleanStr(v) {
+  return v == null ? '' : String(v).trim();
+}
+
+function cleanDocumentDisplayName(value, fallback) {
+  const cleaned = cleanStr(value).replace(/\s+/g, ' ').slice(0, 120);
+  return cleaned || fallback || 'Document';
+}
+
+function composeAddressFromFields(fields = {}) {
+  const existing = cleanStr(fields.address);
+  if (existing) return existing;
+  return [fields.street_address, fields.suburb_city, fields.state, fields.postcode]
+    .map(cleanStr)
+    .filter(Boolean)
+    .join(', ');
+}
+
+function validateRequiredFields(fields, requiredKeys) {
+  const missing = requiredKeys.filter((key) => !cleanStr(fields?.[key]));
+  if (missing.length) {
+    const err = new Error(`Missing required field(s): ${missing.join(', ')}`);
+    err.statusCode = 400;
+    err.missingFields = missing;
+    throw err;
+  }
+}
+
 /**
  * Normalize saved keys + legacy full_name into first_name / last_name / full_legal_name for the client.
  */
 function normalizeStaffPersonalFields(intakeFields, staffNameFallback) {
-  let first = String(intakeFields.first_name || '').trim();
-  let last = String(intakeFields.last_name || '').trim();
-  let fullLegal = String(intakeFields.full_legal_name || '').trim();
-  const legacyFull = String(intakeFields.full_name || '').trim();
+  let first = cleanStr(intakeFields.first_name);
+  let last = cleanStr(intakeFields.last_name);
+  let fullLegal = cleanStr(intakeFields.full_legal_name);
+  const legacyFull = cleanStr(intakeFields.full_name);
   if (!first && !last && legacyFull) {
     const p = legacyFull.split(/\s+/);
     first = p[0] || '';
     last = p.slice(1).join(' ') || '';
   }
   if (!fullLegal && legacyFull && !intakeFields.full_legal_name) fullLegal = legacyFull;
-  const fb = String(staffNameFallback || '').trim();
+  const fb = cleanStr(staffNameFallback);
   if (!first && !last && fb && !legacyFull) {
     const p = fb.split(/\s+/);
     first = p[0] || '';
@@ -83,7 +120,11 @@ function normalizeStaffPersonalFields(intakeFields, staffNameFallback) {
     last_name: last,
     full_legal_name: fullLegal,
     date_of_birth: intakeFields.date_of_birth || '',
-    address: intakeFields.address || '',
+    address: composeAddressFromFields(intakeFields),
+    street_address: intakeFields.street_address || '',
+    suburb_city: intakeFields.suburb_city || '',
+    state: intakeFields.state || '',
+    postcode: intakeFields.postcode || '',
     phone: intakeFields.phone || '',
     emergency_contact_name: intakeFields.emergency_contact_name || '',
     emergency_contact_phone: intakeFields.emergency_contact_phone || ''
@@ -161,11 +202,15 @@ router.post('/renew/:token/upload', (req, res, next) => {
     const status = expiryDate ? computeDocStatus(expiryDate) : 'valid';
     const relPath = join('data', 'uploads', 'staff', ctx.staff.id, req.file.filename);
 
-    const id = uuidv4();
-    db.prepare(`
-      INSERT INTO staff_compliance_documents (id, staff_id, document_type, file_path, expiry_date, status)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, ctx.staff.id, documentType, relPath, expiryDate, status);
+    const displayName = cleanDocumentDisplayName(req.body?.display_name, documentTypeLabels[documentType] || documentType);
+    const saved = upsertStaffComplianceDocument({
+      staffId: ctx.staff.id,
+      documentType,
+      displayName,
+      filePath: relPath,
+      expiryDate,
+      status
+    });
 
     db.prepare('DELETE FROM staff_renewal_tokens WHERE token = ?').run(req.params.token);
 
@@ -177,13 +222,22 @@ router.post('/renew/:token/upload', (req, res, next) => {
         buffer: buf,
         originalFilename: req.file.filename,
         mimeType: mimeForStaffUpload(req.file.path),
-        notes: documentType
+        notes: displayName
       });
     } catch (e) {
       console.warn('[staff-onboarding renew] OneDrive push skipped:', e?.message);
     }
 
-    res.json({ ok: true, message: 'Document uploaded. Thank you.', id, document_type: documentType, expiry_date: expiryDate, status });
+    res.json({
+      ok: true,
+      message: 'Document uploaded. Thank you.',
+      id: saved.id,
+      document_type: documentType,
+      display_name: displayName,
+      expiry_date: expiryDate,
+      status,
+      replaced_existing: !saved.created
+    });
   } catch (err) {
     console.error('[renew upload]', err);
     res.status(500).json({ error: err.message });
@@ -290,7 +344,37 @@ router.post('/:token/step', (req, res) => {
     if (!data || step == null) return res.status(400).json({ error: 'step and data required' });
 
     const stepNum = Number(step);
-    const flat = typeof data === 'object' ? flattenForIntake(data) : { 'step': String(data) };
+    const stepData = data && typeof data === 'object' ? { ...data } : data;
+    if (stepNum === 1 && stepData && typeof stepData === 'object') {
+      validateRequiredFields(stepData, [
+        'first_name',
+        'last_name',
+        'date_of_birth',
+        'street_address',
+        'suburb_city',
+        'state',
+        'postcode',
+        'phone',
+        'emergency_contact_name',
+        'emergency_contact_phone'
+      ]);
+      stepData.address = composeAddressFromFields(stepData);
+    }
+    if (stepNum === 2 && stepData && typeof stepData === 'object') {
+      const required = ['role', 'hourly_rate', 'bank_bsb', 'bank_account'];
+      if (stepData.employment_type === 'subcontractor') required.push('abn');
+      validateRequiredFields(stepData, required);
+    }
+    if (stepNum === 4 && stepData && typeof stepData === 'object') {
+      validateRequiredFields(stepData, ['signature']);
+      if (!stepData.policy_acknowledged) {
+        return res.status(400).json({ error: 'Confirm policy acknowledgement before continuing.', missingFields: ['policy_acknowledged'] });
+      }
+    }
+    if (stepNum === 5 && stepData && typeof stepData === 'object' && !stepData.tfd_confirmed) {
+      return res.status(400).json({ error: 'Confirm the Tax File Declaration before submitting.', missingFields: ['tfd_confirmed'] });
+    }
+    const flat = typeof stepData === 'object' ? flattenForIntake(stepData) : { 'step': String(stepData) };
 
     for (const [key, value] of Object.entries(flat)) {
       if (value === undefined || value === null) continue;
@@ -303,19 +387,19 @@ router.post('/:token/step', (req, res) => {
       }
     }
 
-    if (stepNum === 1 && data && typeof data === 'object') {
+    if (stepNum === 1 && stepData && typeof stepData === 'object') {
       const intakeMerged = mergeStaffIntakeForProfile(getStaffIntakeFieldMap(onboarding.id), staff.name);
       applyStaffIntakeToStaffRow(staff.id, intakeMerged, {
         onlyKeys: new Set(['name', 'phone', 'address', 'date_of_birth', 'emergency_contact_name', 'emergency_contact_phone'])
       });
     }
 
-    if (stepNum === 2 && data) {
-      const tfn = data.tfn || data.tax_file_number;
-      const bankBsb = data.bank_bsb;
-      const bankAccount = data.bank_account;
-      const superFund = data.super_fund_name;
-      const superMember = data.super_member_number;
+    if (stepNum === 2 && stepData) {
+      const tfn = stepData.tfn || stepData.tax_file_number;
+      const bankBsb = stepData.bank_bsb;
+      const bankAccount = stepData.bank_account;
+      const superFund = stepData.super_fund_name;
+      const superMember = stepData.super_member_number;
       if (tfn != null || bankBsb != null || bankAccount != null || superFund != null || superMember != null) {
         const existing = db.prepare('SELECT id FROM staff_sensitive_data WHERE staff_id = ?').get(staff.id);
         const encTfn = tfn ? encrypt(String(tfn)) : null;
@@ -339,8 +423,8 @@ router.post('/:token/step', (req, res) => {
       });
     }
 
-    if (stepNum === 4 && data && typeof data === 'object' && data.policy_acknowledged) {
-      const sig = data.signature != null ? String(data.signature) : '';
+    if (stepNum === 4 && stepData && typeof stepData === 'object' && stepData.policy_acknowledged) {
+      const sig = stepData.signature != null ? String(stepData.signature) : '';
       if (onboarding.provider_profile_id) {
         const policies = listPoliciesForStaffOnboarding(onboarding.provider_profile_id, onboarding.document_pack_id);
         db.prepare('DELETE FROM staff_policy_acknowledgements WHERE staff_onboarding_id = ?').run(onboarding.id);
@@ -360,7 +444,7 @@ router.post('/:token/step', (req, res) => {
     res.json({ ok: true, currentStep: nextStep });
   } catch (err) {
     console.error('[staff-onboarding step]', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, missingFields: err.missingFields || undefined });
   }
 });
 
@@ -401,7 +485,9 @@ router.post('/:token/upload-document', (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const documentType = req.body?.document_type || '';
-    if (!documentTypes.includes(documentType)) return res.status(400).json({ error: 'Invalid document_type' });
+    const displayName = cleanDocumentDisplayName(req.body?.display_name, documentTypeLabels[documentType] || documentType);
+    if (!documentTypes.includes(documentType) && documentType !== 'other') return res.status(400).json({ error: 'Invalid document_type' });
+    if (documentType === 'other' && !cleanStr(req.body?.display_name)) return res.status(400).json({ error: 'Please name this document.' });
 
     const staff = validateToken(req.params.token);
     const onboarding = getOnboarding(staff.id);
@@ -416,27 +502,40 @@ router.post('/:token/upload-document', (req, res, next) => {
     const status = expiryDate ? computeDocStatus(expiryDate) : 'valid';
     const relPath = join('data', 'uploads', 'staff', staff.id, req.file.filename);
 
-    const id = uuidv4();
-    db.prepare(`
-      INSERT INTO staff_compliance_documents (id, staff_id, document_type, file_path, expiry_date, status)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, staff.id, documentType, relPath, expiryDate, status);
+    const saved = upsertStaffComplianceDocument({
+      staffId: staff.id,
+      documentType,
+      displayName,
+      filePath: relPath,
+      expiryDate,
+      status
+    });
 
     try {
       const buf = readFileSync(filePath);
-      void tryPushStaffDocument({
-        staffId: staff.id,
-        category: documentType,
-        buffer: buf,
-        originalFilename: req.file.filename,
-        mimeType: mimeForStaffUpload(filePath),
-        notes: documentType
-      });
+      if (saved.created) {
+        void tryPushStaffDocument({
+          staffId: staff.id,
+          category: documentType,
+          buffer: buf,
+          originalFilename: req.file.filename,
+          mimeType: mimeForStaffUpload(filePath),
+          notes: displayName
+        });
+      }
     } catch (e) {
       console.warn('[staff-onboarding upload-document] OneDrive push skipped:', e?.message);
     }
 
-    res.json({ ok: true, id, document_type: documentType, expiry_date: expiryDate, status });
+    res.json({
+      ok: true,
+      id: saved.id,
+      document_type: documentType,
+      display_name: displayName,
+      expiry_date: expiryDate,
+      status,
+      replaced_existing: !saved.created
+    });
   } catch (err) {
     console.error('[staff-onboarding upload-document]', err);
     res.status(500).json({ error: err.message });
@@ -466,6 +565,29 @@ router.post('/:token/submit', async (req, res) => {
     const rawIntake = getStaffIntakeFieldMap(onboarding.id);
     const normPersonal = normalizeStaffPersonalFields(rawIntake, staffRowFull?.name);
     const mergedIntake = { ...rawIntake, ...normPersonal };
+    validateRequiredFields(mergedIntake, [
+      'first_name',
+      'last_name',
+      'date_of_birth',
+      'street_address',
+      'suburb_city',
+      'state',
+      'postcode',
+      'phone',
+      'emergency_contact_name',
+      'emergency_contact_phone',
+      'role',
+      'hourly_rate',
+      'bank_bsb',
+      'bank_account'
+    ]);
+    if (mergedIntake.employment_type === 'subcontractor') validateRequiredFields(mergedIntake, ['abn']);
+    if (mergedIntake.policy_acknowledged !== 'true' && mergedIntake.policy_acknowledged !== true) {
+      return res.status(400).json({ error: 'Confirm policy acknowledgement before submitting.', missingFields: ['policy_acknowledged'] });
+    }
+    if (mergedIntake.tfd_confirmed !== 'true' && mergedIntake.tfd_confirmed !== true) {
+      return res.status(400).json({ error: 'Confirm the Tax File Declaration before submitting.', missingFields: ['tfd_confirmed'] });
+    }
     applyStaffIntakeToStaffRow(staff.id, mergedIntake);
 
     const staffAfterSync = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff.id);
@@ -484,7 +606,7 @@ router.post('/:token/submit', async (req, res) => {
       console.warn('[staff-onboarding submit] persist contract:', e?.message);
     }
 
-    const docs = db.prepare('SELECT id, document_type, file_path FROM staff_compliance_documents WHERE staff_id = ?').all(staff.id);
+    const docs = db.prepare('SELECT id, document_type, display_name, file_path FROM staff_compliance_documents WHERE staff_id = ?').all(staff.id);
 
     for (const doc of docs) {
       const fullPath = join(projectRoot, doc.file_path);
@@ -495,15 +617,15 @@ router.post('/:token/submit', async (req, res) => {
             staffId: staff.id,
             category: doc.document_type,
             buffer: buf,
-            originalFilename: `${doc.document_type}.${(doc.file_path || '').split('.').pop() || 'pdf'}`,
+            originalFilename: `${(doc.display_name || doc.document_type).replace(/[^a-zA-Z0-9-_]+/g, '_')}.${(doc.file_path || '').split('.').pop() || 'pdf'}`,
             mimeType: mimeForStaffUpload(fullPath),
-            notes: `Onboarding submit: ${doc.document_type}`
+            notes: `Onboarding submit: ${doc.display_name || doc.document_type}`
           });
         } catch (e) {
           console.warn('[staff-onboarding submit] org OneDrive push skip:', e?.message);
         }
         try {
-          await uploadFileToStaffFolder(staffRowFull?.name, doc.file_path, fullPath, `${doc.document_type}.${(doc.file_path || '').split('.').pop() || 'pdf'}`);
+          await uploadFileToStaffFolder(staffRowFull?.name, doc.file_path, fullPath, `${(doc.display_name || doc.document_type).replace(/[^a-zA-Z0-9-_]+/g, '_')}.${(doc.file_path || '').split('.').pop() || 'pdf'}`);
         } catch (e) {
           console.warn('[staff-onboarding submit] legacy OneDrive upload skip:', e?.message);
         }
@@ -518,8 +640,9 @@ router.post('/:token/submit', async (req, res) => {
       console.warn('[staff-onboarding submit] Cannot resolve organisation for staff; skipping admin notification', staff.id);
     } else {
       const adminUsers = db
-        .prepare(`SELECT id, email FROM users WHERE role = 'admin' AND org_id = ? ORDER BY created_at ASC`)
+        .prepare(`SELECT id, email, role FROM users WHERE role IN ('admin', 'delegate') AND org_id = ? ORDER BY role = 'admin' DESC, created_at ASC`)
         .all(orgId);
+      const configuredAdminUsers = adminUsers.filter((adminUser) => adminUser?.email && isEmailConfiguredForUser(adminUser.id));
       const subject = 'Staff onboarding complete – ' + (staffRowFull?.name || staff.id);
       let text = `Staff member ${staffRowFull?.name || staff.id} has completed their onboarding form. Review their profile and compliance documents in Nexus Core.`;
       const safeBase = (templateMeta?.displayName || 'Employment-contract').replace(/[^a-zA-Z0-9-_]+/g, '_');
@@ -540,8 +663,14 @@ router.post('/:token/submit', async (req, res) => {
       if (contractAttachments.length) {
         text += '\n\nA prefilled employment contract is attached for signing.';
       }
-      for (const adminUser of adminUsers) {
-        if (!adminUser?.email || !isEmailConfiguredForUser(adminUser.id)) continue;
+      if (configuredAdminUsers.length === 0) {
+        console.warn('[staff-onboarding submit] No configured admin/delegate email recipients for completion notification', {
+          orgId,
+          staffId: staff.id,
+          candidateCount: adminUsers.length
+        });
+      }
+      for (const adminUser of configuredAdminUsers) {
         try {
           await sendEmailViaRelay(adminUser.id, adminUser.email, subject, text, null, contractAttachments.length ? contractAttachments : null);
         } catch (e) {

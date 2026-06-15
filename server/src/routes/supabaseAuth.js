@@ -21,6 +21,7 @@ import {
 import { mergeProductIntoAuthMe, AUTH_USER_SELECT } from '../lib/sessionUserPayload.js';
 import { normalizeOrgProductSelectionFromBody } from '../services/tenantProduct.service.js';
 import { requireAgencyShell } from '../middleware/agencyShell.js';
+import { markActiveSession, SESSION_REPLACED_CODE, SESSION_REPLACED_MESSAGE } from '../lib/activeSession.js';
 
 const router = Router();
 
@@ -118,6 +119,7 @@ router.post('/session', async (req, res) => {
     }
     const accessToken = req.body?.access_token;
     if (!accessToken) return res.status(400).json({ error: 'access_token required' });
+    const restoreOnly = req.body?.restore === true;
 
     const result = await completeSupabaseSignIn(accessToken);
     if (result.needs_org_setup) {
@@ -127,7 +129,17 @@ router.post('/session', async (req, res) => {
       });
     }
 
+    if (restoreOnly) {
+      const active = db
+        .prepare('SELECT active_session_id FROM users WHERE id = ?')
+        .get(result.sessionUser.id)?.active_session_id;
+      if (active && active !== req.sessionID) {
+        return res.status(401).json({ error: SESSION_REPLACED_MESSAGE, code: SESSION_REPLACED_CODE });
+      }
+    }
+
     req.session.user = result.sessionUser;
+    markActiveSession(req, result.sessionUser.id);
     const u = db.prepare(`SELECT ${AUTH_USER_SELECT}, auth_uid FROM users WHERE id = ?`).get(result.sessionUser.id);
 
     res.json({
@@ -166,6 +178,7 @@ router.post('/register-org', async (req, res) => {
     const full = await completeSupabaseSignIn(access_token);
     if (!full.needs_org_setup && full.sessionUser) {
       req.session.user = full.sessionUser;
+      markActiveSession(req, full.sessionUser.id);
     }
 
     const u = full.sessionUser

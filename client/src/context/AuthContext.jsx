@@ -9,9 +9,13 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authNotice, setAuthNotice] = useState('');
 
   useEffect(() => {
-    const onAuthRequired = () => {
+    const onAuthRequired = (event) => {
+      if (event?.detail?.code === 'SESSION_REPLACED') {
+        setAuthNotice('You were signed out because this account was used on another device.');
+      }
       setUser(null);
     };
     if (typeof window !== 'undefined') {
@@ -27,7 +31,12 @@ export function AuthProvider({ children }) {
       try {
         const data = await authApi.me();
         if (!cancelled) setUser(data?.user);
-      } catch {
+      } catch (err) {
+        if (err?.code === 'SESSION_REPLACED') {
+          setAuthNotice('You were signed out because this account was used on another device.');
+          if (!cancelled) setUser(null);
+          return;
+        }
         const restored = await tryRestoreExpressSessionFromSupabase();
         if (cancelled) return;
         if (restored) {
@@ -73,12 +82,14 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     const data = await authApi.login(email, password);
     // Use login payload — avoids a second /auth/me before the session cookie is applied (Safari timing).
+    setAuthNotice('');
     setUser(data?.user ?? null);
     return data;
   };
 
   const register = async (email, password, name, organization_name, products) => {
     const data = await authApi.register(email, password, name, organization_name, products);
+    setAuthNotice('');
     setUser(data?.user ?? null);
     return data;
   };
@@ -96,6 +107,7 @@ export function AuthProvider({ children }) {
     const body = await authApi.supabaseSession(token);
     if (body.needs_org_setup) return { needs_org_setup: true };
     const meData = await authApi.me();
+    setAuthNotice('');
     setUser(meData?.user ?? null);
     return {};
   };
@@ -121,6 +133,7 @@ export function AuthProvider({ children }) {
       const body = await authApi.supabaseSession(data.session.access_token);
       if (body.needs_org_setup) return { needs_org_setup: true };
       const meData = await authApi.me();
+      setAuthNotice('');
       setUser(meData?.user ?? null);
       return {};
     }
@@ -135,6 +148,7 @@ export function AuthProvider({ children }) {
     clearPreferredProductSurface();
     const sb = getSupabaseBrowserClient();
     if (sb) await sb.auth.signOut();
+    setAuthNotice('');
     setUser(null);
   };
 
@@ -165,6 +179,8 @@ export function AuthProvider({ children }) {
       value={{
         user,
         loading,
+        authNotice,
+        clearAuthNotice: () => setAuthNotice(''),
         login,
         register,
         loginWithSupabase,

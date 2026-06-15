@@ -148,12 +148,12 @@ router.post('/participants/:id/intake-token', async (req, res) => {
       try {
         const org = orgId ? db.prepare('SELECT name FROM organisations WHERE id = ?').get(orgId) : null;
         const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
-        const subject = `Complete your intake details – ${orgName}`;
+        const subject = `${orgName}: complete your intake details`;
         let text = `Hi ${participant.name || 'there'},\n\n`;
-        text += `Please complete your intake details using the secure link below. It saves automatically as you go.\n\n`;
+        text += `${orgName} has asked you to complete your intake details using the secure link below. It saves automatically as you go.\n\n`;
         text += `Intake form: ${intakeUrl}\n\n`;
         text += `The link expires on ${new Date(issued.expires_at).toLocaleDateString('en-AU')}. If you have questions reply to this email.\n`;
-        await sendEmailViaRelay(userId, participant.email.trim(), subject, text, null, null);
+        await sendEmailViaRelay(userId, participant.email.trim(), subject, text, null, null, orgName);
         emailSent = true;
       } catch (e) {
         emailError = formatSmtpAuthError(e);
@@ -272,7 +272,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
     const org = pp?.organisation_id ? db.prepare(`SELECT name FROM organisations WHERE id = ?`).get(pp.organisation_id) : null;
     const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
 
-    const subject = `Onboarding documents – ${orgName}`;
+    const subject = `${orgName}: onboarding documents`;
     let text = `Hi ${participant.name || 'there'},\n\n`;
     text += `Please find attached documents from ${orgName}. Keep them for your records.\n\n`;
     text += `Your coordinator will guide you through the rest of onboarding in Nexus Core.\n\n`;
@@ -282,7 +282,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
       ...a,
       content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content
     }));
-    await sendEmailViaRelay(userId, participant.email.trim(), subject, text, null, attachmentsForEmail);
+    await sendEmailViaRelay(userId, participant.email.trim(), subject, text, null, attachmentsForEmail, orgName);
 
     createAuditEvent({
       participantId: req.params.id,

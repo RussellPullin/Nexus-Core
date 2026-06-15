@@ -693,6 +693,7 @@ const PDF_CATEGORY_MAP = {
   'improved learning': '13',
   'improved life choices': '14',
   'choice and control': '14',
+  'improved daily living': '15',
   'improved daily living skills': '15',
   'daily activities': '01',
   'social and community participation': '09',
@@ -738,7 +739,11 @@ const PDF_CATEGORY_LINE_AMOUNT_RULES = [
     name: 'Support Coordination',
     re: /(?:Support Coordination(?:\s+and\s+Psychosocial\s+Recovery\s+Coaches)?|Coordination\s+of\s+Supports|Specialist\s+Support\s+Coordination)\s*[:\u2013\u2014-]\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i
   },
-  { cat: '15', name: 'Improved Daily Living Skills', re: /Improved Daily Living Skills\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
+  {
+    cat: '15',
+    name: 'Improved Daily Living Skills',
+    re: /(?:Improved Daily Living(?:\s+Skills)?(?:\s*\(\s*CB\s+Daily\s+Activit(?:y|ies)\s*\))?|CB\s+Daily\s+Activit(?:y|ies))(?:(?:\s*[:\u2013\u2014-]\s*(?:\n|\s)*)|[^\S\r\n]+)\$([\d,]+(?:\.\d{2})?)/i
+  },
   { cat: '12', name: 'Improved Health and Wellbeing', re: /Improved Health and Wellbeing\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
   { cat: '01', name: 'Assistance with Daily Life', re: /Assistance with Daily Life\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },
   { cat: '09', name: 'Increased Social and Community Participation', re: /Increased Social and Community Participation\s*:\s*(?:\n|\s)*\$([\d,]+(?:\.\d{2})?)/i },

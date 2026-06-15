@@ -171,6 +171,149 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 0.75rem 1rem;
 }
+
+.template-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.85rem;
+}
+
+.template-library-card {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.template-library-card h3 {
+  margin: 0.35rem 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.template-library-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e0f2fe;
+  color: #075985;
+  font-weight: 700;
+}
+
+.template-library-badge {
+  display: inline-flex;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.74rem;
+  text-transform: capitalize;
+}
+
+.branded-template-shell {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.branded-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.branded-template-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.branded-template-list-item span {
+  color: #64748b;
+  font-size: 0.78rem;
+  text-transform: capitalize;
+}
+
+.branded-template-list-item.is-selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.branded-template-editor {
+  display: grid;
+  grid-template-columns: minmax(320px, 40%) minmax(360px, 60%);
+  gap: 1rem;
+  align-items: start;
+}
+
+.branded-template-left,
+.branded-template-preview {
+  min-width: 0;
+}
+
+.branded-template-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+}
+
+.branded-template-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.branded-section-edit {
+  padding: 0.8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.branded-section-edit.is-locked {
+  background: #f8fafc;
+}
+
+.branded-template-iframe {
+  width: 100%;
+  height: 720px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.branded-template-preview-empty {
+  min-height: 420px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  background: #f8fafc;
+}
+
+@media (max-width: 1100px) {
+  .branded-template-shell,
+  .branded-template-editor {
+    grid-template-columns: 1fr;
+  }
+}
 .forms-doc-list {
   list-style: none;
   margin: 0;
@@ -1069,10 +1212,14 @@ input[type="radio"] {
 }
 
 .week-planner-day-col {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   padding: 0.35rem 0.5rem;
   text-align: center;
   border-right: 1px solid #e2e8f0;
   border-bottom: 1px solid #e2e8f0;
+  background: #fff;
 }
 
 .week-planner-day-name {
@@ -1111,6 +1258,7 @@ input[type="radio"] {
 .week-planner-pending-hint {
   position: absolute;
   inset: 2px;
+  z-index: 4;
   font-size: 0.65rem;
   color: var(--brand-muted, #64748b);
   display: flex;
@@ -1194,6 +1342,8 @@ input[type="radio"] {
 }
 
 .week-planner-time-header {
+  top: 0;
+  z-index: 5;
   font-weight: 600;
   color: var(--brand-muted, #64748b);
   font-size: 0.7rem;

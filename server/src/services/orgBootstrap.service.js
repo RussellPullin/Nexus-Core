@@ -42,8 +42,11 @@ export async function seedOrgFromMasters(orgId) {
       .map((r) => [r.master_id, true])
   );
   const insertNexus = db.prepare(
-    `INSERT INTO nexus_org_form_templates (id, org_id, master_id, label, variable_values_json, branding_json, metadata_json)
-     VALUES (?, ?, ?, ?, '{}', ?, '{}')`
+    `INSERT INTO nexus_org_form_templates (
+       id, org_id, master_id, label, variable_values_json, branding_json,
+       branding_slots_json, variable_slots_json, sections_json, page_layout_json, category, metadata_json
+     )
+     VALUES (?, ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, '{}')`
   );
   const tx = db.transaction(() => {
     for (const master of nexusMasters) {
@@ -56,7 +59,12 @@ export async function seedOrgFromMasters(orgId) {
         orgId,
         master.id,
         master.title || 'Untitled template',
-        JSON.stringify(mergeBranding(null))
+        JSON.stringify(mergeBranding(null)),
+        master.branding_slots_json || null,
+        master.variable_slots_json || null,
+        master.sections_json || null,
+        master.page_layout_json || null,
+        master.category || master.template_type || 'custom'
       );
       result.nexus_masters_cloned += 1;
     }

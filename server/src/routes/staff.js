@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
-import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
@@ -32,6 +32,8 @@ import {
 import { availabilityFromRequestBody } from '../lib/staffAvailability.js';
 import { tryPushStaffDocument, resolveOrgIdForStaff } from '../services/orgOnedriveSync.service.js';
 import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
+import { decrypt } from '../lib/crypto.js';
+import { upsertStaffComplianceDocument } from '../services/staffComplianceDocuments.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -39,6 +41,19 @@ const dataDir = process.env.DATA_DIR || join(projectRoot, 'data');
 const staffUploadsDir = join(dataDir, 'uploads', 'staff');
 
 const DOCUMENT_TYPES = ['drivers_licence_front', 'drivers_licence_back', 'blue_card', 'yellow_card', 'first_aid', 'car_insurance'];
+const DOCUMENT_TYPE_LABELS = {
+  drivers_licence_front: "Driver's licence (front)",
+  drivers_licence_back: "Driver's licence (back)",
+  blue_card: 'Blue Card (Working With Children Check)',
+  yellow_card: 'Yellow Card (Disability Worker Screening)',
+  first_aid: 'First Aid Certificate',
+  car_insurance: 'Car insurance certificate',
+};
+
+function cleanDocumentDisplayName(value, fallback) {
+  const cleaned = value == null ? '' : String(value).trim().replace(/\s+/g, ' ').slice(0, 120);
+  return cleaned || fallback || 'Document';
+}
 
 const PAY_RATE_OVERRIDE_KEYS = ['weekday', 'saturday', 'sunday', 'public_holiday', 'evening'];
 const STAFF_INTAKE_FIELD_META = new Map(STAFF_ONBOARDING_FIELD_DEFS.map((def, order) => [def.key, { ...def, order }]));
@@ -637,20 +652,137 @@ router.get('/:id/intake-form', requireAdminOrDelegate, (req, res) => {
       .prepare('SELECT field_key, field_value, source, created_at, updated_at FROM staff_intake_fields WHERE staff_onboarding_id = ? ORDER BY field_key')
       .all(onboarding.id);
 
+    const rowByKey = new Map(rows.map((row) => [row.field_key, row]));
+    const sensitive = db
+      .prepare('SELECT tfn_encrypted, bank_bsb, bank_account_encrypted, super_fund_name, super_member_number, updated_at FROM staff_sensitive_data WHERE staff_id = ?')
+      .get(req.params.id);
+    const sensitiveValues = {};
+    if (sensitive) {
+      try {
+        if (sensitive.tfn_encrypted) sensitiveValues.tfn = decrypt(sensitive.tfn_encrypted);
+      } catch {
+        sensitiveValues.tfn = rowByKey.get('tfn')?.field_value || '';
+      }
+      try {
+        if (sensitive.bank_account_encrypted) sensitiveValues.bank_account = decrypt(sensitive.bank_account_encrypted);
+      } catch {
+        sensitiveValues.bank_account = rowByKey.get('bank_account')?.field_value || '';
+      }
+      if (sensitive.bank_bsb) sensitiveValues.bank_bsb = sensitive.bank_bsb;
+      if (sensitive.super_fund_name) sensitiveValues.super_fund_name = sensitive.super_fund_name;
+      if (sensitive.super_member_number) sensitiveValues.super_member_number = sensitive.super_member_number;
+    }
+
     const sectionsByKey = new Map();
-    for (const row of rows) {
-      const meta = STAFF_INTAKE_FIELD_META.get(row.field_key);
-      const sectionKey = meta?.section || (row.field_key === 'documents' ? 'documents' : 'other');
+    const pushField = (sectionKey, field) => {
       if (!sectionsByKey.has(sectionKey)) sectionsByKey.set(sectionKey, []);
-      sectionsByKey.get(sectionKey).push({
-        key: row.field_key,
-        label: meta?.label || row.field_key.replace(/[._]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-        value: row.field_value,
-        type: meta?.type || 'text',
+      sectionsByKey.get(sectionKey).push(field);
+    };
+
+    for (const def of STAFF_ONBOARDING_FIELD_DEFS) {
+      const meta = STAFF_INTAKE_FIELD_META.get(def.key);
+      const row = rowByKey.get(def.key);
+      const sensitiveValue = Object.prototype.hasOwnProperty.call(sensitiveValues, def.key) ? sensitiveValues[def.key] : undefined;
+      pushField(def.section || 'other', {
+        key: def.key,
+        label: def.label,
+        value: sensitiveValue !== undefined ? sensitiveValue : (row?.field_value || ''),
+        type: def.type || 'text',
         order: meta?.order ?? 999,
+        source: sensitiveValue !== undefined && !row ? 'sensitive_data' : (row?.source || 'not_provided'),
+        updated_at: row?.updated_at || sensitive?.updated_at || null
+      });
+    }
+
+    for (const row of rows) {
+      if (STAFF_INTAKE_FIELD_META.has(row.field_key)) continue;
+      if (row.field_key === 'documents') continue;
+      const sectionKey = row.field_key === 'documents' ? 'documents' : 'other';
+      pushField(sectionKey, {
+        key: row.field_key,
+        label: row.field_key.replace(/[._]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        value: row.field_value,
+        type: 'text',
+        order: 999,
         source: row.source,
         updated_at: row.updated_at
       });
+    }
+
+    const uploadedDocs = db
+      .prepare('SELECT document_type, display_name, file_path, expiry_date, status, uploaded_at FROM staff_compliance_documents WHERE staff_id = ? ORDER BY document_type, uploaded_at DESC')
+      .all(req.params.id);
+    const docsByType = new Map();
+    for (const doc of uploadedDocs) {
+      if (!docsByType.has(doc.document_type)) docsByType.set(doc.document_type, []);
+      docsByType.get(doc.document_type).push(doc);
+    }
+    for (const [idx, documentType] of DOCUMENT_TYPES.entries()) {
+      const docs = docsByType.get(documentType) || [];
+      const value = docs.length
+        ? docs.map((doc) => {
+          const filename = doc.display_name || (doc.file_path || '').split('/').pop() || 'Uploaded document';
+          return [
+            filename,
+            doc.expiry_date ? `expires ${doc.expiry_date}` : null,
+            doc.status ? `status ${doc.status.replace(/_/g, ' ')}` : null,
+            doc.uploaded_at ? `uploaded ${doc.uploaded_at}` : null
+          ].filter(Boolean).join(' - ');
+        }).join('\n')
+        : '';
+      pushField('documents', {
+        key: `document_${documentType}`,
+        label: DOCUMENT_TYPE_LABELS[documentType] || documentType,
+        value,
+        type: 'document',
+        order: 300 + idx,
+        source: docs.length ? 'staff_compliance_documents' : 'not_provided',
+        updated_at: docs[0]?.uploaded_at || null
+      });
+    }
+    const extraDocs = uploadedDocs.filter((doc) => !DOCUMENT_TYPES.includes(doc.document_type));
+    if (extraDocs.length) {
+      pushField('documents', {
+        key: 'document_other',
+        label: 'Other documents',
+        value: extraDocs.map((doc) => [
+          doc.display_name || (doc.file_path || '').split('/').pop() || 'Uploaded document',
+          doc.expiry_date ? `expires ${doc.expiry_date}` : null,
+          doc.status ? `status ${doc.status.replace(/_/g, ' ')}` : null,
+          doc.uploaded_at ? `uploaded ${doc.uploaded_at}` : null
+        ].filter(Boolean).join(' - ')).join('\n'),
+        type: 'document',
+        order: 399,
+        source: 'staff_compliance_documents',
+        updated_at: extraDocs[0]?.uploaded_at || null
+      });
+    }
+
+    const policyAcks = db
+      .prepare(`
+        SELECT a.acknowledged_at, a.signature_data, p.display_name
+        FROM staff_policy_acknowledgements a
+        LEFT JOIN company_policy_files p ON p.id = a.policy_file_id
+        WHERE a.staff_onboarding_id = ?
+        ORDER BY p.display_name, a.acknowledged_at
+      `)
+      .all(onboarding.id);
+    pushField('policy', {
+      key: 'acknowledged_policies',
+      label: 'Acknowledged policy PDFs',
+      value: policyAcks.length
+        ? policyAcks.map((ack) => `${ack.display_name || 'Policy PDF'}${ack.acknowledged_at ? ` - ${ack.acknowledged_at}` : ''}`).join('\n')
+        : '',
+      type: 'text',
+      order: 402,
+      source: policyAcks.length ? 'staff_policy_acknowledgements' : 'not_provided',
+      updated_at: policyAcks[0]?.acknowledged_at || null
+    });
+    const firstPolicySignature = policyAcks.find((ack) => ack.signature_data)?.signature_data;
+    const signatureField = sectionsByKey.get('policy')?.find((field) => field.key === 'signature');
+    if (signatureField && !signatureField.value && firstPolicySignature) {
+      signatureField.value = firstPolicySignature;
+      signatureField.source = 'staff_policy_acknowledgements';
     }
 
     const sections = STAFF_INTAKE_SECTION_ORDER
@@ -932,8 +1064,8 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     const org = profile ? db.prepare('SELECT name FROM organisations WHERE id = ?').get(profile.organisation_id) : null;
     const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
 
-    const subject = `Complete your onboarding – ${orgName}`;
-    let text = `Hi ${s.name},\n\nWelcome! Please complete your staff onboarding by filling out the form at the link below.\n\n`;
+    const subject = `${orgName}: complete your onboarding`;
+    let text = `Hi ${s.name},\n\n${orgName} has invited you to complete your staff onboarding. Please fill out the form at the link below.\n\n`;
     text += `Onboarding form: ${formLink}\n\n`;
     text += `The form will collect your personal and employment details, compliance documents, and policy acknowledgements. Please sign to confirm you have read and acknowledged the company policies (attached).\n\n`;
     text += `If you have any questions, contact your manager.`;
@@ -946,7 +1078,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
       ...a,
       content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content
     }));
-    await sendEmailViaRelay(userId, s.email, subject, text, null, attachmentsForEmail);
+    await sendEmailViaRelay(userId, s.email, subject, text, null, attachmentsForEmail, orgName);
 
     res.json({ ok: true, message: `Onboarding email sent to ${s.email}`, formLink });
   } catch (err) {
@@ -998,9 +1130,10 @@ router.get('/:id/employment-contract', requireAdminOrDelegate, async (req, res) 
 router.get('/:id/compliance-documents/:docId/file', requireAdminOrDelegate, (req, res) => {
   try {
     const { id: staffId, docId } = req.params;
-    const doc = db.prepare('SELECT id, document_type, file_path, onedrive_web_url, onedrive_item_id FROM staff_compliance_documents WHERE id = ? AND staff_id = ?').get(docId, staffId);
+    const doc = db.prepare('SELECT id, document_type, display_name, file_path, onedrive_web_url, onedrive_item_id FROM staff_compliance_documents WHERE id = ? AND staff_id = ?').get(docId, staffId);
     if (!doc) return res.status(404).json({ error: 'Document not found' });
-    const filename = (doc.file_path || '').split('/').pop() || `${doc.document_type}.pdf`;
+    const ext = (doc.file_path || '').split('.').pop() || 'pdf';
+    const filename = doc.display_name ? `${doc.display_name.replace(/[^a-zA-Z0-9-_]+/g, '_')}.${ext}` : ((doc.file_path || '').split('/').pop() || `${doc.document_type}.pdf`);
     const oneDriveUrl = findStaffComplianceOneDriveUrl(staffId, docId, filename);
     if (oneDriveUrl) return res.redirect(oneDriveUrl);
     const absPath = resolve(projectRoot, doc.file_path);
@@ -1016,7 +1149,7 @@ router.get('/:id/compliance-documents/:docId/file', requireAdminOrDelegate, (req
 
 router.get('/:id/compliance-documents', (req, res) => {
   try {
-    const list = db.prepare('SELECT id, document_type, file_path, expiry_date, status, uploaded_at FROM staff_compliance_documents WHERE staff_id = ? ORDER BY document_type').all(req.params.id);
+    const list = db.prepare('SELECT id, document_type, display_name, file_path, expiry_date, status, uploaded_at FROM staff_compliance_documents WHERE staff_id = ? ORDER BY document_type, uploaded_at DESC').all(req.params.id);
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1026,19 +1159,25 @@ router.get('/:id/compliance-documents', (req, res) => {
 router.post('/:id/compliance-documents', requireAdminOrDelegate, complianceUpload.single('file'), async (req, res) => {
   try {
     const staffId = req.params.id;
-    const s = db.prepare('SELECT id FROM staff WHERE id = ?').get(staffId);
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(staffId, orgId);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const documentType = req.body?.document_type || '';
-    if (!DOCUMENT_TYPES.includes(documentType)) return res.status(400).json({ error: 'Invalid document_type' });
+    if (!DOCUMENT_TYPES.includes(documentType) && documentType !== 'other') return res.status(400).json({ error: 'Invalid document_type' });
+    const displayName = cleanDocumentDisplayName(req.body?.display_name, DOCUMENT_TYPE_LABELS[documentType] || documentType);
+    if (documentType === 'other' && !String(req.body?.display_name || '').trim()) return res.status(400).json({ error: 'Please name this document.' });
     const expiryDate = req.body?.expiry_date || null;
     const status = expiryDate ? computeDocStatus(expiryDate) : 'valid';
     const relPath = join('data', 'uploads', 'staff', staffId, req.file.filename);
-    const id = uuidv4();
-    db.prepare(`
-      INSERT INTO staff_compliance_documents (id, staff_id, document_type, file_path, expiry_date, status)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, staffId, documentType, relPath, expiryDate, status);
+    const saved = upsertStaffComplianceDocument({
+      staffId,
+      documentType,
+      displayName,
+      filePath: relPath,
+      expiryDate,
+      status
+    });
     try {
       const absPath = resolve(projectRoot, relPath);
       if (existsSync(absPath)) {
@@ -1049,7 +1188,7 @@ router.post('/:id/compliance-documents', requireAdminOrDelegate, complianceUploa
           buffer: buf,
           originalFilename: req.file.originalname || req.file.filename,
           mimeType: req.file.mimetype || null,
-          notes: `staff_compliance_document:${id}`
+          notes: `staff_compliance_document:${saved.id}:${displayName}`
         });
         if (uploaded?.webUrl || uploaded?.itemId) {
           db.prepare(`
@@ -1057,14 +1196,46 @@ router.post('/:id/compliance-documents', requireAdminOrDelegate, complianceUploa
             SET onedrive_web_url = COALESCE(?, onedrive_web_url),
                 onedrive_item_id = COALESCE(?, onedrive_item_id)
             WHERE id = ?
-          `).run(uploaded?.webUrl || null, uploaded?.itemId || null, id);
+          `).run(uploaded?.webUrl || null, uploaded?.itemId || null, saved.id);
         }
       }
     } catch (e) {
       console.warn('[staff] OneDrive push skipped:', e?.message);
     }
-    const row = db.prepare('SELECT id, document_type, file_path, expiry_date, status, uploaded_at FROM staff_compliance_documents WHERE id = ?').get(id);
-    res.status(201).json(row);
+    const row = db.prepare('SELECT id, document_type, display_name, file_path, expiry_date, status, uploaded_at FROM staff_compliance_documents WHERE id = ?').get(saved.id);
+    res.status(saved.created ? 201 : 200).json({ ...row, replaced_existing: !saved.created });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id/compliance-documents/:docId', requireAdminOrDelegate, (req, res) => {
+  try {
+    const { id: staffId, docId } = req.params;
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(staffId, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+
+    const doc = db
+      .prepare('SELECT id, file_path FROM staff_compliance_documents WHERE id = ? AND staff_id = ?')
+      .get(docId, staffId);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+    db.prepare('DELETE FROM staff_compliance_documents WHERE id = ? AND staff_id = ?').run(docId, staffId);
+
+    if (doc.file_path) {
+      const absPath = resolve(projectRoot, doc.file_path);
+      const absUploadsDir = resolve(staffUploadsDir);
+      if (absPath.startsWith(absUploadsDir) && existsSync(absPath)) {
+        try {
+          unlinkSync(absPath);
+        } catch {
+          /* local cleanup best-effort */
+        }
+      }
+    }
+
+    res.status(204).send();
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1078,7 +1249,7 @@ router.patch('/:id/compliance-documents/:docId', requireAdminOrDelegate, (req, r
     if (!doc) return res.status(404).json({ error: 'Document not found' });
     const status = expiryDate ? computeDocStatus(expiryDate) : 'valid';
     db.prepare('UPDATE staff_compliance_documents SET expiry_date = ?, status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(expiryDate || null, status, docId);
-    const row = db.prepare('SELECT id, document_type, file_path, expiry_date, status, uploaded_at FROM staff_compliance_documents WHERE id = ?').get(docId);
+    const row = db.prepare('SELECT id, document_type, display_name, file_path, expiry_date, status, uploaded_at FROM staff_compliance_documents WHERE id = ?').get(docId);
     res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });

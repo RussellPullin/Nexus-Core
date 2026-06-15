@@ -8,6 +8,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { isSuperAdminEmail } from '../lib/superAdmin.js';
 import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 import { mergeProductIntoAuthMe, AUTH_USER_SELECT } from '../lib/sessionUserPayload.js';
+import { getActiveSessionStatus, markActiveSession, sendSessionAuthFailure } from '../lib/activeSession.js';
 import {
   normalizeOrgProductSelectionFromBody,
   getTenantAnchorFlags,
@@ -122,6 +123,7 @@ router.post('/login', (req, res) => {
       role: normalizeAppRole(user.role),
       org_id: user.org_id || null
     };
+    markActiveSession(req, user.id);
     const u = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(user.id);
     res.json({ user: mergeProductIntoAuthMe(req, u) });
   } catch (err) {
@@ -160,6 +162,7 @@ router.post('/emergency-login', (req, res) => {
       role: normalizeAppRole(user.role),
       org_id: user.org_id || null
     };
+    markActiveSession(req, user.id);
     return res.json({
       user: mergeProductIntoAuthMe(req, user),
       emergency_login: true
@@ -261,6 +264,7 @@ router.post('/register', (req, res) => {
 
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     req.session.user = { id: user.id, email: user.email, name: user.name, role: normalizeAppRole(user.role), org_id: user.org_id || null };
+    markActiveSession(req, user.id);
     const u = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(id);
     res.status(201).json({ user: mergeProductIntoAuthMe(req, u) });
   } catch (err) {
@@ -271,6 +275,10 @@ router.post('/register', (req, res) => {
 router.get('/me', (req, res) => {
   if (!req.session?.user) {
     return res.status(401).json({ error: 'Not authenticated' });
+  }
+  const activeStatus = getActiveSessionStatus(req);
+  if (!activeStatus.ok) {
+    return sendSessionAuthFailure(req, res, activeStatus);
   }
   const user = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(req.session.user.id);
   if (!user) {

@@ -186,6 +186,12 @@ import { requireAuth } from './middleware/auth.js';
 import { requireAgencyShell } from './middleware/agencyShell.js';
 import { requireAdminOrDelegate, requireCoordinatorOrAdmin } from './middleware/roles.js';
 import { startLearningJobs } from './jobs/learningJobs.js';
+import saasBillingDashboardRouter from './routes/saasBillingDashboard.js';
+import { start as startSaasFirstInvoice } from './jobs/saasFirstInvoice.js';
+import { start as startSaasMonthlyInvoices } from './jobs/saasMonthlyInvoices.js';
+import { start as startSaasOverdueCheck } from './jobs/saasOverdueCheck.js';
+import { start as startSaasInvoiceReminders } from './jobs/saasInvoiceReminders.js';
+import { start as startSaasCombinedMonthlyInvoices } from './jobs/saasCombinedMonthlyInvoices.js';
 import { mirrorAllShiftsToNexusSupabase } from './services/nexusPublicShiftsSync.service.js';
 
 const app = express();
@@ -208,6 +214,9 @@ app.use(cors({ origin: true, credentials: true }));
 // Xero webhooks require the raw body for HMAC verification (must be before express.json on this path).
 app.use('/api/webhooks/xero', express.raw({ limit: '2mb', type: '*/*' }), xeroWebhookRouter);
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+// Nexus Core SaaS billing dashboard (guarded by BILLING_AUTH_SECRET)
+app.use('/api/saas/billing', saasBillingDashboardRouter);
 const sessionFilesDir = join(dataDir, 'sessions');
 if (!existsSync(sessionFilesDir)) mkdirSync(sessionFilesDir, { recursive: true });
 app.use(session({
@@ -352,6 +361,18 @@ function startServer(port) {
 
 startServer(PORT);
 startLearningJobs();
+
+// SaaS billing jobs (only run if Supabase env is configured)
+if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  startSaasFirstInvoice();
+  startSaasMonthlyInvoices();
+  startSaasOverdueCheck();
+  startSaasInvoiceReminders();
+  startSaasCombinedMonthlyInvoices();
+  console.log('[nexus] SaaS billing jobs started');
+} else {
+  console.log('[nexus] SaaS billing jobs skipped (SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set)');
+}
 
 const publicShiftsSyncMs = Number(process.env.NEXUS_PUBLIC_SHIFTS_SYNC_INTERVAL_MS);
 if (Number.isFinite(publicShiftsSyncMs) && publicShiftsSyncMs >= 60_000) {

@@ -8,7 +8,16 @@ const RECOVERY_MODE_KEY = 'nexus_supabase_recovery_mode';
 const RECOVERY_REQUESTED_KEY = 'nexus_supabase_recovery_requested';
 
 export default function LoginPage() {
-  const { user, loading, login, register, loginWithSupabase, registerWithSupabase } = useAuth();
+  const {
+    user,
+    loading,
+    authNotice,
+    clearAuthNotice,
+    login,
+    register,
+    loginWithSupabase,
+    registerWithSupabase
+  } = useAuth();
   const navigate = useNavigate();
   const [useCloudAuth, setUseCloudAuth] = useState(false);
   const syncingSupabaseSessionRef = useRef(false);
@@ -46,6 +55,13 @@ export default function LoginPage() {
   useEffect(() => {
     if (!loading && user) navigate('/', { replace: true });
   }, [user, loading, navigate]);
+
+  useEffect(() => {
+    if (authNotice && !isRecoveryMode) {
+      setError('');
+      setInfo(authNotice);
+    }
+  }, [authNotice, isRecoveryMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -95,7 +111,7 @@ export default function LoginPage() {
   }, [isRegister, useCloudAuth]);
 
   const completeSupabaseSession = useCallback(
-    async (accessToken) => {
+    async (accessToken, options = {}) => {
       if (!accessToken || syncingSupabaseSessionRef.current) return;
       if (attemptedTokenRef.current === accessToken) return;
       attemptedTokenRef.current = accessToken;
@@ -103,7 +119,7 @@ export default function LoginPage() {
       setError('');
       setInfo('');
       try {
-        const body = await authApi.supabaseSession(accessToken);
+        const body = await authApi.supabaseSession(accessToken, { restore: options.restore === true });
         if (body?.needs_org_setup) {
           navigate('/setup-org', { replace: true });
           return;
@@ -210,6 +226,7 @@ export default function LoginPage() {
     const syncFromCurrentSession = async () => {
       const fromUrl = await completeUrlCallback();
       if (!active || fromUrl) return;
+      if (authNotice) return;
       const { data, error } = await sb.auth.getSession();
       if (!active || error) return;
       const token = data?.session?.access_token;
@@ -222,7 +239,7 @@ export default function LoginPage() {
         window.sessionStorage.removeItem(RECOVERY_REQUESTED_KEY);
         return;
       }
-      if (token && !isRecoveryMode) await completeSupabaseSession(token);
+      if (token && !isRecoveryMode) await completeSupabaseSession(token, { restore: true });
     };
 
     syncFromCurrentSession();
@@ -239,8 +256,8 @@ export default function LoginPage() {
         return;
       }
       const token = session?.access_token;
-      if (token && !isRecoveryMode) {
-        completeSupabaseSession(token);
+      if (token && !isRecoveryMode && !authNotice) {
+        completeSupabaseSession(token, { restore: true });
       }
     });
 
@@ -248,7 +265,7 @@ export default function LoginPage() {
       active = false;
       sub?.subscription?.unsubscribe();
     };
-  }, [completeSupabaseSession, isRecoveryMode]);
+  }, [authNotice, completeSupabaseSession, isRecoveryMode]);
 
   const handleCompleteRecovery = async () => {
     setError('');
@@ -331,6 +348,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    clearAuthNotice();
     setError('');
     setInfo('');
     setSubmitting(true);
