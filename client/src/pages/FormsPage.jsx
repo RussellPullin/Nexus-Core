@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { forms, onboarding } from '../lib/api';
+import { forms, formTemplates, onboarding } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import ServiceAgreementTemplateEditor from '../components/ServiceAgreementTemplateEditor';
-import OrgFormsCatalog from '../components/OrgFormsCatalog';
-import PolicyLibraryPanel from '../components/PolicyLibraryPanel';
-import FormTemplatesBulkPanel from '../components/FormTemplatesBulkPanel';
+import BrandedFormTemplateEditor from '../components/BrandedFormTemplateEditor';
 import ActivityRiskAssessmentsPanel from '../components/ActivityRiskAssessmentsPanel';
 
 function workflowLabel(w) {
@@ -20,18 +17,24 @@ export default function FormsPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
+  // Nexus template library
+  const [masterTemplates, setMasterTemplates] = useState([]);
+  const [orgTemplates, setOrgTemplates] = useState([]);
+  const [templateCategoryFilter, setTemplateCategoryFilter] = useState('');
+  const [selectedOrgTemplateId, setSelectedOrgTemplateId] = useState(null);
+  const [templateLibraryBusy, setTemplateLibraryBusy] = useState(false);
+
+  // Policy packs
   const [docPackData, setDocPackData] = useState(null);
   const [packWorking, setPackWorking] = useState(false);
   const [newPackName, setNewPackName] = useState('');
   const [newPackWorkflow, setNewPackWorkflow] = useState('both');
   const [expandedPackId, setExpandedPackId] = useState(null);
   const [packItemDraft, setPackItemDraft] = useState([]);
-  const [defaultStaffPack, setDefaultStaffPack] = useState('');
-  const [defaultParticipantPack, setDefaultParticipantPack] = useState('');
-
   const [policyDisplayName, setPolicyDisplayName] = useState('');
   const [policyFile, setPolicyFile] = useState(null);
 
+  // Onboarding settings
   const [settingsState, setSettingsState] = useState(null);
   const [settingsForm, setSettingsForm] = useState({
     onboarding_enabled: false,
@@ -46,11 +49,7 @@ export default function FormsPage() {
   const reloadDocPacks = useCallback(() => {
     forms
       .onboardingDocumentPacks()
-      .then((d) => {
-        setDocPackData(d);
-        setDefaultStaffPack(d.defaults?.default_staff_onboarding_pack_id || '');
-        setDefaultParticipantPack(d.defaults?.default_participant_onboarding_pack_id || '');
-      })
+      .then((d) => setDocPackData(d))
       .catch(() => {});
   }, []);
 
@@ -64,10 +63,7 @@ export default function FormsPage() {
   }, []);
 
   const reloadSettings = useCallback(() => {
-    if (!orgId || !isAdmin) {
-      setSettingsState(null);
-      return;
-    }
+    if (!orgId || !isAdmin) { setSettingsState(null); return; }
     onboarding
       .getProviderSettings(orgId)
       .then((data) => {
@@ -83,6 +79,18 @@ export default function FormsPage() {
       })
       .catch(() => setSettingsState(null));
   }, [orgId, isAdmin]);
+
+  const reloadBrandedTemplates = useCallback(() => {
+    Promise.all([formTemplates.masters(), formTemplates.orgTemplates()])
+      .then(([mastersRes, orgRes]) => {
+        const masters = mastersRes.data || mastersRes.masters || [];
+        const orgItems = orgRes.data || [];
+        setMasterTemplates(masters);
+        setOrgTemplates(orgItems);
+        setSelectedOrgTemplateId((current) => current || orgItems[0]?.id || null);
+      })
+      .catch((err) => setMessage(err.message || 'Could not load templates'));
+  }, []);
 
   const handleSaveSettings = async (e) => {
     e?.preventDefault?.();
@@ -112,7 +120,24 @@ export default function FormsPage() {
     loadContext();
     reloadDocPacks();
     reloadSettings();
-  }, [loadContext, reloadDocPacks, reloadSettings]);
+    reloadBrandedTemplates();
+  }, [loadContext, reloadDocPacks, reloadSettings, reloadBrandedTemplates]);
+
+  const handleCloneMasterTemplate = async (masterId) => {
+    setTemplateLibraryBusy(true);
+    setMessage('');
+    try {
+      const res = await formTemplates.cloneMasterToOrg(masterId);
+      const id = res.data?.org_template_id || res.data?.id;
+      setMessage(res.data?.already_added ? 'Template already added.' : 'Template added to your forms.');
+      await reloadBrandedTemplates();
+      if (id) setSelectedOrgTemplateId(id);
+    } catch (err) {
+      setMessage(err.message || 'Could not add template');
+    } finally {
+      setTemplateLibraryBusy(false);
+    }
+  };
 
   const handleCreatePack = async (e) => {
     e.preventDefault();
@@ -123,7 +148,7 @@ export default function FormsPage() {
     try {
       await forms.createOnboardingDocumentPack({ display_name: name, workflow: newPackWorkflow });
       setNewPackName('');
-      setMessage('Pack created. Select policy PDFs below.');
+      setMessage('Pack created.');
       reloadDocPacks();
     } catch (err) {
       setMessage(err.message || 'Failed to create pack');
@@ -132,33 +157,13 @@ export default function FormsPage() {
     }
   };
 
-  const handleSavePackDefaults = async () => {
-    setPackWorking(true);
-    setMessage('');
-    try {
-      await forms.patchOnboardingDocumentPackDefaults({
-        default_staff_onboarding_pack_id: defaultStaffPack || null,
-        default_participant_onboarding_pack_id: defaultParticipantPack || null
-      });
-      setMessage('Default packs saved.');
-      reloadDocPacks();
-    } catch (err) {
-      setMessage(err.message || 'Failed to save defaults');
-    } finally {
-      setPackWorking(false);
-    }
-  };
-
   const handleDeletePack = async (packId) => {
-    if (!confirm('Delete this pack? Onboarding emails may attach all policy PDFs until you pick another default.')) return;
+    if (!confirm('Delete this pack?')) return;
     setPackWorking(true);
     setMessage('');
     try {
       await forms.deleteOnboardingDocumentPack(packId);
-      if (expandedPackId === packId) {
-        setExpandedPackId(null);
-        setPackItemDraft([]);
-      }
+      if (expandedPackId === packId) { setExpandedPackId(null); setPackItemDraft([]); }
       setMessage('Pack deleted.');
       reloadDocPacks();
     } catch (err) {
@@ -174,7 +179,9 @@ export default function FormsPage() {
   };
 
   const toggleDraftPolicy = (policyFileId) => {
-    setPackItemDraft((prev) => (prev.includes(policyFileId) ? prev.filter((x) => x !== policyFileId) : [...prev, policyFileId]));
+    setPackItemDraft((prev) =>
+      prev.includes(policyFileId) ? prev.filter((x) => x !== policyFileId) : [...prev, policyFileId]
+    );
   };
 
   const handleSavePackItems = async () => {
@@ -194,10 +201,7 @@ export default function FormsPage() {
 
   const handlePolicyUpload = async (e) => {
     e.preventDefault();
-    if (!policyFile) {
-      setMessage('Choose a policy PDF.');
-      return;
-    }
+    if (!policyFile) { setMessage('Choose a policy PDF.'); return; }
     setPackWorking(true);
     setMessage('');
     try {
@@ -214,7 +218,7 @@ export default function FormsPage() {
   };
 
   const handlePolicyDelete = async (policyId, label) => {
-    if (!confirm(`Remove policy “${label}” from the library? Packs that include it will be updated when you save packs again.`)) return;
+    if (!confirm(`Remove policy "${label}"?`)) return;
     setPackWorking(true);
     setMessage('');
     try {
@@ -229,11 +233,15 @@ export default function FormsPage() {
   };
 
   const bannerIsError = (message || '').toLowerCase().includes('fail') || (message || '').toLowerCase().includes('could not');
+  const templateCategories = Array.from(new Set((masterTemplates || []).map((m) => m.category).filter(Boolean))).sort();
+  const filteredMasterTemplates = templateCategoryFilter
+    ? (masterTemplates || []).filter((m) => m.category === templateCategoryFilter)
+    : masterTemplates;
 
   return (
     <div className="forms-page">
       <div className="page-header">
-        <h2>Forms</h2>
+        <h2>Forms &amp; Documents</h2>
       </div>
 
       {context?.organisation_name && (
@@ -242,35 +250,255 @@ export default function FormsPage() {
           {!context.organisation_id && ' (default)'}
         </p>
       )}
-      {context?.message && <p className="forms-muted">{context.message}</p>}
 
+      {message && (
+        <div
+          className="forms-banner"
+          style={{
+            background: bannerIsError ? '#fef2f2' : '#f0fdf4',
+            color: bannerIsError ? '#991b1b' : '#166534',
+            marginBottom: '1rem'
+          }}
+        >
+          {message}
+        </div>
+      )}
+
+      {/* 1. Activity Risk Assessments */}
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
         <h2 className="forms-section-heading">Activity risk assessments</h2>
-        <ActivityRiskAssessmentsPanel onMessage={(msg, isError) => setMessage(msg)} />
+        <ActivityRiskAssessmentsPanel onMessage={(msg) => setMessage(msg)} />
       </section>
 
+      {/* 2. Nexus Template Library */}
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <h2 className="forms-section-heading">Your forms for signing (upload)</h2>
-        <FormTemplatesBulkPanel onMessage={(msg, isError) => setMessage(msg)} />
+        <div className="forms-row" style={{ justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <div>
+            <h2 className="forms-section-heading" style={{ marginBottom: 0 }}>Nexus Template Library</h2>
+            <p className="forms-lede" style={{ marginBottom: 0 }}>
+              Add compliance documents, forms, and agreements to your organisation. Once added, apply your branding in the section below.
+            </p>
+          </div>
+          <select
+            className="form-input"
+            style={{ maxWidth: 220 }}
+            value={templateCategoryFilter}
+            onChange={(e) => setTemplateCategoryFilter(e.target.value)}
+          >
+            <option value="">All categories</option>
+            {templateCategories.map((cat) => (
+              <option key={cat} value={cat}>{cat.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+        </div>
+        <div className="template-library-grid">
+          {(filteredMasterTemplates || []).length === 0 ? (
+            <p className="forms-muted">No templates available.</p>
+          ) : (
+            (filteredMasterTemplates || []).map((master) => (
+              <article key={master.id} className="template-library-card">
+                <div className="template-library-icon" aria-hidden>
+                  {(master.category || 'F').slice(0, 1).toUpperCase()}
+                </div>
+                <div>
+                  <span className="template-library-badge">{(master.category || 'custom').replace(/_/g, ' ')}</span>
+                  <h3>{master.name || master.title}</h3>
+                  <p className="forms-muted">{master.description}</p>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={templateLibraryBusy || master.already_added}
+                    onClick={() => handleCloneMasterTemplate(master.id)}
+                  >
+                    {master.already_added ? 'Already added' : 'Add to my forms'}
+                  </button>
+                </div>
+              </article>
+            ))
+          )}
+        </div>
       </section>
 
+      {/* 3. Your Branded Templates */}
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <h2 className="forms-section-heading">Policy library</h2>
-        <PolicyLibraryPanel onMessage={(msg, isError) => setMessage(msg)} />
+        <h2 className="forms-section-heading">Your branded templates</h2>
+        <p className="forms-lede">
+          Apply your branding, fill in variables, and customise editable sections. Your logo, colours, ABN, and contact details auto-fill from your organisation profile.
+        </p>
+        <div className="branded-template-shell">
+          <aside className="branded-template-list">
+            {(orgTemplates || []).length === 0 ? (
+              <p className="forms-muted">No templates yet — add one from the library above.</p>
+            ) : (
+              (orgTemplates || []).map((template) => (
+                <button
+                  type="button"
+                  key={template.id}
+                  className={`branded-template-list-item${selectedOrgTemplateId === template.id ? ' is-selected' : ''}`}
+                  onClick={() => setSelectedOrgTemplateId(template.id)}
+                >
+                  <strong>{template.name}</strong>
+                  <span>{(template.category || 'custom').replace(/_/g, ' ')}</span>
+                </button>
+              ))
+            )}
+          </aside>
+          <main className="branded-template-editor-wrap">
+            {selectedOrgTemplateId ? (
+              <BrandedFormTemplateEditor
+                key={selectedOrgTemplateId}
+                templateId={selectedOrgTemplateId}
+                onMessage={(msg) => setMessage(msg)}
+                onSaved={reloadBrandedTemplates}
+              />
+            ) : (
+              <p className="forms-muted">Choose a template to edit.</p>
+            )}
+          </main>
+        </div>
       </section>
 
-      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <h2 className="forms-section-heading">Your forms</h2>
-        <OrgFormsCatalog onMessage={(msg, isError) => setMessage(msg)} />
-      </section>
+      {/* 4. Policy packs */}
+      {!loading && (
+        <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
+          <h2 className="forms-section-heading">Policy packs — onboarding</h2>
+          <p className="forms-lede">
+            Upload your policy PDFs and group them into packs that attach to staff or participant onboarding emails.
+          </p>
 
-      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <h2 className="forms-section-heading">Services Agreement template</h2>
-        <ServiceAgreementTemplateEditor
-          onMessage={(msg, isError) => setMessage(msg)}
-        />
-      </section>
+          <form onSubmit={handlePolicyUpload} className="forms-add-row" style={{ marginBottom: '1rem' }}>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Display name (optional)"
+              value={policyDisplayName}
+              onChange={(e) => setPolicyDisplayName(e.target.value)}
+              style={{ flex: 1, minWidth: 160 }}
+            />
+            <input type="file" accept=".pdf" onChange={(e) => setPolicyFile(e.target.files?.[0] || null)} />
+            <button type="submit" className="btn btn-primary" disabled={packWorking || !policyFile}>
+              {packWorking ? 'Uploading…' : 'Upload policy PDF'}
+            </button>
+          </form>
 
+          {(docPackData?.policy_files || []).length > 0 && (
+            <>
+              <h3 className="forms-subheading">Uploaded policies</h3>
+              <div className="table-wrap">
+                <table className="table-condensed forms-data-table">
+                  <thead>
+                    <tr><th>Name</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {(docPackData?.policy_files || []).map((f) => (
+                      <tr key={f.id}>
+                        <td>{f.display_name}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ color: '#b91c1c' }}
+                            disabled={packWorking}
+                            onClick={() => handlePolicyDelete(f.id, f.display_name)}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          <form onSubmit={handleCreatePack} className="forms-add-row" style={{ marginTop: '1.25rem' }}>
+            <input
+              className="form-input"
+              value={newPackName}
+              onChange={(e) => setNewPackName(e.target.value)}
+              placeholder="New pack name"
+              style={{ flex: 1, minWidth: 160 }}
+            />
+            <select
+              className="form-input"
+              value={newPackWorkflow}
+              onChange={(e) => setNewPackWorkflow(e.target.value)}
+              style={{ maxWidth: 220 }}
+            >
+              <option value="both">Staff and participant</option>
+              <option value="staff_onboarding">Staff only</option>
+              <option value="participant_onboarding">Participant only</option>
+            </select>
+            <button type="submit" className="btn btn-primary" disabled={packWorking || !newPackName.trim()}>
+              Create pack
+            </button>
+          </form>
+
+          <div className="forms-pack-list">
+            {(docPackData?.packs || []).map((p) => (
+              <div key={p.id} className="forms-pack-card">
+                <div className="forms-pack-head">
+                  <div>
+                    <strong>{p.display_name}</strong>
+                    <span className="forms-muted" style={{ marginLeft: 8, fontSize: '0.9rem' }}>
+                      {workflowLabel(p.workflow)} · {p.item_count ?? 0} item(s)
+                    </span>
+                  </div>
+                  <div className="forms-pack-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => openPackEditor(p)}
+                      disabled={packWorking}
+                    >
+                      {expandedPackId === p.id ? 'Editing…' : 'Edit pack'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ color: '#b91c1c' }}
+                      onClick={() => handleDeletePack(p.id)}
+                      disabled={packWorking}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+                {expandedPackId === p.id && (
+                  <div className="forms-pack-body">
+                    <p className="forms-muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+                      Tick policies to include in this pack.
+                    </p>
+                    <div className="forms-policy-checks">
+                      {(docPackData?.policy_files || []).map((f) => (
+                        <label key={f.id} className="forms-policy-check">
+                          <input
+                            type="checkbox"
+                            checked={packItemDraft.includes(f.id)}
+                            onChange={() => toggleDraftPolicy(f.id)}
+                          />
+                          {f.display_name}
+                        </label>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={packWorking}
+                      onClick={handleSavePackItems}
+                    >
+                      Save pack
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 5. Onboarding settings */}
       {isAdmin && orgId && (
         <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
           <h2 className="forms-section-heading">Onboarding settings</h2>
@@ -279,10 +507,7 @@ export default function FormsPage() {
           </p>
 
           {settingsState?.readiness && !settingsState.readiness.ready && (
-            <div
-              className="forms-banner"
-              style={{ background: '#fef2f2', color: '#991b1b', marginBottom: '1rem' }}
-            >
+            <div className="forms-banner" style={{ background: '#fef2f2', color: '#991b1b', marginBottom: '1rem' }}>
               Not ready to send onboarding yet: {settingsState.readiness.reason}
             </div>
           )}
@@ -355,186 +580,6 @@ export default function FormsPage() {
               )}
             </div>
           </form>
-        </section>
-      )}
-
-      {message && (
-        <div
-          className="forms-banner"
-          style={{ background: bannerIsError ? '#fef2f2' : '#f0fdf4', color: bannerIsError ? '#991b1b' : '#166534' }}
-        >
-          {message}
-        </div>
-      )}
-
-      {loading ? (
-        <p>Loading…</p>
-      ) : (
-        <section className="card forms-section">
-          <h2 className="forms-section-heading">Policies and packs — staff and participant onboarding</h2>
-          <p className="forms-lede">
-            Policy PDFs can be grouped into packs and attached to staff welcome mail and participant onboarding mail. Choose whether each pack applies to staff onboarding, participant onboarding, or both.
-          </p>
-
-          <form onSubmit={handlePolicyUpload} className="forms-add-row" style={{ marginBottom: '1rem' }}>
-            <input
-              type="text"
-              className="form-input"
-              placeholder="Display name (optional)"
-              value={policyDisplayName}
-              onChange={(e) => setPolicyDisplayName(e.target.value)}
-              style={{ flex: 1, minWidth: 160 }}
-            />
-            <input type="file" accept=".pdf" onChange={(e) => setPolicyFile(e.target.files?.[0] || null)} />
-            <button type="submit" className="btn btn-primary" disabled={packWorking || !policyFile}>
-              {packWorking ? 'Uploading…' : 'Upload policy PDF'}
-            </button>
-          </form>
-
-          <h3 className="forms-subheading">Policy library</h3>
-          {(docPackData?.policy_files || []).length === 0 ? (
-            <p className="forms-muted">No policy PDFs yet. Upload one above.</p>
-          ) : (
-            <div className="table-wrap">
-              <table className="table-condensed forms-data-table">
-                <thead>
-                  <tr>
-                    <th>Display name</th>
-                    <th>Id</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(docPackData?.policy_files || []).map((f) => (
-                    <tr key={f.id}>
-                      <td>{f.display_name}</td>
-                      <td className="forms-muted" style={{ fontSize: '0.85rem' }}>
-                        {f.id.slice(0, 8)}…
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ color: '#b91c1c' }}
-                          disabled={packWorking}
-                          onClick={() => handlePolicyDelete(f.id, f.display_name)}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="forms-pack-defaults" style={{ marginTop: '1.25rem' }}>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="forms-label">Default pack — staff onboarding email</label>
-              <select
-                className="form-input"
-                value={defaultStaffPack}
-                onChange={(e) => setDefaultStaffPack(e.target.value)}
-                disabled={packWorking}
-              >
-                <option value="">None — attach all policy PDFs</option>
-                {(docPackData?.packs || [])
-                  .filter((p) => p.workflow === 'staff_onboarding' || p.workflow === 'both')
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.display_name} ({p.item_count ?? 0})
-                    </option>
-                  ))}
-              </select>
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="forms-label">Default pack — participant onboarding email</label>
-              <select
-                className="form-input"
-                value={defaultParticipantPack}
-                onChange={(e) => setDefaultParticipantPack(e.target.value)}
-                disabled={packWorking}
-              >
-                <option value="">None — attach all policy PDFs</option>
-                {(docPackData?.packs || [])
-                  .filter((p) => p.workflow === 'participant_onboarding' || p.workflow === 'both')
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.display_name} ({p.item_count ?? 0})
-                    </option>
-                  ))}
-              </select>
-            </div>
-            <button type="button" className="btn btn-secondary" disabled={packWorking} onClick={handleSavePackDefaults}>
-              Save defaults
-            </button>
-          </div>
-
-          <form onSubmit={handleCreatePack} className="forms-add-row" style={{ marginTop: '1.25rem' }}>
-            <input
-              className="form-input"
-              value={newPackName}
-              onChange={(e) => setNewPackName(e.target.value)}
-              placeholder="New pack name"
-              style={{ flex: 1, minWidth: 160 }}
-            />
-            <select className="form-input" value={newPackWorkflow} onChange={(e) => setNewPackWorkflow(e.target.value)} style={{ maxWidth: 220 }}>
-              <option value="both">Staff and participant</option>
-              <option value="staff_onboarding">Staff only</option>
-              <option value="participant_onboarding">Participant only</option>
-            </select>
-            <button type="submit" className="btn btn-primary" disabled={packWorking || !newPackName.trim()}>
-              Create pack
-            </button>
-          </form>
-
-          <div className="forms-pack-list">
-            {(docPackData?.packs || []).map((p) => (
-              <div key={p.id} className="forms-pack-card">
-                <div className="forms-pack-head">
-                  <div>
-                    <strong>{p.display_name}</strong>
-                    <span className="forms-muted" style={{ marginLeft: 8, fontSize: '0.9rem' }}>
-                      {workflowLabel(p.workflow)} · {p.item_count ?? 0} item(s)
-                    </span>
-                  </div>
-                  <div className="forms-pack-actions">
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => openPackEditor(p)} disabled={packWorking}>
-                      {expandedPackId === p.id ? 'Editing…' : 'Edit pack'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ color: '#b91c1c' }}
-                      onClick={() => handleDeletePack(p.id)}
-                      disabled={packWorking}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-                {expandedPackId === p.id && (
-                  <div className="forms-pack-body">
-                    <p className="forms-muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-                      Tick policy PDFs to include in this pack.
-                    </p>
-                    <div className="forms-policy-checks">
-                      {(docPackData?.policy_files || []).map((f) => (
-                        <label key={f.id} className="forms-policy-check">
-                          <input type="checkbox" checked={packItemDraft.includes(f.id)} onChange={() => toggleDraftPolicy(f.id)} />
-                          {f.display_name}
-                        </label>
-                      ))}
-                    </div>
-                    <button type="button" className="btn btn-primary btn-sm" disabled={packWorking} onClick={handleSavePackItems}>
-                      Save pack
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
         </section>
       )}
     </div>
