@@ -260,7 +260,7 @@ export function buildBrandedFormRenderModel(orgTemplateId, participantId, databa
   };
   const sections = mergeSections(row.master_sections_json, row.sections_json);
   const orgDerivedVariables = {
-    org_name: variableMap.org_trading_name || variableMap.org_legal_name || org.trading_name || org.name || '',
+    org_name: variableMap.org_legal_name || variableMap.org_trading_name || org.legal_name || org.trading_name || org.name || '',
     abn: variableMap.org_abn || org.abn || '',
     address: variableMap.org_address || org.address || '',
     phone: variableMap.org_phone || org.phone || '',

@@ -162,6 +162,24 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
         await formTemplates.uploadInstanceLogo(instanceId, logoFile);
         setLogoFile(null);
       }
+      // Sync key org fields to the organisations table so they persist across
+      // all document renderers and aren't overridden by stale DB data.
+      try {
+        const orgUpdate = {};
+        if (variable_values.org_legal_name?.trim()) {
+          orgUpdate.legal_name  = variable_values.org_legal_name.trim();
+          orgUpdate.trading_name = variable_values.org_legal_name.trim(); // keep in sync
+        }
+        if (variable_values.org_abn?.trim())     orgUpdate.abn     = variable_values.org_abn.trim();
+        if (variable_values.org_address?.trim()) orgUpdate.address = variable_values.org_address.trim();
+        if (variable_values.org_email?.trim())   orgUpdate.email   = variable_values.org_email.trim();
+        if (variable_values.org_phone?.trim())   orgUpdate.phone   = variable_values.org_phone.trim();
+        if (Object.keys(orgUpdate).length > 0) {
+          await organisations.updateMyProfile(orgUpdate);
+        }
+      } catch {
+        // Org table sync failure doesn't block template save
+      }
       notify('Service agreement template saved.');
       await load();
     } catch (e) {
@@ -173,7 +191,7 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
 
   const handleDownloadSample = async () => {
     if (!instanceId) return;
-    // Always save current values before generating sample so the PDF reflects what's on screen
+    // Always save + sync before generating so the PDF reflects what's on screen
     setSaving(true);
     try {
       const variable_values = { ...values };
@@ -188,8 +206,21 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
           document_next_review_date: metadata.document_next_review_date || null
         }
       });
+      // Sync to organisations table so all renderers use the correct name
+      try {
+        const orgUpdate = {};
+        if (variable_values.org_legal_name?.trim()) {
+          orgUpdate.legal_name  = variable_values.org_legal_name.trim();
+          orgUpdate.trading_name = variable_values.org_legal_name.trim();
+        }
+        if (variable_values.org_abn?.trim())     orgUpdate.abn     = variable_values.org_abn.trim();
+        if (variable_values.org_address?.trim()) orgUpdate.address = variable_values.org_address.trim();
+        if (variable_values.org_email?.trim())   orgUpdate.email   = variable_values.org_email.trim();
+        if (variable_values.org_phone?.trim())   orgUpdate.phone   = variable_values.org_phone.trim();
+        if (Object.keys(orgUpdate).length > 0) await organisations.updateMyProfile(orgUpdate);
+      } catch { /* non-blocking */ }
     } catch {
-      // Save failed — proceed anyway so the user still gets a PDF
+      // Save failed — still open the PDF with whatever is currently in DB
     } finally {
       setSaving(false);
     }

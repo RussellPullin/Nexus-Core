@@ -346,46 +346,66 @@ export default function FormsPage() {
             gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
             gap: '0.65rem'
           }}>
-            {filteredLibrary.map((doc) => (
-              <div
-                key={doc.id || doc.slug}
-                style={{
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 8,
-                  padding: '0.75rem',
-                  background: '#fff',
-                  display: 'flex',
-                  gap: '0.65rem',
-                  alignItems: 'flex-start'
-                }}
-              >
-                <span style={{ fontSize: '1.2rem', flexShrink: 0, marginTop: 1 }}>
-                  {CATEGORY_ICONS[doc.category] || '📄'}
-                </span>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'baseline', flexWrap: 'wrap', marginBottom: '0.2rem' }}>
-                    <span style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                      color: '#64748b',
-                      background: '#f1f5f9',
-                      borderRadius: 4,
-                      padding: '0.1rem 0.35rem'
-                    }}>
-                      {CATEGORY_LABELS[doc.category] || doc.category}
-                    </span>
-                    {doc.signature_count > 0 && (
-                      <span style={{ fontSize: '0.7rem', color: '#7c3aed' }}>✍️ Signature</span>
-                    )}
+            {filteredLibrary.map((doc) => {
+              const docId = doc.id || doc.slug;
+              const previewUrl = documentLibrary.previewMasterUrl(docId);
+              return (
+                <button
+                  key={docId}
+                  type="button"
+                  onClick={() => window.open(previewUrl, '_blank', 'noopener,noreferrer')}
+                  title={`Open ${doc.display_name || doc.name}`}
+                  style={{
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    padding: '0.75rem',
+                    background: '#fff',
+                    display: 'flex',
+                    gap: '0.65rem',
+                    alignItems: 'flex-start',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.12s, box-shadow 0.12s',
+                    width: '100%'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = '#93c5fd';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(59,130,246,0.10)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = '#e2e8f0';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <span style={{ fontSize: '1.2rem', flexShrink: 0, marginTop: 1 }}>
+                    {CATEGORY_ICONS[doc.category] || '📄'}
+                  </span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'baseline', flexWrap: 'wrap', marginBottom: '0.2rem' }}>
+                      <span style={{
+                        fontSize: '0.7rem',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        color: '#64748b',
+                        background: '#f1f5f9',
+                        borderRadius: 4,
+                        padding: '0.1rem 0.35rem'
+                      }}>
+                        {CATEGORY_LABELS[doc.category] || doc.category}
+                      </span>
+                      {doc.signature_count > 0 && (
+                        <span style={{ fontSize: '0.7rem', color: '#7c3aed' }}>✍️ Signature</span>
+                      )}
+                    </div>
+                    <strong style={{ display: 'block', fontSize: '0.88rem', color: '#1e293b', lineHeight: 1.3 }}>
+                      {doc.display_name || doc.name}
+                    </strong>
                   </div>
-                  <strong style={{ display: 'block', fontSize: '0.88rem', color: '#1e293b', lineHeight: 1.3 }}>
-                    {doc.display_name || doc.name}
-                  </strong>
-                </div>
-              </div>
-            ))}
+                  <span style={{ fontSize: '0.75rem', color: '#3b82f6', flexShrink: 0, marginTop: 2 }}>↗</span>
+                </button>
+              );
+            })}
           </div>
         )}
 
