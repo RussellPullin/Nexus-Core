@@ -171,8 +171,28 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
     }
   };
 
-  const handleDownloadSample = () => {
+  const handleDownloadSample = async () => {
     if (!instanceId) return;
+    // Always save current values before generating sample so the PDF reflects what's on screen
+    setSaving(true);
+    try {
+      const variable_values = { ...values };
+      variable_values.document_date_approved = metadata.document_date_approved || '';
+      variable_values.document_review_date = metadata.document_review_date || '';
+      variable_values.document_next_review_date = metadata.document_next_review_date || '';
+      await formTemplates.updateInstance(instanceId, {
+        variable_values,
+        metadata: {
+          document_date_approved: metadata.document_date_approved || null,
+          document_review_date: metadata.document_review_date || null,
+          document_next_review_date: metadata.document_next_review_date || null
+        }
+      });
+    } catch {
+      // Save failed — proceed anyway so the user still gets a PDF
+    } finally {
+      setSaving(false);
+    }
     window.open(formTemplates.previewPdfUrl(instanceId), '_blank', 'noopener,noreferrer');
   };
 
@@ -193,8 +213,8 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
   return (
     <div className="sa-template-editor">
       <p className="forms-lede">
-        Standard NDIS <strong>Services Agreement (Version 3)</strong>. Set your organisation details here. Participant fields stay blank on the
-        template preview and are filled from each participant’s profile and onboarding intake when you generate an agreement.
+        Set your organisation details here once. Participant fields stay blank on the
+        sample preview and are filled from each participant’s profile and intake when you generate an agreement.
       </p>
 
       <div className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
@@ -378,16 +398,16 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
 
       <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
         <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSave}>
-          {saving ? 'Saving…' : 'Save template'}
+          {saving ? 'Saving…' : 'Save'}
         </button>
         <button
           type="button"
           className="btn btn-secondary"
-          disabled={!templateReady}
+          disabled={!templateReady || saving}
           onClick={handleDownloadSample}
-          title={templateReady ? 'Download a sample PDF with your organisation details (participant fields blank)' : 'Add your organisation name first'}
+          title={templateReady ? 'Saves your details then downloads a sample PDF (participant fields blank)' : 'Add your organisation name first'}
         >
-          Sample
+          {saving ? 'Saving…' : 'Save & download sample'}
         </button>
         {!templateReady ? (
           <span className="forms-muted" style={{ fontSize: '0.85rem' }}>Add organisation name to enable download.</span>
