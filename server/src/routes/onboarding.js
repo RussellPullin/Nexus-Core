@@ -142,18 +142,26 @@ router.post('/participants/:id/intake-token', async (req, res) => {
     const baseUrl = (process.env.FRONTEND_BASE_URL || process.env.BASE_URL || 'http://localhost:5174').replace(/\/$/, '');
     const intakeUrl = `${baseUrl}/intake/${issued.token}`;
 
+    // send_to_email overrides the participant's email on file (e.g. send to guardian/coordinator)
+    const sendToEmail = (req.body?.send_to_email || '').trim() || participant.email?.trim() || '';
+    const sendToNote  = (req.body?.send_to_note || '').trim(); // optional label e.g. "Parent: Jane Smith"
+
     let emailSent = false;
     let emailError = null;
-    if (!req.body?.skip_email && participant.email?.trim() && userId && isEmailConfiguredForUser(userId)) {
+    if (!req.body?.skip_email && sendToEmail && userId && isEmailConfiguredForUser(userId)) {
       try {
         const org = orgId ? db.prepare('SELECT name FROM organisations WHERE id = ?').get(orgId) : null;
         const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
-        const subject = `${orgName}: complete your intake details`;
-        let text = `Hi ${participant.name || 'there'},\n\n`;
-        text += `${orgName} has asked you to complete your intake details using the secure link below. It saves automatically as you go.\n\n`;
+        const subject = `${orgName}: complete ${participant.name ? `${participant.name}'s` : 'your'} intake details`;
+        let text = `Hi ${sendToNote ? sendToNote.split(':')[0] : (participant.name || 'there')},\n\n`;
+        if (sendToNote) {
+          text += `This intake form is for ${participant.name || 'a participant'} at ${orgName}.\n\n`;
+        } else {
+          text += `${orgName} has asked you to complete your intake details using the secure link below. It saves automatically as you go.\n\n`;
+        }
         text += `Intake form: ${intakeUrl}\n\n`;
         text += `The link expires on ${new Date(issued.expires_at).toLocaleDateString('en-AU')}. If you have questions reply to this email.\n`;
-        await sendEmailViaRelay(userId, participant.email.trim(), subject, text, null, null, orgName);
+        await sendEmailViaRelay(userId, sendToEmail, subject, text, null, null, orgName);
         emailSent = true;
       } catch (e) {
         emailError = formatSmtpAuthError(e);
@@ -167,7 +175,7 @@ router.post('/participants/:id/intake-token', async (req, res) => {
       eventType: 'participant_intake_token_issued',
       entityType: 'participant',
       entityId: req.params.id,
-      newValue: { expires_at: issued.expires_at, email_sent: emailSent },
+      newValue: { expires_at: issued.expires_at, email_sent: emailSent, send_to_email: sendToEmail || null },
       sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
       userAgent: req.headers['user-agent'] || null
     });
@@ -176,7 +184,8 @@ router.post('/participants/:id/intake-token', async (req, res) => {
       url: intakeUrl,
       expires_at: issued.expires_at,
       email_sent: emailSent,
-      email_error: emailError
+      email_error: emailError,
+      send_to_email: sendToEmail || null
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

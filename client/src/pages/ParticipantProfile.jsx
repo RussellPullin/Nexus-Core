@@ -199,6 +199,10 @@ export default function ParticipantProfile() {
   const [intakeIssuing, setIntakeIssuing] = useState(false);
   const [intakeLinkResult, setIntakeLinkResult] = useState(null);
   const [intakeLinkError, setIntakeLinkError] = useState('');
+  const [showIntakeSendPanel, setShowIntakeSendPanel] = useState(false);
+  const [intakeSendToMode, setIntakeSendToMode] = useState('participant'); // 'participant' | 'other'
+  const [intakeSendToEmail, setIntakeSendToEmail] = useState('');
+  const [intakeSendToNote, setIntakeSendToNote] = useState('');
   const [expandedBudgetCards, setExpandedBudgetCards] = useState({});
   const [allNdisItems, setAllNdisItems] = useState([]);
   const [copiedGoalKey, setCopiedGoalKey] = useState(null);
@@ -1120,8 +1124,16 @@ export default function ParticipantProfile() {
     setIntakeLinkError('');
     setIntakeLinkResult(null);
     try {
-      const res = await onboarding.issueIntakeToken(id);
+      const body = {};
+      if (intakeSendToMode === 'other') {
+        const emailVal = intakeSendToEmail.trim();
+        if (!emailVal) { setIntakeLinkError('Enter an email address to send to.'); setIntakeIssuing(false); return; }
+        body.send_to_email = emailVal;
+        if (intakeSendToNote.trim()) body.send_to_note = intakeSendToNote.trim();
+      }
+      const res = await onboarding.issueIntakeToken(id, body);
       setIntakeLinkResult(res);
+      setShowIntakeSendPanel(false);
     } catch (err) {
       setIntakeLinkError(err.message || 'Failed to issue intake link');
     } finally {
@@ -1608,19 +1620,86 @@ export default function ParticipantProfile() {
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={handleSendIntakeLink}
-                    disabled={intakeIssuing}
+                    onClick={() => { setShowIntakeSendPanel((v) => !v); setIntakeLinkResult(null); setIntakeLinkError(''); }}
                     title="Send the participant a private link so they can fill in their own intake details"
                   >
-                    {intakeIssuing ? 'Sending…' : 'Send self-intake link'}
+                    Send self-intake link
                   </button>
                   <Link to={`${pathPrefix}/onboarding/${id}`} className="btn btn-secondary">Open onboarding</Link>
                 </div>
               </div>
+
+              {/* ── Send-to panel ── */}
+              {showIntakeSendPanel && (
+                <div style={{ marginBottom: '0.75rem', padding: '0.9rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+                  <p style={{ margin: '0 0 0.6rem', fontWeight: 600, fontSize: '0.9rem', color: '#1e293b' }}>Send intake form to:</p>
+                  <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="intakeSendTo"
+                      checked={intakeSendToMode === 'participant'}
+                      onChange={() => setIntakeSendToMode('participant')}
+                    />
+                    Participant's email on file
+                    {participant?.email ? (
+                      <span style={{ color: '#475569', fontSize: '0.85rem' }}>({participant.email})</span>
+                    ) : (
+                      <span style={{ color: '#b91c1c', fontSize: '0.85rem' }}>(no email on file)</span>
+                    )}
+                  </label>
+                  <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.6rem', fontSize: '0.9rem', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="intakeSendTo"
+                      checked={intakeSendToMode === 'other'}
+                      onChange={() => setIntakeSendToMode('other')}
+                    />
+                    Another email address (guardian, family, coordinator)
+                  </label>
+                  {intakeSendToMode === 'other' && (
+                    <div style={{ display: 'grid', gap: '0.5rem', marginBottom: '0.6rem', paddingLeft: '1.5rem' }}>
+                      <input
+                        type="email"
+                        className="form-input"
+                        placeholder="Email address"
+                        value={intakeSendToEmail}
+                        onChange={(e) => setIntakeSendToEmail(e.target.value)}
+                        style={{ maxWidth: 320 }}
+                      />
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Who is this? e.g. Parent: Jane Smith (optional)"
+                        value={intakeSendToNote}
+                        onChange={(e) => setIntakeSendToNote(e.target.value)}
+                        style={{ maxWidth: 320 }}
+                      />
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={handleSendIntakeLink}
+                      disabled={intakeIssuing}
+                    >
+                      {intakeIssuing ? 'Sending…' : 'Send intake link'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setShowIntakeSendPanel(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {intakeLinkResult && (
                 <div style={{ padding: '0.5rem 0.75rem', border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#166534', borderRadius: 6, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
                   {intakeLinkResult.email_sent
-                    ? <>Intake link emailed. Expires {new Date(intakeLinkResult.expires_at).toLocaleDateString('en-AU')}. </>
+                    ? <>Intake link emailed to {intakeLinkResult.send_to_email || 'participant'}. Expires {new Date(intakeLinkResult.expires_at).toLocaleDateString('en-AU')}. </>
                     : <>Intake link generated (email not sent). Expires {new Date(intakeLinkResult.expires_at).toLocaleDateString('en-AU')}. </>}
                   <a href={intakeLinkResult.url} target="_blank" rel="noreferrer">Copy / open link</a>
                   {intakeLinkResult.email_error && (
