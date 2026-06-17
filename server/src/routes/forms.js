@@ -66,7 +66,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
 const memoryUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB
 const bulkFormUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024, files: 100 } });
-const policyDir = join(projectRoot, 'data', 'onboarding', 'policies');
+const policyDir = join(process.env.DATA_DIR || '/data', 'onboarding', 'policies');
 
 const ROUTER = Router();
 

@@ -250,9 +250,14 @@ export function buildPolicyAttachmentsForEmail(providerProfileId, explicitPackId
     formRows = [];
   }
 
+  const dataDir = process.env.DATA_DIR || '/data';
   const attachments = [];
   for (const pf of policies) {
-    const fullPath = join(projectRoot, pf.file_path);
+    // file_path is stored as "data/onboarding/policies/..." (relative to old projectRoot).
+    // Resolve against DATA_DIR so files survive deploys on the persistent volume.
+    const fullPath = pf.file_path.startsWith('/')
+      ? pf.file_path
+      : join(dataDir, pf.file_path.replace(/^data\//, ''));
     if (!existsSync(fullPath)) continue;
     try {
       const content = readFileSync(fullPath);
