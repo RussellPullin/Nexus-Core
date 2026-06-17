@@ -2379,12 +2379,13 @@ router.post('/import-csv', requireCoordinatorOrAdmin, memoryUpload.single('file'
 // Update participant
 router.put('/:id', (req, res) => {
   try {
-    const { name, ndis_number, email, phone, address, date_of_birth, plan_manager_id, remoteness, notes, parent_guardian_phone, parent_guardian_email, diagnosis, services_required, management_type, ndia_managed_services, plan_managed_services, invoice_emails, default_ndis_line_item_id, invoice_includes_gst } = req.body;
+    const { name, ndis_number, email, phone, address, date_of_birth, plan_manager_id, remoteness, notes, parent_guardian_phone, parent_guardian_email, diagnosis, services_required, management_type, ndia_managed_services, plan_managed_services, invoice_emails, default_ndis_line_item_id, default_billing_category, invoice_includes_gst } = req.body;
     const servicesJson = typeof services_required === 'string' ? services_required : (Array.isArray(services_required) ? JSON.stringify(services_required) : null);
     const ndiaJson = typeof ndia_managed_services === 'string' ? ndia_managed_services : (Array.isArray(ndia_managed_services) ? JSON.stringify(ndia_managed_services) : null);
     const planJson = typeof plan_managed_services === 'string' ? plan_managed_services : (Array.isArray(plan_managed_services) ? JSON.stringify(plan_managed_services) : null);
     const invoiceEmailsJson = typeof invoice_emails === 'string' ? invoice_emails : (Array.isArray(invoice_emails) ? JSON.stringify(invoice_emails) : null);
     const defaultLineItemId = default_ndis_line_item_id && String(default_ndis_line_item_id).trim() ? String(default_ndis_line_item_id).trim() : null;
+    const defaultBillingCategory = /^\d{2}$/.test(String(default_billing_category || '').trim()) ? String(default_billing_category).trim() : null;
     const includesGst = invoice_includes_gst === true || invoice_includes_gst === 1 || invoice_includes_gst === '1' ? 1 : 0;
     const before = db.prepare('SELECT name FROM participants WHERE id = ?').get(req.params.id);
     db.prepare(`
@@ -2393,10 +2394,10 @@ router.put('/:id', (req, res) => {
         date_of_birth = ?, plan_manager_id = ?, remoteness = ?, notes = ?,
         parent_guardian_phone = ?, parent_guardian_email = ?, diagnosis = ?, services_required = ?,
         management_type = ?, ndia_managed_services = ?, plan_managed_services = ?,
-        invoice_emails = ?, default_ndis_line_item_id = ?, invoice_includes_gst = ?,
+        invoice_emails = ?, default_ndis_line_item_id = ?, default_billing_category = ?, invoice_includes_gst = ?,
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(name, ndis_number, email, phone, address, date_of_birth, plan_manager_id, remoteness || 'standard', notes, parent_guardian_phone || null, parent_guardian_email || null, diagnosis || null, servicesJson, management_type || 'self', ndiaJson, planJson, invoiceEmailsJson, defaultLineItemId, includesGst, req.params.id);
+    `).run(name, ndis_number, email, phone, address, date_of_birth, plan_manager_id, remoteness || 'standard', notes, parent_guardian_phone || null, parent_guardian_email || null, diagnosis || null, servicesJson, management_type || 'self', ndiaJson, planJson, invoiceEmailsJson, defaultLineItemId, defaultBillingCategory, includesGst, req.params.id);
     const nameChanged =
       before && String(before.name || '').trim() !== String(name || '').trim();
     if (nameChanged) {

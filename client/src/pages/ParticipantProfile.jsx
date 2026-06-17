@@ -1370,6 +1370,18 @@ export default function ParticipantProfile() {
               <small style={{ color: '#64748b' }}>Pre-selected when adding charges to shifts for this participant</small>
             </div>
             <div className="form-group">
+              <label>Default Billing Category</label>
+              <select value={editForm.default_billing_category || ''} onChange={(e) => setEditForm({ ...editForm, default_billing_category: e.target.value || null })}>
+                <option value="">None (use org default 04)</option>
+                {(supportCategories.length > 0 ? supportCategories : FALLBACK_SUPPORT_CATEGORIES).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.id} – {c.name}
+                  </option>
+                ))}
+              </select>
+              <small style={{ color: '#64748b' }}>Shifts for this client are billed under this category by default.</small>
+            </div>
+            <div className="form-group">
               <label className="checkbox-label" style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"

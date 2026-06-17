@@ -264,8 +264,9 @@ export function getDefaultLineItemForParticipant(participantId, shiftStartTime, 
     unit: (item.unit || 'hour').toLowerCase() === 'hr' ? 'hour' : (item.unit || 'hour')
   });
 
-  const participant = db.prepare('SELECT default_ndis_line_item_id, remoteness FROM participants WHERE id = ?').get(participantId);
+  const participant = db.prepare('SELECT default_ndis_line_item_id, default_billing_category, remoteness FROM participants WHERE id = ?').get(participantId);
   const remoteness = participant?.remoteness || 'standard';
+  const preferredCat = /^\d{2}$/.test(participant?.default_billing_category) ? participant.default_billing_category : '04';
 
   // 1. Participant default (exclude establishment fee and group)
   if (participant?.default_ndis_line_item_id) {
@@ -301,7 +302,7 @@ export function getDefaultLineItemForParticipant(participantId, shiftStartTime, 
 
   // 3. Budget line items: prefer category 04 (community access) first, then 01, 02, 03, etc.
   // Exclude 0136 (Group Activities); prefer 0125 (Access to Community)
-  const budgetOrder = ['04', '01', '02', '03', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15'];
+  const budgetOrder = [preferredCat, ...['04', '01', '02', '03', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15'].filter(c => c !== preferredCat)];
   for (const cat of budgetOrder) {
     const budgetItems = db.prepare(`
       SELECT bli.ndis_line_item_id, nli.id, nli.rate, nli.rate_remote, nli.rate_very_remote, nli.unit, nli.rate_type, nli.time_band, nli.description, nli.support_item_number
@@ -332,7 +333,7 @@ export function getDefaultLineItemForParticipant(participantId, shiftStartTime, 
   const fallback = db.prepare(`
     SELECT id, rate, rate_remote, rate_very_remote, unit, rate_type, time_band, description, support_item_number
     FROM ndis_line_items
-    WHERE (support_category = '04' OR support_item_number LIKE '04_%')
+    WHERE (support_category = ? OR support_item_number LIKE ?)
       AND (rate_type = ? OR rate_type IS NULL OR rate_type = 'weekday')
       AND (time_band = ? OR time_band IS NULL)
       AND (unit = 'hour' OR unit = 'hr')
@@ -341,7 +342,7 @@ export function getDefaultLineItemForParticipant(participantId, shiftStartTime, 
       AND (support_item_number NOT LIKE '%_0136_%')
     ORDER BY (support_item_number LIKE '%_0125_%') DESC, rate_type = ? DESC
     LIMIT 1
-  `).get(dayType, timeBand, dayType);
+  `).get(preferredCat, `${preferredCat}_%`, dayType, timeBand, dayType);
 
   if (fallback && !isEstablishmentFee(fallback) && !isGroupActivity(fallback)) {
     return toResult(fallback, remoteness);
@@ -351,7 +352,7 @@ export function getDefaultLineItemForParticipant(participantId, shiftStartTime, 
   const fallbackDayOnly = db.prepare(`
     SELECT id, rate, rate_remote, rate_very_remote, unit, rate_type, time_band, description, support_item_number
     FROM ndis_line_items
-    WHERE (support_category = '04' OR support_item_number LIKE '04_%')
+    WHERE (support_category = ? OR support_item_number LIKE ?)
       AND (rate_type = ? OR rate_type IS NULL OR rate_type = 'weekday')
       AND (unit = 'hour' OR unit = 'hr')
       AND (description NOT LIKE '%Establishment Fee%' AND description NOT LIKE '%establishment fee%')
@@ -359,7 +360,7 @@ export function getDefaultLineItemForParticipant(participantId, shiftStartTime, 
       AND (support_item_number NOT LIKE '%_0136_%')
     ORDER BY (support_item_number LIKE '%_0125_%') DESC, rate_type = ? DESC
     LIMIT 1
-  `).get(dayType, dayType);
+  `).get(preferredCat, `${preferredCat}_%`, dayType, dayType);
 
   if (fallbackDayOnly && !isEstablishmentFee(fallbackDayOnly) && !isGroupActivity(fallbackDayOnly)) {
     return toResult(fallbackDayOnly, remoteness);

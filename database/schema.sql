@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS participants (
   invoice_emails TEXT,
   invoice_includes_gst INTEGER DEFAULT 0,
   default_ndis_line_item_id TEXT,
+  default_billing_category TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (provider_org_id) REFERENCES organisations(id),
