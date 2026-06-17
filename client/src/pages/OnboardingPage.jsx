@@ -761,6 +761,33 @@ export default function OnboardingPage() {
               </div>
             </div>
 
+            <h5 style={{ marginTop: '1.5rem' }}>Representative / Advocate (for legal documents)</h5>
+            <p style={{ color: '#64748b', fontSize: '0.85rem', margin: '-0.5rem 0 0.75rem' }}>
+              Person who signs on behalf of the participant. Used in the Service Agreement, Privacy Consent, and Service Schedule.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div className="form-group">
+                <label>First name</label>
+                <input value={intake.representative_first_name || ''} onChange={(e) => setIntake({ ...intake, representative_first_name: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Last name</label>
+                <input value={intake.representative_last_name || ''} onChange={(e) => setIntake({ ...intake, representative_last_name: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Relationship to participant</label>
+                <input value={intake.representative_relationship || ''} onChange={(e) => setIntake({ ...intake, representative_relationship: e.target.value })} placeholder="e.g. Parent, Legal guardian, Spouse" />
+              </div>
+              <div className="form-group">
+                <label>Phone</label>
+                <input value={intake.representative_phone || ''} onChange={(e) => setIntake({ ...intake, representative_phone: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Email</label>
+                <input type="email" value={intake.representative_email || ''} onChange={(e) => setIntake({ ...intake, representative_email: e.target.value })} />
+              </div>
+            </div>
+
             <h5 style={{ marginTop: '1.5rem' }}>Primary Contact / Guardian</h5>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <div className="form-group">

@@ -1434,6 +1434,9 @@ try {
     addStaffCol('shifter_worker_profile_id', 'TEXT');
     addStaffCol('availability_json', 'TEXT');
     addStaffCol('pay_rates_json', 'TEXT');
+    addStaffCol('pay_frequency', 'TEXT');
+    addStaffCol('governing_state', 'TEXT');
+    addStaffCol('supervisor_name', 'TEXT');
   } catch (e) {
     if (!e.message?.includes('duplicate column')) console.warn('staff onboarding columns migration:', e.message);
   }

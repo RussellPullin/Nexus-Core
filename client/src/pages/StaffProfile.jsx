@@ -32,6 +32,9 @@ function staffEditFormFromRow(staffRow) {
     role: staffRow?.role || '',
     employment_type: staffRow?.employment_type || 'employee',
     hourly_rate: staffRow?.hourly_rate != null ? String(staffRow.hourly_rate) : '',
+    pay_frequency: staffRow?.pay_frequency || '',
+    governing_state: staffRow?.governing_state || '',
+    supervisor_name: staffRow?.supervisor_name || '',
     ...payRateFormFieldsFromRow(staffRow),
     availability: parseStaffAvailabilityFromRow(staffRow),
   };
@@ -205,6 +208,9 @@ export default function StaffProfile() {
         role: editForm.role,
         employment_type: editForm.employment_type,
         hourly_rate: editForm.hourly_rate,
+        pay_frequency: editForm.pay_frequency,
+        governing_state: editForm.governing_state,
+        supervisor_name: editForm.supervisor_name,
         pay_rates: payRateOverridesFromFormFields(editForm),
         availability: editForm.availability,
       });
@@ -621,6 +627,9 @@ export default function StaffProfile() {
             <p><strong>Phone:</strong> {data.phone || '—'}</p>
             <p><strong>Role:</strong> {data.role || '—'}</p>
             <p><strong>Employment type:</strong> {data.employment_type === 'subcontractor' ? 'Subcontractor' : (data.employment_type === 'employee' ? 'Employee' : (data.employment_type || '—'))}</p>
+            {data.pay_frequency && <p><strong>Pay frequency:</strong> {data.pay_frequency.charAt(0).toUpperCase() + data.pay_frequency.slice(1)}</p>}
+            {data.governing_state && <p><strong>Governing state:</strong> {data.governing_state}</p>}
+            {data.supervisor_name && <p><strong>Supervisor:</strong> {data.supervisor_name}</p>}
             <div style={{ marginTop: '0.5rem' }}>
               <p style={{ marginBottom: '0.35rem' }}><strong>Pay rates (per hour)</strong></p>
               <p style={{ margin: '0.15rem 0', color: '#334155', fontSize: '0.95rem' }}>
@@ -691,6 +700,33 @@ export default function StaffProfile() {
             <div className="form-group">
               <label>Hourly rate (weekday default, daytime)</label>
               <input type="number" step="0.01" min="0" value={editForm.hourly_rate} onChange={(e) => setEditForm({ ...editForm, hourly_rate: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>Pay frequency</label>
+              <select value={editForm.pay_frequency} onChange={(e) => setEditForm({ ...editForm, pay_frequency: e.target.value })}>
+                <option value="">— Select —</option>
+                <option value="weekly">Weekly</option>
+                <option value="fortnightly">Fortnightly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Governing state (for contract)</label>
+              <select value={editForm.governing_state} onChange={(e) => setEditForm({ ...editForm, governing_state: e.target.value })}>
+                <option value="">— Select —</option>
+                <option value="Queensland">Queensland</option>
+                <option value="New South Wales">New South Wales</option>
+                <option value="Victoria">Victoria</option>
+                <option value="South Australia">South Australia</option>
+                <option value="Western Australia">Western Australia</option>
+                <option value="Tasmania">Tasmania</option>
+                <option value="Northern Territory">Northern Territory</option>
+                <option value="Australian Capital Territory">Australian Capital Territory</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Supervisor / manager name (for contract)</label>
+              <input value={editForm.supervisor_name} onChange={(e) => setEditForm({ ...editForm, supervisor_name: e.target.value })} placeholder="e.g. Sarah Jones" />
             </div>
             <p style={{ color: '#64748b', fontSize: '0.9rem', marginTop: 0, marginBottom: '0.5rem' }}>
               Optional: set different pay for weekend, public holidays, or weekday evening shifts. Leave blank to use the default hourly rate.

@@ -9,7 +9,13 @@
   "pack": "staff_onboarding",
   "placeholders": [
     "org.abn",
-    "org.name"
+    "org.name",
+    "org.primary_contact.name",
+    "staff.full_name",
+    "staff.first_name",
+    "staff.last_name",
+    "staff.supervisor_name",
+    "today"
   ],
   "required_signer_role": "participant",
   "signature_count": 1,

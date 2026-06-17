@@ -58,16 +58,44 @@ export function buildSectionsPayload() {
     {
       id: 'parties',
       title: SECTION_TITLES.s1,
-      locked: true,
+      locked: false,
       body_html:
-        '<p>This section identifies the service provider, participant, representative details where applicable, and funding arrangement for the agreement.</p>'
+        '<h3>Service Provider (We / Us)</h3>' +
+        '<p><strong>Organisation:</strong> {{org_legal_name}}</p>' +
+        '<p><strong>ABN:</strong> {{org_abn}}</p>' +
+        '<p><strong>Address:</strong> {{org_address}}</p>' +
+        '<p><strong>Phone:</strong> {{org_phone}}</p>' +
+        '<p><strong>Email:</strong> {{org_email}}</p>' +
+        '<p><strong>Contact person:</strong> {{org_contact_person}}</p>' +
+        '<h3>Participant details (You)</h3>' +
+        '<p><strong>Name:</strong> {{participant_first_name}} {{participant_last_name}}</p>' +
+        '<p><strong>NDIS number:</strong> {{participant_ndis_number}}</p>' +
+        '<p><strong>Date of birth:</strong> {{participant_date_of_birth}}</p>' +
+        '<p><strong>Address:</strong> {{participant_address}}</p>' +
+        '<p><strong>Phone:</strong> {{participant_phone}}</p>' +
+        '<p><strong>Email:</strong> {{participant_email}}</p>' +
+        '<p><strong>Preferred contact method:</strong> {{participant_preferred_contact_method}}</p>' +
+        '<h3>Representative / Advocate (if applicable)</h3>' +
+        '<p><strong>Name:</strong> {{representative_first_name}} {{representative_last_name}}</p>' +
+        '<p><strong>Relationship:</strong> {{representative_relationship}}</p>' +
+        '<p><strong>Phone:</strong> {{representative_phone}}</p>' +
+        '<p><strong>Email:</strong> {{representative_email}}</p>' +
+        '<h3>Funding Management</h3>' +
+        '<p><strong>Arrangement:</strong> {{funding_management_type}}</p>' +
+        '<p><strong>Plan manager (if plan-managed):</strong> {{plan_manager_company_name}}</p>' +
+        '<p><strong>Plan manager email:</strong> {{plan_manager_invoice_email}}</p>'
     },
     {
       id: 'key_details',
       title: SECTION_TITLES.s2,
-      locked: true,
+      locked: false,
       body_html:
-        '<p>This section records the agreement date, scheduled review date, communication preferences, and the services and supports schedule.</p>'
+        '<p><strong>Agreement date:</strong> {{agreement_date}}</p>' +
+        '<p><strong>Plan start date:</strong> {{plan_start_date}}</p>' +
+        '<p><strong>Plan end / review date:</strong> {{plan_end_date}}</p>' +
+        '<p><strong>Scheduled review date:</strong> {{scheduled_review_date}}</p>' +
+        '<p><strong>Preferred communication:</strong> {{communication_preferences}}</p>' +
+        '<p><strong>Services and supports schedule:</strong> Attached or completed at onboarding</p>'
     },
     {
       id: 'terms',
@@ -78,9 +106,16 @@ export function buildSectionsPayload() {
     {
       id: 'execution',
       title: 'Execution — Signatures',
-      locked: true,
+      locked: false,
       body_html:
-        '<p>The provider, participant, and representative where applicable sign this agreement after the details above have been reviewed.</p>'
+        '<p>By signing below, both parties agree to the terms of this Services Agreement.</p>' +
+        '<p><strong>Provider signatory:</strong> {{org_signatory_name}}</p>' +
+        '<p><strong>Role:</strong> {{org_contact_person}}</p>' +
+        '<p><strong>Date:</strong> ___________________________</p>' +
+        '<p><strong>Participant name (print):</strong> {{participant_first_name}} {{participant_last_name}}</p>' +
+        '<p><strong>Representative name (if signing on behalf):</strong> {{representative_first_name}} {{representative_last_name}}</p>' +
+        '<p><strong>Relationship to participant:</strong> {{representative_relationship}}</p>' +
+        '<p><strong>Date:</strong> ___________________________</p>'
     }
   ];
 }
@@ -107,8 +142,8 @@ export function buildMasterInsertPayload() {
   return {
     template_key: SERVICE_AGREEMENT_TEMPLATE_KEY,
     template_type: 'service_agreement',
-    title: 'NDIS Services Agreement (Version 3)',
-    version_label: 'Version 3',
+    title: 'NDIS Services Agreement',
+    version_label: '',
     definition_json: JSON.stringify(buildDefinitionPayload()),
     variable_schema_json: JSON.stringify(buildVariableSchemaPayload()),
     branding_slots_json: JSON.stringify(buildBrandingSlotsPayload()),

@@ -134,6 +134,18 @@ export function applyStaffIntakeToStaffRow(staffId, intakeMap, options = {}) {
     updates.push('abn = ?');
     vals.push(cleanStr(merged.abn));
   }
+  if (want('pay_frequency')) {
+    updates.push('pay_frequency = ?');
+    vals.push(cleanStr(merged.pay_frequency));
+  }
+  if (want('governing_state')) {
+    updates.push('governing_state = ?');
+    vals.push(cleanStr(merged.governing_state));
+  }
+  if (want('supervisor_name')) {
+    updates.push('supervisor_name = ?');
+    vals.push(cleanStr(merged.supervisor_name));
+  }
 
   if (!updates.length) return true;
 

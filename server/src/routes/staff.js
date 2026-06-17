@@ -1358,7 +1358,7 @@ router.put('/:id', requireAdminOrDelegate, async (req, res) => {
     const orgId = requesterOrgId(req.session?.user?.id);
     const existing = visibleStaffById(req.params.id, orgId);
     if (!existing) return res.status(404).json({ error: 'Staff not found' });
-    const { name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate, pay_rates } = req.body;
+    const { name, email, phone, notify_email, notify_sms, role, employment_type, hourly_rate, pay_rates, pay_frequency, governing_state, supervisor_name } = req.body;
     const before = db.prepare('SELECT email, availability_json, pay_rates_json FROM staff WHERE id = ?').get(req.params.id);
     const emailBefore = normStaffEmail(before?.email);
     const emailAfter = normStaffEmail(email);
@@ -1369,7 +1369,8 @@ router.put('/:id', requireAdminOrDelegate, async (req, res) => {
       : (before?.pay_rates_json ?? null);
     db.prepare(`
       UPDATE staff SET name = ?, email = ?, phone = ?, notify_email = ?, notify_sms = ?,
-        role = ?, employment_type = ?, hourly_rate = ?, pay_rates_json = ?, availability_json = ?, updated_at = datetime('now')
+        role = ?, employment_type = ?, hourly_rate = ?, pay_rates_json = ?, availability_json = ?,
+        pay_frequency = ?, governing_state = ?, supervisor_name = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       name,
@@ -1382,6 +1383,9 @@ router.put('/:id', requireAdminOrDelegate, async (req, res) => {
       hourly_rate != null ? Number(hourly_rate) : null,
       payRatesToStore,
       availabilityToStore,
+      pay_frequency || null,
+      governing_state || null,
+      supervisor_name || null,
       req.params.id
     );
     const row = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);

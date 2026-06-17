@@ -104,6 +104,12 @@ export function resolveIntakeToken(token) {
 export function upsertFieldsByToken(token, fields) {
   const record = resolveIntakeToken(token);
   if (!fields || typeof fields !== 'object') return record;
+  initializeParticipantOnboarding({
+    participantId: record.participant_id,
+    providerOrganisationId: record.organisation_id || null,
+    actorType: 'participant',
+    actorId: record.participant_id
+  });
   upsertIntakeFields({
     participantId: record.participant_id,
     fields,

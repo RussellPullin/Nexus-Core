@@ -5,9 +5,9 @@
 
 export const DOCUMENT_META = {
   documentTitle: 'Services Agreement',
-  versionLabel: 'Version 3',
+  versionLabel: '',
   /** Bumped when master definition_json changes — seed service refreshes DB row. */
-  definitionRevision: 7
+  definitionRevision: 9
 };
 
 export const SECTION_TITLES = {

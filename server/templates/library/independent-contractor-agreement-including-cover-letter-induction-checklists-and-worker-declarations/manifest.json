@@ -11,8 +11,17 @@
     "org.abn",
     "org.legal_name",
     "org.name",
+    "org.address",
     "org.primary_contact.name",
-    "org.signatory.name"
+    "org.signatory.name",
+    "contractor.full_name",
+    "contractor.address",
+    "contractor.abn",
+    "contractor.services_fee",
+    "contractor.insurance_min",
+    "contractor.governing_state",
+    "agreement_date",
+    "today"
   ],
   "required_signer_role": null,
   "signature_count": 0,

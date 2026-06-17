@@ -61,8 +61,9 @@ function parseObject(value, fallback = {}) {
 function resolveLogoFullPath(branding, org) {
   // Same resolution order as serviceAgreementPdf.service.js:
   // org profile logo first, legacy business settings next, then template branding.
-  if (org?.logo_path) {
-    const raw = String(org.logo_path).trim();
+  // Accept both snake_case (raw DB row) and camelCase (orgContext shape).
+  if (org?.logo_path || org?.logoPath) {
+    const raw = String(org.logo_path || org.logoPath || '').trim();
     if (raw) {
       const candidates = isAbsolute(raw)
         ? [raw]
@@ -259,8 +260,14 @@ export function buildBrandedFormRenderModel(orgTemplateId, participantId, databa
     ...parseObject(row.page_layout_json, parseObject(row.master_page_layout_json, DEFAULT_LAYOUT))
   };
   const sections = mergeSections(row.master_sections_json, row.sections_json);
+  // org_legal_name is the editable field in the SA template editor so it wins over
+  // org_trading_name (which may be stale from a previous DB value).  Sync org_trading_name
+  // so {{org_trading_name}} in clause body text resolves to the same correct value.
+  const resolvedOrgName =
+    variableMap.org_legal_name || variableMap.org_trading_name || org.legal_name || org.trading_name || org.name || '';
   const orgDerivedVariables = {
-    org_name: variableMap.org_legal_name || variableMap.org_trading_name || org.legal_name || org.trading_name || org.name || '',
+    org_name: resolvedOrgName,
+    org_trading_name: resolvedOrgName,   // override stale saved value so clause text is correct
     abn: variableMap.org_abn || org.abn || '',
     address: variableMap.org_address || org.address || '',
     phone: variableMap.org_phone || org.phone || '',
@@ -359,10 +366,7 @@ export async function renderBrandedForm(orgTemplateId, participantId, database) 
       doc.text(model.title, margins.left + 96, 48, { width: contentWidth - 192, align: 'center', lineBreak: false });
       doc.fillColor(primary).font('Helvetica-Bold').fontSize(16);
       doc.text(orgName, margins.left + 96, 22, { width: contentWidth - 96, align: 'right', lineBreak: false });
-      if (model.version_label) {
-        doc.fillColor('#64748b').fontSize(8);
-        doc.text(model.version_label, margins.left + 96, 64, { width: contentWidth - 96, align: 'right' });
-      }
+      // version_label intentionally omitted — internal versioning is not shown to participants
       doc.strokeColor(accent).lineWidth(2);
       doc.moveTo(margins.left, (model.page_layout.header_height || 108) - 6).lineTo(pageWidth - margins.right, (model.page_layout.header_height || 108) - 6).stroke();
       doc.restore();

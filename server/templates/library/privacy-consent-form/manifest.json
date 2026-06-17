@@ -10,7 +10,16 @@
   "placeholders": [
     "org.abn",
     "org.legal_name",
-    "org.name"
+    "org.name",
+    "org.address",
+    "org.primary_contact.name",
+    "participant.full_name",
+    "participant.first_name",
+    "participant.last_name",
+    "staff.full_name",
+    "staff.first_name",
+    "staff.last_name",
+    "today"
   ],
   "required_signer_role": "participant",
   "signature_count": 1,
