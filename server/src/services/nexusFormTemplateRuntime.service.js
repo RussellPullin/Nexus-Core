@@ -39,12 +39,19 @@ export function enrichVariablesFromOrgProfile(variableMap, organisationRow, busi
   const biz = businessSettingsRow || {};
 
   // Phase 1: prefer the canonical organisations.* fields populated by the org setup wizard,
-  // then fall back to legacy business_settings rows for back-compat with older deployments.
-  const trading = String(org.trading_name || org.name || biz.company_name || '').trim();
-  const legal = String(org.legal_name || org.name || biz.company_name || '').trim() || trading;
+  // then business_settings.company_name (the name the org actually trades under),
+  // then fall back to organisations.name as last resort.
+  // NOTE: business_settings.company_name is preferred over org.name because the primary
+  // org row uses a generic placeholder name ("Primary organisation") while business_settings
+  // always holds the real trading name (e.g. "Spring 2 Health").
+  const trading = String(org.trading_name || biz.company_name || org.name || '').trim();
+  const legal = String(org.legal_name || biz.company_name || org.name || '').trim() || trading;
 
-  if (!String(out.org_legal_name || '').trim()) out.org_legal_name = legal;
-  if (!String(out.org_trading_name || '').trim()) out.org_trading_name = trading;
+  // Always override from live DB — don't let stale template variable values override
+  // the organisation's actual name (e.g. a previously saved "Pristine Lifestyle Solutions"
+  // should be replaced when the business has since set "Spring 2 Health" in settings).
+  out.org_legal_name = legal || String(out.org_legal_name || '').trim();
+  out.org_trading_name = trading || String(out.org_trading_name || '').trim();
   if (!String(out.org_abn || '').trim()) out.org_abn = String(org.abn || biz.company_abn || '').trim();
   if (!String(out.org_acn || '').trim()) out.org_acn = String(org.acn || '').trim();
   if (!String(out.org_ndis_provider_number || '').trim())

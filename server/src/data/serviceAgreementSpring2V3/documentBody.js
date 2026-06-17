@@ -7,7 +7,7 @@ export const DOCUMENT_META = {
   documentTitle: 'Services Agreement',
   versionLabel: '',
   /** Bumped when master definition_json changes — seed service refreshes DB row. */
-  definitionRevision: 9
+  definitionRevision: 10
 };
 
 export const SECTION_TITLES = {
@@ -80,7 +80,7 @@ export const TERMS_CLAUSES = [
       '(c) Prices are set in the NDIS Price Guide and will be automatically adjusted when the Price Guide changes.\n\n' +
       '(d) An establishment fee may be charged for personal care/participation Services where applicable under NDIS Rules, provided at least {{establishment_fee_min_hours}} hours per month of personal care/community access support is to be delivered.\n\n' +
       '(e) Where recreational or community access services are funded under your Plan, funded hours may be converted to a fee for those purposes.\n\n' +
-      '(f) Group centre-based care may attract an additional allowance of ${{group_centre_allowance_per_hour}} per hour.\n\n' +
+      '(f) Group centre-based care may attract an additional charge in accordance with the NDIS Pricing Arrangements and Price Limits.\n\n' +
       '(g) Shadow shifts may be charged (up to {{shadow_shift_max_hours_per_year}} hours per year at weekday rates) where complex needs require a new worker to be introduced before providing Services independently.\n\n' +
       '(h)-(i) Meal preparation Services are charged at an hourly rate; the cost of food itself is not covered under the Plan.'
   },

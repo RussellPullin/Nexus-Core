@@ -240,10 +240,11 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
 
     const bodyPara = (text, opts = {}) => {
       const size = opts.size || 9;
+      const lineGap = 2;
       doc.fillColor('#374151').font(font).fontSize(size);
-      const h = doc.heightOfString(text, { width: pageWidth - 2 * margin });
+      const h = doc.heightOfString(text, { width: pageWidth - 2 * margin, lineGap });
       y = ensureSpace(doc, y, h + 10, margin, pageMaxY());
-      doc.text(text, margin, y, { width: pageWidth - 2 * margin, align: 'left', lineGap: 2 });
+      doc.text(text, margin, y, { width: pageWidth - 2 * margin, align: 'left', lineGap });
       y += h + 10;
     };
 
@@ -487,10 +488,11 @@ export function generateServiceAgreementPdfBuffer(snapshot) {
       y += 16;
 
       const body = c.body_rendered || '';
+      const clauseLineGap = 1.5;
       doc.font(font).fontSize(9).fillColor('#374151');
-      const bh = doc.heightOfString(body, { width: pageWidth - 2 * margin });
+      const bh = doc.heightOfString(body, { width: pageWidth - 2 * margin, lineGap: clauseLineGap });
       y = ensureSpace(doc, y, bh + 14, margin, pageMaxY());
-      doc.text(body, margin, y, { width: pageWidth - 2 * margin, align: 'justify', lineGap: 1.5 });
+      doc.text(body, margin, y, { width: pageWidth - 2 * margin, align: 'justify', lineGap: clauseLineGap });
       y += bh + 14;
     });
 

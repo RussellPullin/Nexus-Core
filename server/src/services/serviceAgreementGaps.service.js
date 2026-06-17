@@ -195,9 +195,9 @@ export function computeServiceAgreementGaps(params) {
   if (!snapshot.schedule_rows?.length) {
     add({
       id: 'service_schedule',
-      severity: 'warning',
-      title: 'Services & supports schedule',
-      description: 'No schedule rows from plan allocations or intake — Section 2 schedule will be empty.',
+      severity: 'blocking',
+      title: 'Services & supports schedule is empty',
+      description: 'Add at least one service in the participant\'s plan allocations (or in the SA agreements tab) before generating the Service Agreement.',
       section: 'Section 2',
       fix: { kind: 'participant_profile', tab: 'plans', anchor_id: 'sa-gap-plans' }
     });
