@@ -138,6 +138,7 @@ try {
   addParticipantCol('invoice_emails', 'TEXT');
   addParticipantCol('archived_at', 'TEXT');
   addParticipantCol('default_ndis_line_item_id', 'TEXT');
+  addParticipantCol('default_billing_category', 'TEXT');
   addParticipantCol('invoice_includes_gst', 'INTEGER DEFAULT 0');
   const hasRegGroup = ndisCols.some(c => c.name === 'registration_group_number');
   if (!hasRegGroup) {
@@ -867,6 +868,28 @@ try {
     }
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('incident_register_entries migration:', e.message);
+  }
+
+  // Per-cell manual edits layered on top of the derived register snapshots so the
+  // auto-generated registers (staff compliance, participants, etc.) are editable in-app
+  // without mutating the underlying operational records.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS register_cell_overrides (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org_id TEXT NOT NULL,
+        view_id TEXT NOT NULL,
+        row_key TEXT NOT NULL,
+        col_index INTEGER NOT NULL,
+        value TEXT,
+        updated_by INTEGER REFERENCES users(id),
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(org_id, view_id, row_key, col_index)
+      );
+      CREATE INDEX IF NOT EXISTS idx_register_cell_overrides_lookup ON register_cell_overrides(org_id, view_id);
+    `);
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('register_cell_overrides migration:', e.message);
   }
 
   try {

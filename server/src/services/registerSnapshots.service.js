@@ -86,6 +86,60 @@ function tableExists(name) {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 }
 
+/**
+ * Registers whose rows are derived from other Nexus data but can still be hand-edited in-app.
+ * Edits are stored as per-cell overrides keyed by the first column (a stable natural key such as
+ * the staff/participant name) so we never mutate the underlying operational records.
+ */
+export const EDITABLE_REGISTER_VIEWS = {
+  staff_compliance_register: { sheet_key: 'Staff Compliance Register', key_column_index: 0 },
+  risk_assessment_register: { sheet_key: 'Risk Assessment Register', key_column_index: 0 },
+  participant_register: { sheet_key: 'Participant Register', key_column_index: 0 },
+  staff_register: { sheet_key: 'Staff Register', key_column_index: 0 }
+};
+
+const SHEET_KEY_TO_VIEW_ID = Object.fromEntries(
+  Object.entries(EDITABLE_REGISTER_VIEWS).map(([viewId, def]) => [def.sheet_key, viewId])
+);
+
+export function rowKeyForRegister(row, keyColIndex = 0) {
+  return String(row?.[keyColIndex] ?? '').trim();
+}
+
+/**
+ * Layer manual cell overrides on top of derived register rows. Returns new row arrays where an
+ * override exists; untouched rows are returned by reference.
+ */
+export function applyCellOverrides(organizationId, viewId, rows, keyColIndex = 0) {
+  if (!viewId || !tableExists('register_cell_overrides')) return rows;
+  const overrides = db
+    .prepare('SELECT row_key, col_index, value FROM register_cell_overrides WHERE org_id = ? AND view_id = ?')
+    .all(organizationId, viewId);
+  if (!overrides.length) return rows;
+  const map = new Map();
+  for (const o of overrides) map.set(`${o.row_key}::${o.col_index}`, o.value);
+  return rows.map((row) => {
+    const key = rowKeyForRegister(row, keyColIndex);
+    if (!key) return row;
+    let next = null;
+    for (let c = 0; c < row.length; c += 1) {
+      const override = map.get(`${key}::${c}`);
+      if (override !== undefined) {
+        if (!next) next = [...row];
+        next[c] = override;
+      }
+    }
+    return next || row;
+  });
+}
+
+/** Apply overrides using the sheet name (for the OneDrive Excel export path). */
+function applyOverridesForSheet(organizationId, sheetKey, rows) {
+  const viewId = SHEET_KEY_TO_VIEW_ID[sheetKey];
+  if (!viewId) return rows;
+  return applyCellOverrides(organizationId, viewId, rows, EDITABLE_REGISTER_VIEWS[viewId].key_column_index);
+}
+
 function safeJson(raw) {
   if (!raw) return {};
   try {
@@ -759,11 +813,11 @@ export function buildTemplateDataBySheet(organizationId) {
       return [label, label, label, 1, 'Nexus Core', 'Nexus Core', fmtDate(r.created_at), fmtDate(r.created_at), ''];
     });
 
-  const staffCompliance = staffComplianceRows(organizationId);
+  const staffCompliance = applyOverridesForSheet(organizationId, 'Staff Compliance Register', staffComplianceRows(organizationId));
   const incidentRegisterRows = incidentRows(organizationId);
-  const riskRegisterRows = riskAssessmentRows(organizationId);
-  const participantRows = participantRegisterRows(organizationId);
-  const staffRows = staffRegisterRows(organizationId, staffCompliance);
+  const riskRegisterRows = applyOverridesForSheet(organizationId, 'Risk Assessment Register', riskAssessmentRows(organizationId));
+  const participantRows = applyOverridesForSheet(organizationId, 'Participant Register', participantRegisterRows(organizationId));
+  const staffRows = applyOverridesForSheet(organizationId, 'Staff Register', staffRegisterRows(organizationId, staffCompliance));
 
   const riskKeyPlaceholders = RISK_ASSESSMENT_FIELD_KEYS.map(() => '?').join(', ');
   const sigRiskRows = (() => {
@@ -1059,11 +1113,11 @@ function buildRegisterSummary(views) {
 }
 
 const VIEW_METADATA = {
-  staff_compliance_register: { date_column: 'Next expiry', status_column: 'Status' },
+  staff_compliance_register: { date_column: 'Next expiry', status_column: 'Status', editable: true, key_column_index: 0 },
   incident_register: { date_column: 'When', source_column: 'Source', manual_id_column: 'Manual ID' },
-  risk_assessment_register: { date_column: null },
-  participant_register: { date_column: 'Plan end', status_column: 'Status' },
-  staff_register: { date_column: 'Last shift date', status_column: 'Status' }
+  risk_assessment_register: { date_column: null, editable: true, key_column_index: 0 },
+  participant_register: { date_column: 'Plan end', status_column: 'Status', editable: true, key_column_index: 0 },
+  staff_register: { date_column: 'Last shift date', status_column: 'Status', editable: true, key_column_index: 0 }
 };
 
 /**

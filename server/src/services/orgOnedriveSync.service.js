@@ -426,6 +426,24 @@ function clearRows(ws, startRow) {
   }
 }
 
+/** Convert a CSS hex colour (#1d4ed8 / #abc) to ExcelJS ARGB (FF1D4ED8). */
+function hexToArgb(hex, fallback = 'FF1D4ED8') {
+  const h = String(hex || '').trim().replace(/^#/, '');
+  if (/^[0-9a-fA-F]{6}$/.test(h)) return `FF${h.toUpperCase()}`;
+  if (/^[0-9a-fA-F]{3}$/.test(h)) return `FF${h.split('').map((c) => c + c).join('').toUpperCase()}`;
+  return fallback;
+}
+
+/** Recolour a worksheet's header band to the org's brand primary colour with white bold text. */
+function applyBrandToHeaderRow(ws, headerRowNum, primaryArgb) {
+  if (!ws || !headerRowNum || headerRowNum < 1) return;
+  const row = ws.getRow(headerRowNum);
+  row.eachCell({ includeEmpty: false }, (cell) => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: primaryArgb } };
+    cell.font = { ...(cell.font || {}), bold: true, color: { argb: 'FFFFFFFF' } };
+  });
+}
+
 function replaceBrandingInCellValue(value, orgName) {
   const from = /Pristine Lifestyle Solutions(?: Pty Ltd)?/gi;
   if (value == null) return value;
@@ -505,8 +523,11 @@ export async function syncTemplateRegistersNow(organizationId, suppliedAccessTok
   const templateBuffer = await readFile(REGISTERS_TEMPLATE_PATH);
   const templateWb = new ExcelJS.Workbook();
   await templateWb.xlsx.load(templateBuffer);
-  const org = db.prepare('SELECT name FROM organisations WHERE id = ?').get(organizationId);
+  const org = db
+    .prepare('SELECT name, brand_primary_color, brand_accent_color FROM organisations WHERE id = ?')
+    .get(organizationId);
   const orgName = (org?.name || 'Nexus Core organisation').trim();
+  const primaryArgb = hexToArgb(org?.brand_primary_color, 'FF1D4ED8');
   await ensureFolderPath(accessToken, [ROOT_NAME, FOLDER_REGISTER]);
 
   const sheetData = buildTemplateDataBySheet(organizationId);
@@ -532,6 +553,8 @@ export async function syncTemplateRegistersNow(organizationId, suppliedAccessTok
     copyWorksheetTemplate(src, outWs);
     replaceTemplateBranding(outWs, orgName);
     const startRow = dataStartBySheet[src.name];
+    // Brand the column-header band (the row immediately above the data) with the org's colour.
+    if (startRow && startRow > 1) applyBrandToHeaderRow(outWs, startRow - 1, primaryArgb);
     const rows = sheetData[src.name] || [];
     if (src.name === 'Risk register') {
       appendRiskRegisterActivityRows(outWs, rows);

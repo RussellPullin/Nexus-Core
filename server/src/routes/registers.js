@@ -2,7 +2,7 @@ import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import { requireCoordinatorOrAdmin } from '../middleware/roles.js';
 import { db } from '../db/index.js';
-import { buildRegisterSnapshotForOrg } from '../services/registerSnapshots.service.js';
+import { buildRegisterSnapshotForOrg, EDITABLE_REGISTER_VIEWS } from '../services/registerSnapshots.service.js';
 
 const router = Router();
 
@@ -182,6 +182,60 @@ router.delete('/incidents/:id', requireCoordinatorOrAdmin, (req, res) => {
       .run(req.params.id, orgId);
     if (!info.changes) return res.status(404).json({ error: 'Incident entry not found' });
     res.json({ id: req.params.id, deleted: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * Set (upsert) a manual override for a single cell of a derived register. Overrides are layered
+ * on top of the auto-generated rows so editing a register never mutates the source records.
+ */
+router.put('/:viewId/cell', requireCoordinatorOrAdmin, (req, res) => {
+  try {
+    const orgId = requireOrg(req, res);
+    if (!orgId) return;
+    const viewId = String(req.params.viewId || '').trim();
+    if (!EDITABLE_REGISTER_VIEWS[viewId]) {
+      return res.status(400).json({ error: 'This register cannot be edited inline.' });
+    }
+    const rowKey = String(req.body?.row_key ?? '').trim();
+    const colIndex = Number.parseInt(req.body?.col_index, 10);
+    if (!rowKey) return res.status(400).json({ error: 'row_key is required' });
+    if (!Number.isInteger(colIndex) || colIndex < 0) {
+      return res.status(400).json({ error: 'col_index must be a non-negative integer' });
+    }
+    const value = req.body?.value == null ? '' : String(req.body.value);
+    db.prepare(
+      `INSERT INTO register_cell_overrides (org_id, view_id, row_key, col_index, value, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(org_id, view_id, row_key, col_index)
+       DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = datetime('now')`
+    ).run(orgId, viewId, rowKey, colIndex, value, req.session.user.id);
+    res.json(buildRegisterSnapshotForOrg(orgId));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Clear a manual override so the cell reverts to its derived value. */
+router.delete('/:viewId/cell', requireCoordinatorOrAdmin, (req, res) => {
+  try {
+    const orgId = requireOrg(req, res);
+    if (!orgId) return;
+    const viewId = String(req.params.viewId || '').trim();
+    if (!EDITABLE_REGISTER_VIEWS[viewId]) {
+      return res.status(400).json({ error: 'This register cannot be edited inline.' });
+    }
+    const rowKey = String(req.query.row_key ?? '').trim();
+    const colIndex = Number.parseInt(req.query.col_index, 10);
+    if (!rowKey || !Number.isInteger(colIndex)) {
+      return res.status(400).json({ error: 'row_key and col_index are required' });
+    }
+    db.prepare(
+      'DELETE FROM register_cell_overrides WHERE org_id = ? AND view_id = ? AND row_key = ? AND col_index = ?'
+    ).run(orgId, viewId, rowKey, colIndex);
+    res.json(buildRegisterSnapshotForOrg(orgId));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

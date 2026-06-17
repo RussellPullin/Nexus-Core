@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
-import { registers, documentLibrary, participants as participantsApi, staff as staffApi } from '../lib/api.js';
+import { registers, documentLibrary, participants as participantsApi, staff as staffApi, organisations } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import DocumentPreviewModal from '../components/DocumentPreviewModal';
 import '../App.css';
@@ -88,7 +88,12 @@ export default function RegistersPage() {
   const [incidentForm, setIncidentForm] = useState(EMPTY_INCIDENT_FORM);
   const [editingIncidentId, setEditingIncidentId] = useState(null);
   const [savingIncident, setSavingIncident] = useState(false);
+  const [branding, setBranding] = useState({ primaryColor: '#1d4ed8', accentColor: '#0ea5e9' });
+  const [editCell, setEditCell] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const [savingCell, setSavingCell] = useState(false);
   const canManageIncidents = isAdmin || canAccessCaseTasks;
+  const canEditRegisters = isAdmin || canAccessCaseTasks;
 
   useEffect(() => {
     let cancelled = false;
@@ -97,9 +102,10 @@ export default function RegistersPage() {
       documentLibrary.listMasters().catch(() => []),
       registers.incidents().catch(() => ({ entries: [] })),
       participantsApi.list('', false).catch(() => []),
-      staffApi.list(false).catch(() => [])
+      staffApi.list(false).catch(() => []),
+      organisations.getMyProfile().catch(() => null)
     ])
-      .then(([snapshot, masters, incidents, participantRows, staffRows]) => {
+      .then(([snapshot, masters, incidents, participantRows, staffRows, profile]) => {
         if (cancelled) return;
         setData(snapshot);
         const first = snapshot?.views?.[0]?.id;
@@ -108,6 +114,12 @@ export default function RegistersPage() {
         setIncidentEntries(incidents?.entries || []);
         setParticipantsList(participantRows || []);
         setStaffList(staffRows || []);
+        if (profile?.branding) {
+          setBranding({
+            primaryColor: profile.branding.primaryColor || '#1d4ed8',
+            accentColor: profile.branding.accentColor || '#0ea5e9'
+          });
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(e.message || 'Could not load registers');
@@ -161,6 +173,38 @@ export default function RegistersPage() {
       index,
       dir: prev?.viewId === active.id && prev.index === index && prev.dir === 'asc' ? 'desc' : 'asc'
     }));
+  };
+
+  const isEditableView = !!active?.editable && canEditRegisters;
+  const keyColIndex = active?.key_column_index ?? 0;
+
+  const beginEditCell = (rowKey, colIndex, currentValue) => {
+    if (!isEditableView) return;
+    setEditCell({ rowKey, colIndex });
+    setEditValue(String(currentValue ?? ''));
+  };
+
+  const cancelEditCell = () => {
+    setEditCell(null);
+    setEditValue('');
+  };
+
+  const commitEditCell = async () => {
+    if (!editCell || !active?.id) return cancelEditCell();
+    setSavingCell(true);
+    try {
+      const snapshot = await registers.setCell(active.id, {
+        rowKey: editCell.rowKey,
+        colIndex: editCell.colIndex,
+        value: editValue
+      });
+      if (snapshot?.views) setData(snapshot);
+      cancelEditCell();
+    } catch (err) {
+      setError(err.message || 'Could not save edit');
+    } finally {
+      setSavingCell(false);
+    }
   };
 
   const openNewIncident = () => {
@@ -271,7 +315,7 @@ export default function RegistersPage() {
   return (
     <div className="content">
       <div className="page-header" style={{ marginBottom: '1rem' }}>
-        <h1 style={{ margin: 0 }}>Registers</h1>
+        <h1 style={{ margin: 0, color: branding.primaryColor }}>Registers</h1>
         <p style={{ margin: '0.35rem 0 0', color: '#64748b', maxWidth: '52rem' }}>
           Live view of the same data Nexus pushes to <strong>Nexus Core / Register</strong> in OneDrive (when connected).
           Extending a Nexus feature with new compliance data should update rows here and in the next register sync.
@@ -284,20 +328,20 @@ export default function RegistersPage() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-        <button type="button" className="card" onClick={() => jumpTo('staff_compliance_register', 'Expiring Soon')} style={{ textAlign: 'left', padding: '1rem', border: '1px solid #e2e8f0', cursor: 'pointer' }}>
+        <button type="button" className="card" onClick={() => jumpTo('staff_compliance_register', 'Expiring Soon')} style={{ textAlign: 'left', padding: '1rem', border: '1px solid #e2e8f0', borderLeft: `4px solid ${branding.accentColor}`, cursor: 'pointer' }}>
           <div style={{ color: '#64748b', fontSize: '0.85rem' }}>Staff with expiring certs</div>
           <strong style={{ fontSize: '1.5rem' }}>{data?.summary?.staff_expiring_certs_60_days ?? 0}</strong>
           <div style={{ color: '#94a3b8', fontSize: '0.8rem' }}>Next 60 days</div>
         </button>
-        <div className="card" style={{ padding: '1rem' }}>
+        <div className="card" style={{ padding: '1rem', borderLeft: `4px solid ${branding.accentColor}` }}>
           <div style={{ color: '#64748b', fontSize: '0.85rem' }}>Incidents this month</div>
           <strong style={{ fontSize: '1.5rem' }}>{data?.summary?.incidents_this_month ?? 0}</strong>
         </div>
-        <div className="card" style={{ padding: '1rem' }}>
+        <div className="card" style={{ padding: '1rem', borderLeft: `4px solid ${branding.accentColor}` }}>
           <div style={{ color: '#64748b', fontSize: '0.85rem' }}>Participants missing risk assessment</div>
           <strong style={{ fontSize: '1.5rem' }}>{data?.summary?.participants_missing_risk_assessment ?? 0}</strong>
         </div>
-        <div className="card" style={{ padding: '1rem' }}>
+        <div className="card" style={{ padding: '1rem', borderLeft: `4px solid ${branding.accentColor}` }}>
           <div style={{ color: '#64748b', fontSize: '0.85rem' }}>Plans expiring soon</div>
           <strong style={{ fontSize: '1.5rem' }}>{data?.summary?.participants_plan_expiring_60_days ?? 0}</strong>
           <div style={{ color: '#94a3b8', fontSize: '0.8rem' }}>Next 60 days</div>
@@ -313,8 +357,10 @@ export default function RegistersPage() {
               onClick={() => {
                 setActiveId(v.id);
                 setSort(null);
+                cancelEditCell();
               }}
               className={v.id === active?.id ? 'btn btn-primary' : 'btn btn-secondary'}
+              style={v.id === active?.id ? { background: branding.primaryColor, borderColor: branding.primaryColor } : undefined}
             >
               {v.title} <span style={{ opacity: 0.75 }}>({v.row_count})</span>
             </button>
@@ -327,6 +373,11 @@ export default function RegistersPage() {
               <div>
                 <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{active.title}</h2>
                 {active.data_source && <p style={{ margin: '0.2rem 0 0', color: '#64748b', fontSize: '0.85rem' }}>Source: <code>{active.data_source}</code></p>}
+                {isEditableView && (
+                  <p style={{ margin: '0.2rem 0 0', color: branding.accentColor, fontSize: '0.8rem' }}>
+                    Click any cell to edit. Manual edits override the auto-generated value and sync to the register files.
+                  </p>
+                )}
               </div>
               {active.id === 'incident_register' && canManageIncidents && (
                 <button type="button" className="btn btn-primary" onClick={openNewIncident}>Log Incident</button>
@@ -363,11 +414,11 @@ export default function RegistersPage() {
                 <thead>
                   <tr>
                     {visibleColumnIndexes.map(({ col, index }) => (
-                      <th key={col} onClick={() => handleSort(index)} style={{ position: 'sticky', top: 0, background: '#f8fafc', cursor: 'pointer', zIndex: 1 }}>
+                      <th key={col} onClick={() => handleSort(index)} style={{ position: 'sticky', top: 0, background: branding.primaryColor, color: '#fff', cursor: 'pointer', zIndex: 1 }}>
                         {col}{sort?.viewId === active.id && sort.index === index ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
                       </th>
                     ))}
-                    {active.id === 'incident_register' && <th style={{ position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>Actions</th>}
+                    {active.id === 'incident_register' && <th style={{ position: 'sticky', top: 0, background: branding.primaryColor, color: '#fff', zIndex: 1 }}>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -379,11 +430,41 @@ export default function RegistersPage() {
                       const manualIdIdx = getColumnIndex(active, 'Manual ID');
                       const source = sourceIdx >= 0 ? row[sourceIdx] : '';
                       const manualId = manualIdIdx >= 0 ? row[manualIdIdx] : '';
+                      const rowKey = String(row[keyColIndex] ?? '');
                       return (
                         <tr key={`${ri}-${row.join('|')}`} style={{ background: ri % 2 ? '#f8fafc' : '#fff' }}>
-                          {visibleColumnIndexes.map(({ index }) => (
-                            <td key={index}>{statusBadge(row[index] ?? '')}</td>
-                          ))}
+                          {visibleColumnIndexes.map(({ index }) => {
+                            const editing = isEditableView && editCell && editCell.rowKey === rowKey && editCell.colIndex === index;
+                            if (editing) {
+                              return (
+                                <td key={index} style={{ padding: '0.15rem' }}>
+                                  <input
+                                    autoFocus
+                                    className="form-input"
+                                    value={editValue}
+                                    disabled={savingCell}
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    onBlur={commitEditCell}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') { e.preventDefault(); commitEditCell(); }
+                                      else if (e.key === 'Escape') { e.preventDefault(); cancelEditCell(); }
+                                    }}
+                                    style={{ minWidth: '8rem', fontSize: '0.82rem', padding: '0.2rem 0.35rem' }}
+                                  />
+                                </td>
+                              );
+                            }
+                            return (
+                              <td
+                                key={index}
+                                onClick={() => isEditableView && rowKey && beginEditCell(rowKey, index, row[index])}
+                                title={isEditableView && rowKey ? 'Click to edit' : undefined}
+                                style={{ cursor: isEditableView && rowKey ? 'text' : 'default' }}
+                              >
+                                {statusBadge(row[index] ?? '')}
+                              </td>
+                            );
+                          })}
                           {active.id === 'incident_register' && (
                             <td>
                               {source === 'Manual' && canManageIncidents ? (

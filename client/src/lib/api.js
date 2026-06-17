@@ -48,6 +48,16 @@ export const registers = {
   updateIncident: (id, data) =>
     fetchApi(`/registers/incidents/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data || {}) }),
   deleteIncident: (id) => fetchApi(`/registers/incidents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // Upsert a manual override for one cell of a derived register; resolves to the fresh snapshot.
+  setCell: (viewId, { rowKey, colIndex, value }) =>
+    fetchApi(`/registers/${encodeURIComponent(viewId)}/cell`, {
+      method: 'PUT',
+      body: JSON.stringify({ row_key: rowKey, col_index: colIndex, value })
+    }),
+  clearCell: (viewId, { rowKey, colIndex }) => {
+    const q = new URLSearchParams({ row_key: rowKey, col_index: String(colIndex) });
+    return fetchApi(`/registers/${encodeURIComponent(viewId)}/cell?${q.toString()}`, { method: 'DELETE' });
+  },
   exportUrl: ({ view, format = 'csv', from, to } = {}) => {
     const q = new URLSearchParams();
     if (view) q.set('view', view);
