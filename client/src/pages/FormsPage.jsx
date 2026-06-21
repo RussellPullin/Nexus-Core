@@ -58,6 +58,12 @@ export default function FormsPage() {
     default_renewal_days: 365,
     dropbox_sign_enabled: false
   });
+
+  // Library send stages (participant)
+  const [sendStagesData, setSendStagesData] = useState(null);
+  const [sendStagesDraft, setSendStagesDraft] = useState({});
+  const [sendStagesBusy, setSendStagesBusy] = useState(false);
+  const [sendStagesMsg, setSendStagesMsg] = useState('');
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
 
@@ -78,6 +84,23 @@ export default function FormsPage() {
       .catch(() => setLibraryTemplates([]))
       .finally(() => setLibraryLoading(false));
   }, []);
+
+  const reloadSendStages = useCallback(() => {
+    if (!orgId || !isAdmin) return;
+    documentLibrary.getSendStages('participant_onboarding')
+      .then((data) => {
+        setSendStagesData(data);
+        const draft = {};
+        for (const stage of (data.stages || [])) draft[stage] = new Set();
+        for (const m of (data.masters || [])) {
+          for (const stage of (m.active_stages || [])) {
+            if (draft[stage]) draft[stage].add(m.id);
+          }
+        }
+        setSendStagesDraft(draft);
+      })
+      .catch(() => setSendStagesData(null));
+  }, [orgId, isAdmin]);
 
   const reloadSettings = useCallback(() => {
     if (!orgId || !isAdmin) { setSettingsState(null); return; }
@@ -100,7 +123,8 @@ export default function FormsPage() {
     reloadDocPacks();
     reloadLibrary();
     reloadSettings();
-  }, [reloadDocPacks, reloadLibrary, reloadSettings]);
+    reloadSendStages();
+  }, [reloadDocPacks, reloadLibrary, reloadSettings, reloadSendStages]);
 
   // ── Policy pack handlers ─────────────────────────────────────────────────
 
@@ -194,6 +218,34 @@ export default function FormsPage() {
       setMessage(err.message || 'Delete failed');
     } finally {
       setPackWorking(false);
+    }
+  };
+
+  // ── Send stages handlers ─────────────────────────────────────────────────
+
+  const toggleSendStage = (masterId, stage) => {
+    setSendStagesDraft((prev) => {
+      const current = new Set(prev[stage] || []);
+      if (current.has(masterId)) current.delete(masterId); else current.add(masterId);
+      return { ...prev, [stage]: current };
+    });
+  };
+
+  const handleSaveSendStages = async () => {
+    setSendStagesBusy(true);
+    setSendStagesMsg('');
+    try {
+      const stages = {};
+      for (const [stage, ids] of Object.entries(sendStagesDraft)) {
+        stages[stage] = [...ids];
+      }
+      await documentLibrary.saveSendStages('participant_onboarding', stages);
+      setSendStagesMsg('Saved.');
+      reloadSendStages();
+    } catch (err) {
+      setSendStagesMsg(err.message || 'Save failed');
+    } finally {
+      setSendStagesBusy(false);
     }
   };
 
@@ -425,7 +477,73 @@ export default function FormsPage() {
         )}
       </section>
 
-      {/* ── 5. Policy packs ──────────────────────────────────────────────── */}
+      {/* ── 5. Participant onboarding send stages ────────────────────────── */}
+      {isAdmin && sendStagesData && (
+        <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
+          <h2 className="forms-section-heading">Participant onboarding — when to send each document</h2>
+          <p className="forms-lede">
+            Tick which library documents go out at each stage. Changes apply to all future intakes — existing participants are unaffected.
+          </p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '0.75rem' }}>
+            <div>
+              <h3 className="forms-subheading" style={{ marginBottom: '0.25rem' }}>Stage 1 — On intake submit</h3>
+              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.6rem', marginTop: 0 }}>
+                Sent automatically the moment a participant submits their intake form.
+              </p>
+              <div className="forms-policy-checks">
+                {(sendStagesData.masters || []).map((m) => (
+                  <label key={m.id} className="forms-policy-check">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(sendStagesDraft.participant_intake?.has(m.id))}
+                      onChange={() => toggleSendStage(m.id, 'participant_intake')}
+                    />
+                    {m.display_name}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="forms-subheading" style={{ marginBottom: '0.25rem' }}>Stage 2 — With Service Agreement</h3>
+              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.6rem', marginTop: 0 }}>
+                Attached when the coordinator generates and sends the Service Agreement.
+              </p>
+              <div className="forms-policy-checks">
+                {(sendStagesData.masters || []).map((m) => (
+                  <label key={m.id} className="forms-policy-check">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(sendStagesDraft.participant_sa?.has(m.id))}
+                      onChange={() => toggleSendStage(m.id, 'participant_sa')}
+                    />
+                    {m.display_name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSaveSendStages}
+              disabled={sendStagesBusy}
+            >
+              {sendStagesBusy ? 'Saving…' : 'Save stages'}
+            </button>
+            {sendStagesMsg && (
+              <span style={{ fontSize: '0.875rem', color: sendStagesMsg === 'Saved.' ? '#166534' : '#991b1b' }}>
+                {sendStagesMsg}
+              </span>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* ── 6. Policy packs ──────────────────────────────────────────────── */}
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
         <h2 className="forms-section-heading">Policy packs — onboarding</h2>
         <p className="forms-lede">

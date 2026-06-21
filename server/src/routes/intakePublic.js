@@ -149,11 +149,10 @@ async function sendIntakePoliciesAndNotify(participantId, organisationId) {
     const libMasters = db.prepare(`
       SELECT m.id, m.slug, m.display_name, m.engine
       FROM document_library_masters m
-      JOIN document_library_org_clones c ON c.master_id = m.id
-      WHERE c.org_id = ?
-        AND c.is_active = 1
+      JOIN org_library_send_stages s ON s.master_id = m.id
+      WHERE s.org_id = ?
+        AND s.stage = 'participant_intake'
         AND m.is_active = 1
-        AND JSON_EXTRACT(m.manifest_json, '$.pack') = 'participant_onboarding'
       ORDER BY m.display_name COLLATE NOCASE
     `).all(organisationId);
 

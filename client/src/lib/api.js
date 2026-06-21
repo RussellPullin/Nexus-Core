@@ -661,6 +661,11 @@ export const documentLibrary = {
   renderMaster: (masterId, body = {}) => fetchApi(`/document-library/masters/${masterId}/render`, {
     method: 'POST',
     body: JSON.stringify(body)
+  }),
+  getSendStages: (workflow) => fetchApi(`/document-library/send-stages?workflow=${encodeURIComponent(workflow)}`),
+  saveSendStages: (workflow, stages) => fetchApi('/document-library/send-stages', {
+    method: 'PUT',
+    body: JSON.stringify({ workflow, stages })
   })
 };
 
