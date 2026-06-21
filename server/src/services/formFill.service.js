@@ -201,6 +201,31 @@ async function embedCoordinatorSignature(doc, coordinatorSignatureDataUrl) {
 export { getServiceAgreementTemplatePath, getSupportPlanTemplatePath };
 
 /**
+ * Fill a PDF AcroForm using a flat token map (field name → value).
+ * Fields that are not TextFields (checkboxes, radio, etc.) are silently skipped.
+ * The form is flattened after filling so values are embedded as static content.
+ * @param {Buffer} pdfBytes
+ * @param {Record<string, string>} tokens
+ * @returns {Promise<Buffer>}
+ */
+export async function fillAcroFormWithTokens(pdfBytes, tokens) {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const form = doc.getForm();
+  for (const field of form.getFields()) {
+    const name = field.getName();
+    if (name in tokens && tokens[name] != null && tokens[name] !== '') {
+      try {
+        form.getTextField(name).setText(String(tokens[name]));
+      } catch {
+        // Not a TextField (checkbox, radio, etc.) — skip
+      }
+    }
+  }
+  try { form.flatten(); } catch { /* non-fatal if form has no fields */ }
+  return Buffer.from(await doc.save());
+}
+
+/**
  * Build data object for form filling from participant, plan, intake.
  * @param {object} [context] - optional { db } for building detailed schedule from NDIS line items
  */

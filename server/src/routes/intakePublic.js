@@ -16,6 +16,8 @@ import {
 } from '../services/participantIntakeToken.service.js';
 import { getOrgRenderContext } from '../services/orgContext.service.js';
 import { buildPolicyAttachmentsForEmail } from '../services/onboardingDocumentPacks.service.js';
+import { renderLibraryDocument } from '../services/documentLibraryRender.service.js';
+import { fillAcroFormWithTokens } from '../services/formFill.service.js';
 import { sendEmailViaRelay } from '../services/notification.service.js';
 
 const router = Router();
@@ -125,21 +127,66 @@ async function sendIntakePoliciesAndNotify(participantId, organisationId) {
     .get(organisationId);
   const orgName = org?.trading_name?.trim() || org?.name?.trim() || 'Your service provider';
 
-  // ── 1. Send policy pack to participant ────────────────────────────────────
+  // ── 1. Gather all participant onboarding attachments ─────────────────────
+  const allAttachments = [];
+
+  // 1a. Uploaded policy PDFs from the org's participant onboarding pack
   try {
     const { attachments } = buildPolicyAttachmentsForEmail(
       profile.id,
       profile.default_participant_onboarding_pack_id || null,
       'participant_onboarding',
-      null  // projectRoot no longer used — resolved from DATA_DIR inside the function
+      null
     );
+    allAttachments.push(...attachments);
+  } catch (err) {
+    console.warn('[intake-submit] policy pack build failed:', err?.message);
+  }
 
-    if (attachments.length > 0) {
-      const attachmentsForEmail = attachments.map((a) => ({
+  // 1b. Document library templates tagged pack=participant_onboarding
+  try {
+    const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(participantId);
+    const libMasters = db.prepare(`
+      SELECT m.id, m.slug, m.display_name, m.engine
+      FROM document_library_masters m
+      JOIN document_library_org_clones c ON c.master_id = m.id
+      WHERE c.org_id = ?
+        AND c.is_active = 1
+        AND m.is_active = 1
+        AND JSON_EXTRACT(m.manifest_json, '$.pack') = 'participant_onboarding'
+      ORDER BY m.display_name COLLATE NOCASE
+    `).all(organisationId);
+
+    for (const master of libMasters) {
+      try {
+        const rendered = renderLibraryDocument({
+          masterId: master.id,
+          orgId: organisationId,
+          participant: fullParticipant
+        });
+        let buf = rendered.buffer;
+        if (rendered.needsAcroFormFill && buf) {
+          buf = await fillAcroFormWithTokens(buf, rendered.tokens);
+        }
+        if (buf) {
+          const safeName = (master.display_name || master.slug).replace(/[/\\?%*:|"<>]/g, '_');
+          allAttachments.push({ filename: `${safeName}.pdf`, content: buf, contentType: 'application/pdf' });
+        }
+      } catch (err) {
+        console.warn(`[intake-submit] library doc render failed (${master.slug}):`, err?.message);
+      }
+    }
+  } catch (err) {
+    console.warn('[intake-submit] library template query failed:', err?.message);
+  }
+
+  // ── 2. Send participant email with all attachments ────────────────────────
+  if (allAttachments.length > 0) {
+    try {
+      const attachmentsForEmail = allAttachments.map((a) => ({
         ...a,
         content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content
       }));
-
       const subject = `${orgName}: welcome — your onboarding documents`;
       const text =
         `Hi ${participant.name || 'there'},\n\n` +
@@ -149,24 +196,16 @@ async function sendIntakePoliciesAndNotify(participantId, organisationId) {
         `Your coordinator will be in touch shortly to finalise your Service Agreement.\n\n` +
         `If you have any questions please reply to this email.\n`;
 
-      await sendEmailViaRelay(
-        adminUser.id,
-        participant.email.trim(),
-        subject,
-        text,
-        null,
-        attachmentsForEmail,
-        orgName
-      );
-      console.log(`[intake-submit] policy pack sent to ${participant.email} (${attachments.length} attachments)`);
-    } else {
-      console.log('[intake-submit] no policy attachments found — skipping participant policy email');
+      await sendEmailViaRelay(adminUser.id, participant.email.trim(), subject, text, null, attachmentsForEmail, orgName);
+      console.log(`[intake-submit] onboarding docs sent to ${participant.email} (${allAttachments.length} attachments)`);
+    } catch (err) {
+      console.warn('[intake-submit] participant email send failed:', err?.message);
     }
-  } catch (err) {
-    console.warn('[intake-submit] policy pack send failed:', err?.message);
+  } else {
+    console.log('[intake-submit] no onboarding attachments found — skipping participant email');
   }
 
-  // ── 2. Notify admin that intake is complete ───────────────────────────────
+  // ── 3. Notify admin that intake is complete ───────────────────────────────
   try {
     const participantName = participant.name || 'A participant';
     const subject = `Nexus: ${participantName} completed their intake form`;
