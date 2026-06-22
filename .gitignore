@@ -18,3 +18,7 @@ data/
 # OS / editor
 .DS_Store
 *.log
+
+# Local tooling / temp
+.claude/
+supabase/.temp/
