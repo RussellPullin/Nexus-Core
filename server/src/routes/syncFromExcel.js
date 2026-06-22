@@ -155,6 +155,7 @@ router.post('/from-excel', async (req, res) => {
 
     const result = processShifts(shifts, {
       orgId,
+      requireCompletionEvidence: true,
       log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
       logWarn: (msg, data) => console.warn('[sync-from-excel]', msg, data || ''),
       logError: (msg, err) => console.error('[sync-from-excel]', msg, err),
@@ -249,6 +250,7 @@ router.post('/from-shifter', async (req, res) => {
     const result = processShifts(pulled.shifts, {
       orgId,
       skipUnchanged,
+      requireCompletionEvidence: true,
       log: (msg, data) => console.log('[sync-from-shifter]', msg, data || ''),
       logWarn: (msg, data) => console.warn('[sync-from-shifter]', msg, data || ''),
       logError: (msg, err) => console.error('[sync-from-shifter]', msg, err),

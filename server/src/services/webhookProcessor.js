@@ -128,15 +128,48 @@ function isReimportPayloadUnchanged({
 }
 
 /**
+ * Did the worker actually deliver/complete this shift?
+ *
+ * Used to gate pull imports (Excel / Shifter Supabase) so that a scheduled shift which was
+ * never actually worked is NOT flipped to 'completed' and then double-billed alongside the
+ * real shift the worker separately logged for that day.
+ *
+ * Deliberately ignores start/end/duration: a scheduled placeholder row echoed back from the
+ * roster carries those times even though no support was delivered. Evidence of delivery is
+ * either an explicit completed signal from the source row, or worker-entered actuals
+ * (a progress note, mood, incidents, travel, or expenses).
+ *
+ * @param {{ completed?: boolean, sessionDetails?: string|null, mood?: string|null,
+ *   incidents?: string|null, travelKm?: any, travelTimeMin?: any, expensesVal?: number }} p
+ * @returns {boolean}
+ */
+function hasWorkerCompletionEvidence({ completed, sessionDetails, mood, incidents, travelKm, travelTimeMin, expensesVal }) {
+  // Explicit signal from the source row (e.g. Shifter status / clock-out) wins both ways.
+  if (completed === true) return true;
+  if (completed === false) return false;
+  if (sessionDetails && String(sessionDetails).trim()) return true;
+  if (mood && String(mood).trim()) return true;
+  if (incidents && String(incidents).trim()) return true;
+  if (Number(travelKm) > 0) return true;
+  if (Number(travelTimeMin) > 0) return true;
+  if (Number(expensesVal) > 0) return true;
+  return false;
+}
+
+/**
  * Process an array of shifts (from webhook or Excel).
  * @param {Array} shiftsArray - Shifts in webhook format
- * @param {object} options - { orgId, log, skipUnchanged?: boolean } — when skipUnchanged, matched shifts that
- *   already match Nexus (by shifter_shift_id + latest progress note) are not written again.
+ * @param {object} options - { orgId, log, skipUnchanged?: boolean, requireCompletionEvidence?: boolean }.
+ *   When skipUnchanged, matched shifts that already match Nexus (by shifter_shift_id + latest progress
+ *   note) are not written again. When requireCompletionEvidence (used by Excel/Shifter pulls), a row with
+ *   no proof of delivery is never created or flipped to 'completed' — any existing scheduled shift is left
+ *   untouched so it cannot be billed.
  * @returns {{ processed, matched, unmatched, skipped, unchanged? }}
  */
 export function processShifts(shiftsArray, options = {}) {
   const orgId = options.orgId ?? null;
   const skipUnchanged = !!options.skipUnchanged;
+  const requireCompletionEvidence = !!options.requireCompletionEvidence;
   const log = options.log || console.log;
   const logWarn = options.logWarn || console.warn;
   const logError = options.logError || console.error;
@@ -271,6 +304,31 @@ export function processShifts(shiftsArray, options = {}) {
             endTime: finishTime,
             shiftId: shiftId || undefined
           });
+        }
+
+        // Completion gate (pull sources only): never turn a scheduled-but-unworked shift into a
+        // billable 'completed' shift. Without this, a scheduled shift echoed back from Shifter/Excel
+        // gets marked completed and is billed alongside the real shift the worker logged → double billing.
+        if (requireCompletionEvidence &&
+            !hasWorkerCompletionEvidence({ completed: s.completed, sessionDetails, mood, incidents, travelKm, travelTimeMin, expensesVal })) {
+          if (matchingShift) {
+            const existingStatus = String(matchingShift.status || '').trim().toLowerCase();
+            if (existingStatus === 'completed' || existingStatus === 'completed_by_admin') {
+              unchanged++;
+              log('Skipped re-import without completion evidence (already completed; left unchanged)', { shiftId });
+            } else {
+              skipped++;
+              log('Skipped shift without completion evidence (left as scheduled; not billed)', {
+                shiftId,
+                status: matchingShift.status,
+              });
+            }
+          } else {
+            skipped++;
+            log('Skipped shift without completion evidence (no delivery recorded)', { shiftId });
+          }
+          processed++;
+          continue;
         }
 
         let resolvedShiftId;

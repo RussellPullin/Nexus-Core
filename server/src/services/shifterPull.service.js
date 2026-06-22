@@ -467,6 +467,28 @@ function mapShifterRowToWebhookShift(row, lookups = null, tzSpec = null) {
     sessionDetails = fromProgressNote || fromRowSession || '';
   }
 
+  // Did the worker actually complete this shift? Nexus must not bill a scheduled shift that was
+  // never worked. A scheduled placeholder pushed to Shifter is pulled back with a 'scheduled'/empty
+  // status and no progress note; a genuinely worked shift carries a completed status, a clock-out
+  // time, or a progress note. true/false here is authoritative; undefined defers to the importer's
+  // worker-actuals heuristic (mood/incidents/travel/expenses).
+  const statusRaw = pickString(row, ['status', 'shift_status', 'state', 'progress_status', 'shift_state']).toLowerCase();
+  const completionTimestamp = pickString(row, [
+    'completed_at', 'clock_out', 'clocked_out_at', 'clock_out_at',
+    'actual_end', 'actual_end_time', 'actual_finish', 'actual_finish_time',
+    'finished_at', 'ended_at', 'check_out_time', 'checkout_time', 'checked_out_at',
+  ]);
+  let completed;
+  if (/cancel|no[\s_-]?show|missed|declin|absent/.test(statusRaw)) {
+    completed = false;
+  } else if (/complete|finish|done|submitted|approved|delivered/.test(statusRaw) || completionTimestamp) {
+    completed = true;
+  } else if (fromProgressNote) {
+    completed = true;
+  } else {
+    completed = undefined;
+  }
+
   return {
     shiftId,
     date,
@@ -481,6 +503,7 @@ function mapShifterRowToWebhookShift(row, lookups = null, tzSpec = null) {
     incidents: pickString(row, ['incidents']),
     mood: pickString(row, ['mood']),
     sessionDetails,
+    completed,
     medicationChecks: row.medication_checks || {},
   };
 }
