@@ -8,6 +8,7 @@ import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { billingParticipantFilterFromRequest, staffTableOrgFilterFromRequest } from '../lib/orgScopeSql.js';
+import { shiftCompletionEvidenceSql } from '../lib/shiftBillingEligibility.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
 import { fileToRows, importCaseNotesFromRows } from '../lib/caseNotesCsvImport.js';
 
@@ -118,6 +119,7 @@ router.get('/billable-summary', (req, res) => {
         AND (s.billing_invoice_id IS NULL OR s.billing_invoice_id = '')
         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id)
         AND s.start_time >= ? AND s.start_time <= ?
+        AND ${shiftCompletionEvidenceSql('s')}
     `).all(...bf.params, `${from}T00:00:00`, `${to}T23:59:59`);
     let unbilledShiftHours = 0;
     unbilledShifts.forEach((s) => {
@@ -135,6 +137,7 @@ router.get('/billable-summary', (req, res) => {
         AND (s.billing_invoice_id IS NULL OR s.billing_invoice_id = '')
         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id)
         AND s.start_time >= ? AND s.start_time <= ?
+        AND ${shiftCompletionEvidenceSql('s')}
     `).all(...bf.params, `${from}T00:00:00`, `${to}T23:59:59`);
     const unbilledShiftValue = shiftLineItems.reduce((s, li) => s + (li.quantity || 0) * (li.unit_price || 0), 0);
 

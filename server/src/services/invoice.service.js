@@ -5,6 +5,7 @@ import { recordEvent } from './learningEvent.service.js';
 import { syncShiftLineItemsWithProgressNote } from './shiftLineItems.service.js';
 import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
 import { getShiftLocalDateString } from '../lib/ndisDay.js';
+import { shiftHasCompletionEvidence } from '../lib/shiftBillingEligibility.js';
 
 export function createInvoiceForShift(shiftId) {
   const existing = db.prepare('SELECT id FROM invoices WHERE shift_id = ?').get(shiftId);
@@ -13,6 +14,8 @@ export function createInvoiceForShift(shiftId) {
   const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(shiftId);
   if (!shift || !['completed', 'completed_by_admin'].includes(shift.status)) return null;
   if (shift.billing_invoice_id) return null;
+  // Only bill shifts with proof of delivery (progress note / notes / admin completion).
+  if (!shiftHasCompletionEvidence(db, shiftId)) return null;
 
   syncShiftLineItemsWithProgressNote(shiftId);
 

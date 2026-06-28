@@ -15,6 +15,7 @@ import { getOnedriveLinkRow } from '../services/orgOnedriveTokens.service.js';
 import { getDefaultLineItemForParticipant } from '../services/progressNoteMatcher.js';
 import { getShiftLocalDateString } from '../lib/ndisDay.js';
 import { syncShiftLineItemsWithProgressNote } from '../services/shiftLineItems.service.js';
+import { shiftCompletionEvidenceSql, shiftHasCompletionEvidence } from '../lib/shiftBillingEligibility.js';
 import {
   participantInvoiceIncludesGst,
   roundMoney,
@@ -181,6 +182,7 @@ router.get('/draft-batch', (req, res) => {
         AND s.billing_invoice_id IS NULL
         AND s.start_time >= ? AND s.start_time <= ?
         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id)
+        AND ${shiftCompletionEvidenceSql('s')}
       ORDER BY s.participant_id, s.start_time
     `).all(...shiftScope.params, `${from_date}T00:00:00`, `${to_date}T23:59:59`);
 
@@ -524,6 +526,10 @@ router.post('/create-batch', (req, res) => {
       });
 
       participantShifts.forEach((sid) => {
+        // Never bill a shift that has no proof of delivery (e.g. a scheduled placeholder or a
+        // duplicate the worker created instead of completing the scheduled shift). Guards against
+        // stale drafts or direct calls that reference such a shift.
+        if (!shiftHasCompletionEvidence(db, sid)) return;
         syncShiftLineItemsWithProgressNote(sid);
         const shiftLines = db.prepare(`
           SELECT sli.*, nli.support_item_number, nli.description, nli.unit

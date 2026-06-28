@@ -216,7 +216,11 @@ export function findMatchingShift({ participantId, staffId, supportDate, startTi
       SELECT * FROM shifts
       WHERE id = ? AND participant_id = ? AND staff_id = ?
     `).get(shiftId, participantId, staffId);
-    return byNexusId || null;
+    if (byNexusId) return byNexusId;
+    // No row carries this external id yet. Don't return null here: a worker who created a NEW
+    // Shifter shift (new id) for a slot that already has a scheduled shift would otherwise produce
+    // a duplicate. Fall through to the same-day ±30-min overlap match so the incoming completion
+    // merges into the existing (usually scheduled) shift instead of creating a double-up.
   }
 
   const dayStart = `${supportDate}T00:00:00`;

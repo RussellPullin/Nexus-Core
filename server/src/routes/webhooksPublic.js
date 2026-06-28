@@ -70,6 +70,10 @@ router.post('/progress-app', (req, res) => {
 
     const result = processShifts(shifts, {
       orgId: orgId ? String(orgId).trim() : null,
+      // Never let a scheduled placeholder echoed through the webhook become a billable
+      // 'completed' shift. Genuine completions carry a progress note / mood / clock-out
+      // and still pass; bare scheduled rows are left untouched (not billed).
+      requireCompletionEvidence: true,
       log: (msg, data) => console.log('[webhook progress-app]', msg, data || ''),
       logWarn: (msg, data) => console.warn('[webhook progress-app]', msg, data || ''),
       logError: (msg, err) => console.error('[webhook progress-app]', msg, err),
