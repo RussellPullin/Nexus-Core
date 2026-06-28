@@ -179,7 +179,7 @@ export default function ShiftsPage() {
   const handleDeleteDuplicateShift = async (s) => {
     if (!confirm(`Delete this shift (${s.participant_name} · ${s.staff_name} · ${s.start_time?.slice(0, 16)})? This cannot be undone.`)) return;
     try {
-      await shifts.delete(s.id);
+      await shifts.hardDelete(s.id);
       load({ silent: true });
       const params = duplicatesStaffId ? { staff_id: duplicatesStaffId } : {};
       const data = await shifts.duplicates(params);
@@ -519,7 +519,7 @@ export default function ShiftsPage() {
   const handleDeleteOne = async () => {
     if (!deleteConfirm) return;
     try {
-      await shifts.delete(deleteConfirm.shift.id);
+      await shifts.hardDelete(deleteConfirm.shift.id);
       setShiftList((prev) => prev.filter((s) => s.id !== deleteConfirm.shift.id));
       setDeleteConfirm(null);
       load({ silent: true });
@@ -533,7 +533,7 @@ export default function ShiftsPage() {
     try {
       const groupShifts = await shifts.listByRecurringGroup(deleteConfirm.shift.recurring_group_id);
       for (const s of groupShifts) {
-        await shifts.delete(s.id);
+        await shifts.hardDelete(s.id);
       }
       setShiftList((prev) => prev.filter((s) => s.recurring_group_id !== deleteConfirm.shift.recurring_group_id));
       setDeleteConfirm(null);
@@ -918,8 +918,9 @@ export default function ShiftsPage() {
                   setDeleteConfirm({ shift, count: groupShifts.length });
                   return;
                 }
+                if (!confirm(`Delete this shift (${shift.participant_name} · ${shift.staff_name})? This permanently removes it and cannot be undone.`)) return;
                 try {
-                  await shifts.delete(shift.id);
+                  await shifts.hardDelete(shift.id);
                   setShiftList((prev) => prev.filter((s) => s.id !== shift.id));
                   load({ silent: true });
                 } catch (err) {
