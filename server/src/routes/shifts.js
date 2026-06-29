@@ -9,7 +9,6 @@ import { pullShiftsFromExcel } from '../services/excelPull.service.js';
 import { getEffectiveOrgTzSpecForUser } from '../lib/orgShiftTimezone.js';
 import {
   scheduleMirrorShiftToNexusSupabase,
-  scheduleRemoveShiftFromNexusSupabase,
 } from '../services/nexusPublicShiftsSync.service.js';
 import { syncCaseNoteFromShift } from '../services/shiftCaseNoteSync.service.js';
 import {
@@ -25,6 +24,8 @@ import {
 } from '../lib/orgScopeSql.js';
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 import { recordSuppressedShifterShiftId } from '../services/shiftImportSuppression.service.js';
+import { hardDeleteShiftRow } from '../services/shiftHardDelete.service.js';
+import { cleanupDuplicateUnworkedShifts } from '../services/shiftDuplicateCleanup.service.js';
 
 const router = Router();
 
@@ -571,44 +572,32 @@ router.post('/:id/hard-delete', requireAdminOrDelegate, (req, res) => {
     });
   }
 
-  const existing = db
-    .prepare(
-      `
-    SELECT s.id, s.shifter_shift_id, p.provider_org_id AS participant_provider_org_id
-    FROM shifts s
-    JOIN participants p ON p.id = s.participant_id
-    WHERE s.id = ?
-  `,
-    )
-    .get(id);
-  if (!existing) {
+  const nexusOrgId = getProviderOrgIdForUser(req.session?.user?.id) || null;
+  const result = hardDeleteShiftRow(id, { suppressShifterId: true, nexusOrgId, reason: 'hard_delete' });
+  if (!result.deleted) {
     return res.status(404).json({ error: 'Shift not found' });
   }
-
-  const nexusOrgId = String(existing.participant_provider_org_id || getProviderOrgIdForUser(req.session?.user?.id) || '').trim();
-  if (existing.shifter_shift_id && String(existing.shifter_shift_id).trim()) {
-    recordSuppressedShifterShiftId(nexusOrgId, existing.shifter_shift_id, 'hard_delete');
-  }
-
-  // Remove dependent rows so FK constraints don't block shift delete
-  try {
-    db.prepare('DELETE FROM billing_invoice_line_items WHERE source_shift_id = ?').run(id);
-  } catch (e) { /* table may not exist or no FK */ }
-  try {
-    db.prepare('DELETE FROM invoices WHERE shift_id = ?').run(id);
-  } catch (e) { /* table may not exist */ }
-  try {
-    db.prepare('UPDATE progress_notes SET shift_id = NULL WHERE shift_id = ?').run(id);
-  } catch (e) { /* table may not exist */ }
-  try {
-    db.prepare('DELETE FROM case_notes WHERE shift_id = ?').run(id);
-  } catch (e) { /* column may not exist on old DB */ }
-  db.prepare('DELETE FROM shift_line_items WHERE shift_id = ?').run(id);
-  db.prepare('DELETE FROM shifts WHERE id = ?').run(id);
-
-  // Also remove mirrored copy from Nexus Supabase (if configured).
-  scheduleRemoveShiftFromNexusSupabase(id);
   return res.json({ ok: true, deleted: true, id });
+});
+
+/**
+ * Remove empty, past-date duplicate shifts for the requester's org.
+ * Deletes a no-notes / $0 shift only when a noted shift exists for the same participant + worker at
+ * an overlapping time and the shift is unbilled. Admin/delegate only.
+ *
+ * POST /api/shifts/cleanup-duplicates
+ */
+router.post('/cleanup-duplicates', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = getProviderOrgIdForUser(req.session?.user?.id) || null;
+    const result = cleanupDuplicateUnworkedShifts({
+      orgId,
+      log: (msg, data) => console.log('[shifts cleanup-duplicates]', msg, data || ''),
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Shift line items (charges)

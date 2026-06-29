@@ -777,6 +777,8 @@ export const shifts = {
       method: 'POST',
       body: JSON.stringify({ confirm: 'DELETE' })
     }),
+  /** Remove empty, past-date duplicate shifts that have a noted counterpart (admin/delegate). */
+  cleanupDuplicates: () => fetchApi('/shifts/cleanup-duplicates', { method: 'POST' }),
   /** Block external shiftId from re-import (admin/delegate). */
   suppressShifterId: (shifterShiftId, nexusOrgId) =>
     fetchApi('/shifts/suppress-shifter-id', {

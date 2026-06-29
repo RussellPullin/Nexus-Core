@@ -76,6 +76,7 @@ export default function ShiftsPage() {
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [duplicatesData, setDuplicatesData] = useState(null);
   const [duplicatesLoading, setDuplicatesLoading] = useState(false);
+  const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
   const [duplicatesStaffId, setDuplicatesStaffId] = useState('');
   const [appShiftsList, setAppShiftsList] = useState([]);
   const [showAppShifts, setShowAppShifts] = useState(true);
@@ -175,6 +176,21 @@ export default function ShiftsPage() {
     },
     [setSearchParams, weekStart]
   );
+
+  const handleCleanupDuplicates = async () => {
+    if (!confirm('Delete past empty ($0 / no-notes) shifts that have a completed, noted shift for the same worker and client at the same time? This permanently removes the empty duplicates and cannot be undone.')) return;
+    setCleaningDuplicates(true);
+    try {
+      const r = await shifts.cleanupDuplicates();
+      const n = r?.deleted ?? 0;
+      alert(n === 0 ? 'No empty duplicate shifts found.' : `Removed ${n} empty duplicate shift${n !== 1 ? 's' : ''}.`);
+      if (n > 0) load({ silent: true });
+    } catch (e) {
+      alert(e.message || 'Failed to clean up duplicates');
+    } finally {
+      setCleaningDuplicates(false);
+    }
+  };
 
   const handleDeleteDuplicateShift = async (s) => {
     if (!confirm(`Delete this shift (${s.participant_name} · ${s.staff_name} · ${s.start_time?.slice(0, 16)})? This cannot be undone.`)) return;
@@ -692,6 +708,9 @@ export default function ShiftsPage() {
           </button>
           <button type="button" className="btn btn-secondary" onClick={() => { setDuplicatesOpen(true); setDuplicatesData(null); }} title="Find shifts that were imported twice or same staff+client+time">
             Find duplicate shifts
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={handleCleanupDuplicates} disabled={cleaningDuplicates} title="Delete past, empty ($0 / no notes) shifts when a completed shift with notes exists for the same worker and client at the same time">
+            {cleaningDuplicates ? 'Cleaning…' : 'Clean up empty duplicates'}
           </button>
         </div>
       </div>

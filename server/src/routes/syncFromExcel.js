@@ -13,6 +13,7 @@ import {
 } from '../lib/onedriveExcelSyncHint.js';
 import { pullShiftsFromExcel } from '../services/excelPull.service.js';
 import { processShifts } from '../services/webhookProcessor.js';
+import { cleanupDuplicateUnworkedShifts } from '../services/shiftDuplicateCleanup.service.js';
 import { mirrorAllShiftsToNexusSupabase } from '../services/nexusPublicShiftsSync.service.js';
 import { pullShiftsFromShifterSupabase, debugShifterShiftsByOrg } from '../services/shifterPull.service.js';
 import { isShifterRemoteConfigured } from '../services/supabaseStaffShifter.service.js';
@@ -161,7 +162,14 @@ router.post('/from-excel', async (req, res) => {
       logError: (msg, err) => console.error('[sync-from-excel]', msg, err),
     });
 
-    log('Done', result);
+    // Remove empty, past-date duplicate shifts left over when a worker logged a separate
+    // (noted) shift for the same client+time instead of completing the scheduled one.
+    const cleanup = cleanupDuplicateUnworkedShifts({
+      orgId,
+      log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
+    });
+
+    log('Done', { ...result, duplicates_removed: cleanup.deleted });
 
     res.json({
       ok: true,
@@ -169,6 +177,7 @@ router.post('/from-excel', async (req, res) => {
       ...(source === 'shifter_supabase_fallback' && onedrive_error ? { onedrive_error } : {}),
       llm_used: !!llmUsed,
       ...result,
+      duplicates_removed: cleanup.deleted,
     });
   } catch (err) {
     console.error('[sync-from-excel]', err);
@@ -256,6 +265,13 @@ router.post('/from-shifter', async (req, res) => {
       logError: (msg, err) => console.error('[sync-from-shifter]', msg, err),
     });
 
+    // Remove empty, past-date duplicate shifts left over when a worker logged a separate
+    // (noted) shift for the same client+time instead of completing the scheduled one.
+    const cleanup = cleanupDuplicateUnworkedShifts({
+      orgId,
+      log: (msg, data) => console.log('[sync-from-shifter]', msg, data || ''),
+    });
+
     res.json({
       ok: true,
       source: 'shifter_supabase',
@@ -268,6 +284,7 @@ router.post('/from-shifter', async (req, res) => {
       skipped_rows: pulled.skippedRows,
       skip_unchanged: skipUnchanged,
       ...result,
+      duplicates_removed: cleanup.deleted,
     });
   } catch (err) {
     console.error('[sync-from-shifter]', err);
