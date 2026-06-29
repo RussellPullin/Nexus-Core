@@ -2091,9 +2091,13 @@ try {
       );
       CREATE INDEX IF NOT EXISTS idx_org_library_send_stages_org_stage ON org_library_send_stages(org_id, stage);
     `);
-    // Seed participant defaults for any org that has library clones but no send stages yet
-    const PARTICIPANT_INTAKE_DEFAULTS = ['client-induction-checklist', 'privacy-consent-form'];
-    const PARTICIPANT_SA_DEFAULTS     = ['service-schedule'];
+    // Seed defaults for any org that has library clones but no send stages yet
+    const STAGE_DEFAULTS = {
+      participant_intake: ['client-induction-checklist', 'privacy-consent-form'],
+      participant_sa:     ['service-schedule'],
+      staff_intake:       ['staff-induction-checklist', 'worker-declarations', 'pre-employment-collection-form'],
+      staff_contract:     []
+    };
     const orgsWithClones = db.prepare(
       `SELECT DISTINCT org_id FROM document_library_org_clones WHERE is_active = 1`
     ).all();
@@ -2103,13 +2107,11 @@ try {
     for (const { org_id } of orgsWithClones) {
       const existing = db.prepare(`SELECT COUNT(*) AS n FROM org_library_send_stages WHERE org_id = ?`).get(org_id);
       if (existing.n > 0) continue;
-      for (const slug of PARTICIPANT_INTAKE_DEFAULTS) {
-        const m = db.prepare(`SELECT id FROM document_library_masters WHERE slug = ? AND is_active = 1`).get(slug);
-        if (m) insertStage.run(randomUUID(), org_id, m.id, 'participant_intake');
-      }
-      for (const slug of PARTICIPANT_SA_DEFAULTS) {
-        const m = db.prepare(`SELECT id FROM document_library_masters WHERE slug = ? AND is_active = 1`).get(slug);
-        if (m) insertStage.run(randomUUID(), org_id, m.id, 'participant_sa');
+      for (const [stage, slugs] of Object.entries(STAGE_DEFAULTS)) {
+        for (const slug of slugs) {
+          const m = db.prepare(`SELECT id FROM document_library_masters WHERE slug = ? AND is_active = 1`).get(slug);
+          if (m) insertStage.run(randomUUID(), org_id, m.id, stage);
+        }
       }
     }
   } catch (e) {
@@ -2273,6 +2275,61 @@ try {
     `);
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('activity_risk_assessment_templates migration:', e.message);
+  }
+
+  // One-time data correction: a shift whose date is still in the future can never have been
+  // delivered, so it must not sit as 'completed' (and must not carry charges). Earlier imports
+  // marked future roster shifts completed when Shifter sent a completed-like status. Reset those
+  // back to 'scheduled' and clear their auto-built charges. Only touches future shifts with NO
+  // delivery evidence (no notes/expenses/progress note), and never billed, admin-completed, or
+  // coordinator-curated shifts. Idempotent (safe to run every startup).
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    // Inline of shiftCompletionEvidenceSql('s') (lib/shiftBillingEligibility.js) — kept inline to
+    // avoid importing app libs into the db bootstrap.
+    const hasEvidenceSql = `(
+      s.status = 'completed_by_admin'
+      OR s.line_items_locked = 1
+      OR (s.notes IS NOT NULL AND TRIM(s.notes) <> '')
+      OR (s.expenses IS NOT NULL AND s.expenses > 0)
+      OR EXISTS (
+        SELECT 1 FROM progress_notes pn
+        WHERE pn.shift_id = s.id
+          AND (
+            (pn.session_details IS NOT NULL AND TRIM(pn.session_details) <> '')
+            OR (pn.mood IS NOT NULL AND TRIM(pn.mood) <> '')
+            OR (pn.incidents IS NOT NULL AND TRIM(pn.incidents) <> '')
+            OR (pn.travel_km IS NOT NULL AND pn.travel_km > 0)
+            OR (pn.travel_time_min IS NOT NULL AND pn.travel_time_min > 0)
+          )
+      )
+    )`;
+    const futureCompleted = db
+      .prepare(
+        `SELECT s.id, s.line_items_locked
+         FROM shifts s
+         WHERE LOWER(COALESCE(s.status, '')) = 'completed'
+           AND (s.billing_invoice_id IS NULL OR s.billing_invoice_id = '')
+           AND NOT ${hasEvidenceSql}
+           AND substr(REPLACE(s.start_time, ' ', 'T'), 1, 10) > ?`
+      )
+      .all(today);
+    if (futureCompleted.length) {
+      const clearLines = db.prepare('DELETE FROM shift_line_items WHERE shift_id = ?');
+      const setScheduled = db.prepare(
+        `UPDATE shifts SET status = 'scheduled', updated_at = datetime('now') WHERE id = ?`
+      );
+      const tx = db.transaction((rows) => {
+        for (const r of rows) {
+          if (Number(r.line_items_locked) !== 1) clearLines.run(r.id);
+          setScheduled.run(r.id);
+        }
+      });
+      tx(futureCompleted);
+      console.log(`[migration] reset ${futureCompleted.length} future-dated shift(s) from completed back to scheduled`);
+    }
+  } catch (e) {
+    console.warn('future-completed shift correction:', e.message);
   }
 } catch (err) {
   console.warn('Migration error:', err.message);
