@@ -143,6 +143,25 @@ function isReimportPayloadUnchanged({
  *   incidents?: string|null, travelKm?: any, travelTimeMin?: any, expensesVal?: number }} p
  * @returns {boolean}
  */
+/**
+ * True when the shift's start date is later than today (date-level comparison).
+ * A shift that has not happened yet must never be auto-marked 'completed' (and therefore never
+ * billed) on import — even if Shifter sends a completed-like status, a clock-out timestamp, or a
+ * stray progress note. It stays 'scheduled' until its day arrives; a later re-sync (once the date
+ * has passed and it was genuinely worked) flips it to completed.
+ *
+ * Uses UTC date which, for AU orgs (ahead of UTC), only ever errs toward keeping a shift scheduled
+ * slightly longer — never toward completing one early.
+ * @param {string} startDateTime
+ * @returns {boolean}
+ */
+function isFutureShiftStart(startDateTime) {
+  const datePart = String(startDateTime || '').replace(' ', 'T').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return false;
+  const today = new Date().toISOString().slice(0, 10);
+  return datePart > today;
+}
+
 function hasWorkerCompletionEvidence({ completed, sessionDetails, mood, incidents, travelKm, travelTimeMin, expensesVal }) {
   // Explicit signal from the source row (e.g. Shifter status / clock-out) wins both ways.
   if (completed === true) return true;
@@ -333,6 +352,10 @@ export function processShifts(shiftsArray, options = {}) {
 
         let resolvedShiftId;
         const shifterShiftId = shiftId || null;
+        // A future-dated shift can't have been delivered yet: keep it scheduled (and uncharged)
+        // regardless of any completed-like signal from Shifter.
+        const startIsFuture = isFutureShiftStart(startDateTime);
+        const importStatus = startIsFuture ? 'scheduled' : 'completed';
         if (matchingShift) {
           resolvedShiftId = matchingShift.id;
           const lockedByAdmin = String(matchingShift.status || '').trim().toLowerCase() === 'completed_by_admin';
@@ -368,7 +391,7 @@ export function processShifts(shiftsArray, options = {}) {
             db.prepare(`
               UPDATE shifts SET
                 participant_id = ?, staff_id = ?, start_time = ?, end_time = ?,
-                status = 'completed', notes = ?, expenses = ?, shifter_shift_id = ?,
+                status = ?, notes = ?, expenses = ?, shifter_shift_id = ?,
                 updated_at = datetime('now')
               WHERE id = ?
             `).run(
@@ -376,6 +399,7 @@ export function processShifts(shiftsArray, options = {}) {
               staff.id,
               startDateTime,
               endDateTime,
+              importStatus,
               sessionDetails || null,
               expensesVal,
               shifterShiftId,
@@ -386,20 +410,29 @@ export function processShifts(shiftsArray, options = {}) {
           resolvedShiftId = uuidv4();
           db.prepare(`
             INSERT INTO shifts (id, participant_id, staff_id, start_time, end_time, notes, status, expenses, shifter_shift_id)
-            VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?)
-          `).run(resolvedShiftId, participant.id, staff.id, startDateTime, endDateTime, sessionDetails || null, expensesVal, shifterShiftId);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(resolvedShiftId, participant.id, staff.id, startDateTime, endDateTime, sessionDetails || null, importStatus, expensesVal, shifterShiftId);
         }
 
-        populateShiftLineItems(
-          resolvedShiftId,
-          participant.id,
-          durationHours,
-          startDateTime,
-          endDateTime,
-          supportDate,
-          travelKm,
-          travelTimeMin
-        );
+        if (startIsFuture) {
+          // Scheduled (not yet worked): leave it uncharged. Clear any charges a prior wrong import
+          // may have built, unless a coordinator has manually curated them.
+          const lockRow = db.prepare('SELECT line_items_locked FROM shifts WHERE id = ?').get(resolvedShiftId);
+          if (!lockRow || Number(lockRow.line_items_locked) !== 1) {
+            db.prepare('DELETE FROM shift_line_items WHERE shift_id = ?').run(resolvedShiftId);
+          }
+        } else {
+          populateShiftLineItems(
+            resolvedShiftId,
+            participant.id,
+            durationHours,
+            startDateTime,
+            endDateTime,
+            supportDate,
+            travelKm,
+            travelTimeMin
+          );
+        }
 
         const progressNoteId = uuidv4();
         db.prepare(`
