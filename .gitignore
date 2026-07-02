@@ -22,3 +22,6 @@ data/
 # Local tooling / temp
 .claude/
 supabase/.temp/
+
+# Pre-branding template backups (created by scripts/brandLibraryHeaders.mjs; local rollback only)
+*.prebrand

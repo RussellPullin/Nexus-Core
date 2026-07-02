@@ -1,22 +1,42 @@
 /**
- * Phase 1: Render a document from the file-based library with the universal org token map.
+ * Render a document from the file-based library, branded for a specific org.
  *
  * Supported engines (manifest.engine):
- *   - docxtemplater : .docx with {{org.legal_name}} / {{participant.full_name}} placeholders
- *   - html          : .html template with the same placeholder syntax (returns rendered HTML)
- *   - pdf-acroform  : .pdf with named AcroForm fields (we call existing pdf-lib path)
+ *   - docxtemplater : .docx with {org.name} / {org.abn} / {participant.full_name} text tokens
+ *                     and a {%org_logo} image placeholder in the header. Rendered with the
+ *                     org token map + logo, then converted to PDF (LibreOffice) when available.
+ *   - html          : .html template with the same token syntax (returns rendered HTML)
+ *   - pdf-acroform  : legacy .pdf with named AcroForm fields (route layer fills via pdf-lib)
+ *
+ * Branding note: the DOCX tokens are FLAT dotted keys (e.g. `org.abn`), which is exactly what
+ * docxtemplater's default parser looks up, so we reuse `buildOrgTokenMap` directly. The org logo
+ * is embedded from `organisations.logo_path` via the docxtemplater image module.
  */
-import { readFileSync } from 'fs';
-import { extname } from 'path';
+import { readFileSync, existsSync } from 'fs';
+import { join, resolve, isAbsolute, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
+import ImageModule from 'docxtemplater-image-module-free';
 import { db } from '../db/index.js';
 import { buildOrgTokenMap } from './orgContext.service.js';
 import { buildGlobalTokenMap } from '../lib/templateTokens.js';
+import { convertDocxToPdf } from './consentForm.service.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectRoot = resolve(__dirname, '../../..');
+const dataUploadsDir = process.env.DATA_DIR
+  ? join(process.env.DATA_DIR, 'uploads')
+  : join(projectRoot, 'data', 'uploads');
+
+const LOGO_TAG = '{%org_logo}';
+const LOGO_MAX_HEIGHT = 60;
+const LOGO_MAX_WIDTH = 220;
 
 /**
  * Build the merge data passed to docxtemplater / html templates.
  * Caller may supply `participant` and `staff` objects to populate the matching token groups.
+ * Keys are flat dotted strings (org.abn, participant.full_name, ...) to match template tokens.
  */
 export function buildRenderTokenMap({ orgId, participant = null, staff = null, extra = {} } = {}) {
   const orgTokens = buildOrgTokenMap(orgId);
@@ -68,14 +88,92 @@ function flattenStaff(s) {
 }
 
 /**
- * Render a library master to a Buffer.
+ * Resolve the org logo to an absolute file path (mirrors brandedFormPdf.service.js order).
+ * @param {string} orgId
+ * @returns {string|null}
+ */
+function resolveOrgLogoPath(orgId) {
+  if (!orgId) return null;
+  const row = db.prepare('SELECT logo_path FROM organisations WHERE id = ?').get(orgId);
+  const raw = String(row?.logo_path || '').trim();
+  if (!raw) return null;
+  const candidates = isAbsolute(raw)
+    ? [raw]
+    : [
+        join(projectRoot, raw),
+        join(dataUploadsDir, raw.replace(/^.*[/\\]/, '')),
+        join(dataUploadsDir, raw)
+      ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * Read intrinsic PNG/JPEG dimensions from a buffer without extra dependencies.
+ * @param {Buffer} buf
+ * @returns {{ width: number, height: number } | null}
+ */
+function readImageDimensions(buf) {
+  if (!buf || buf.length < 24) return null;
+  // PNG: 8-byte signature, then IHDR (width @16, height @20, big-endian).
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  // JPEG: scan for a Start-Of-Frame marker (0xFFC0-0xFFC3, C5-C7, C9-CB, CD-CF).
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < buf.length) {
+      if (buf[offset] !== 0xff) { offset += 1; continue; }
+      const marker = buf[offset + 1];
+      const isSof = (marker >= 0xc0 && marker <= 0xc3)
+        || (marker >= 0xc5 && marker <= 0xc7)
+        || (marker >= 0xc9 && marker <= 0xcb)
+        || (marker >= 0xcd && marker <= 0xcf);
+      if (isSof) {
+        return { height: buf.readUInt16BE(offset + 5), width: buf.readUInt16BE(offset + 7) };
+      }
+      const segLen = buf.readUInt16BE(offset + 2);
+      if (segLen <= 0) break;
+      offset += 2 + segLen;
+    }
+  }
+  return null;
+}
+
+/**
+ * Scale a logo to fit within the header box while preserving aspect ratio.
+ * @param {Buffer} buf
+ * @returns {[number, number]} [widthPx, heightPx]
+ */
+function computeLogoSize(buf) {
+  const dims = readImageDimensions(buf);
+  if (!dims || !dims.width || !dims.height) return [150, LOGO_MAX_HEIGHT];
+  const scale = Math.min(LOGO_MAX_WIDTH / dims.width, LOGO_MAX_HEIGHT / dims.height, 1);
+  return [Math.max(1, Math.round(dims.width * scale)), Math.max(1, Math.round(dims.height * scale))];
+}
+
+/**
+ * Strip the logo image placeholder from every XML part in a zip. Used when the org has no logo,
+ * so docxtemplater does not choke on an image tag with no backing module/data.
+ */
+function stripLogoTag(zip) {
+  zip.file(/\.xml$/).forEach((f) => {
+    const xml = f.asText();
+    if (xml.includes(LOGO_TAG)) zip.file(f.name, xml.split(LOGO_TAG).join(''));
+  });
+}
+
+/**
+ * Render a library master to a Buffer, branded for the org (logo + name + ABN etc.).
  * @param {object} params
  * @param {string} params.masterId - document_library_masters.id
  * @param {string} params.orgId
  * @param {object} [params.participant]
  * @param {object} [params.staff]
  * @param {object} [params.extra] - additional token overrides
- * @returns {{ buffer: Buffer | null, html: string | null, mime: string, suggestedFilename: string }}
+ * @returns {{ buffer: Buffer | null, html: string | null, mime: string, suggestedFilename: string, needsAcroFormFill?: boolean, tokens?: object }}
  */
 export function renderLibraryDocument({ masterId, orgId, participant = null, staff = null, extra = {} }) {
   const master = db.prepare('SELECT * FROM document_library_masters WHERE id = ?').get(masterId);
@@ -83,22 +181,47 @@ export function renderLibraryDocument({ masterId, orgId, participant = null, sta
   if (!master.is_active) throw new Error(`Master ${master.slug} is inactive`);
 
   const tokens = buildRenderTokenMap({ orgId, participant, staff, extra });
-  const baseName = `${master.slug}-${(participant?.id || orgId || 'org')}`;
+  const baseName = `${master.slug}-${(participant?.id || staff?.id || orgId || 'org')}`;
 
   switch (master.engine) {
     case 'docxtemplater': {
-      const content = readFileSync(master.template_file_path, 'binary');
-      const zip = new PizZip(content);
+      const zip = new PizZip(readFileSync(master.template_file_path));
+
+      const logoPath = resolveOrgLogoPath(orgId);
+      const modules = [];
+      if (logoPath) {
+        tokens.org_logo = logoPath;
+        modules.push(new ImageModule({
+          centered: false,
+          getImage: (tagValue) => readFileSync(tagValue),
+          getSize: (img) => computeLogoSize(img)
+        }));
+      } else {
+        stripLogoTag(zip);
+      }
+
       const doc = new Docxtemplater(zip, {
-        delimiters: { start: '{{', end: '}}' },
+        modules,
+        delimiters: { start: '{', end: '}' },
         paragraphLoop: true,
         linebreaks: true,
         nullGetter: () => ''
       });
       doc.render(tokens);
-      const buffer = doc.getZip().generate({ type: 'nodebuffer' });
+      const docxBuffer = doc.getZip().generate({ type: 'nodebuffer' });
+
+      const pdfBuffer = convertDocxToPdf(docxBuffer);
+      if (pdfBuffer) {
+        return {
+          buffer: pdfBuffer,
+          html: null,
+          mime: 'application/pdf',
+          suggestedFilename: `${baseName}.pdf`
+        };
+      }
+      // LibreOffice unavailable — fall back to the branded .docx.
       return {
-        buffer,
+        buffer: docxBuffer,
         html: null,
         mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         suggestedFilename: `${baseName}.docx`
@@ -115,9 +238,7 @@ export function renderLibraryDocument({ masterId, orgId, participant = null, sta
       };
     }
     case 'pdf-acroform': {
-      // For PDFs with AcroForm fields we re-use the existing formFill renderer at the route
-      // layer (it already integrates with pdf-lib). This service returns the raw PDF buffer
-      // so the caller can then run it through formFill.fillPdfForm with the same token map.
+      // Legacy path: PDFs with AcroForm fields are filled at the route layer via pdf-lib.
       const buffer = readFileSync(master.template_file_path);
       return {
         buffer,

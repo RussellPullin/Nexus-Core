@@ -3,12 +3,13 @@
   "display_name": "Staff Performance Improvement Plan",
   "category": "procedure",
   "form_type": "procedure",
-  "engine": "pdf-acroform",
+  "engine": "docxtemplater",
   "version": "1.0.0",
-  "template_file": "template.pdf",
+  "template_file": "template.docx",
   "pack": "policy_library",
   "placeholders": [
     "org.abn",
+    "org.branding.logo_path",
     "org.name"
   ],
   "required_signer_role": null,

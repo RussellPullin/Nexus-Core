@@ -3,12 +3,14 @@
   "display_name": "Worker Conflict of Interest Declaration",
   "category": "contract",
   "form_type": "contract",
-  "engine": "pdf-acroform",
+  "engine": "docxtemplater",
   "version": "1.0.0",
-  "template_file": "template.pdf",
+  "template_file": "template.docx",
   "pack": "policy_library",
   "placeholders": [
     "org.abn",
+    "org.branding.logo_path",
+    "org.legal_name",
     "org.name"
   ],
   "required_signer_role": null,

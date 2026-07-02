@@ -3,13 +3,15 @@
   "display_name": "Feedback and Complaints Summary",
   "category": "policy",
   "form_type": "policy",
-  "engine": "pdf-acroform",
+  "engine": "docxtemplater",
   "version": "1.0.0",
-  "template_file": "template.pdf",
+  "template_file": "template.docx",
   "pack": "policy_library",
   "placeholders": [
     "org.abn",
+    "org.branding.logo_path",
     "org.email",
+    "org.legal_name",
     "org.name",
     "org.phone"
   ],

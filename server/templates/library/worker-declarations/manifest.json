@@ -3,19 +3,14 @@
   "display_name": "Worker Declarations",
   "category": "contract",
   "form_type": "contract",
-  "engine": "pdf-acroform",
+  "engine": "docxtemplater",
   "version": "1.0.0",
-  "template_file": "template.pdf",
+  "template_file": "template.docx",
   "pack": "staff_onboarding",
   "placeholders": [
     "org.abn",
-    "org.name",
-    "org.primary_contact.name",
-    "staff.full_name",
-    "staff.first_name",
-    "staff.last_name",
-    "staff.supervisor_name",
-    "today"
+    "org.branding.logo_path",
+    "org.name"
   ],
   "required_signer_role": "participant",
   "signature_count": 1,

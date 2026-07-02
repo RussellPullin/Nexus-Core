@@ -169,7 +169,12 @@ async function sendIntakePoliciesAndNotify(participantId, organisationId) {
         }
         if (buf) {
           const safeName = (master.display_name || master.slug).replace(/[/\\?%*:|"<>]/g, '_');
-          allAttachments.push({ filename: `${safeName}.pdf`, content: buf, contentType: 'application/pdf' });
+          const ext = rendered.mime === 'application/pdf' ? 'pdf' : 'docx';
+          allAttachments.push({
+            filename: `${safeName}.${ext}`,
+            content: buf,
+            contentType: rendered.mime || 'application/pdf'
+          });
         }
       } catch (err) {
         console.warn(`[intake-submit] library doc render failed (${master.slug}):`, err?.message);

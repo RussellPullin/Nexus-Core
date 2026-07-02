@@ -3,12 +3,13 @@
   "display_name": "Accommodation _ Tenancy Assistance Position Description",
   "category": "guide",
   "form_type": "guide",
-  "engine": "pdf-acroform",
+  "engine": "docxtemplater",
   "version": "1.0.0",
-  "template_file": "template.pdf",
+  "template_file": "template.docx",
   "pack": "staff_onboarding",
   "placeholders": [
     "org.abn",
+    "org.branding.logo_path",
     "org.name"
   ],
   "required_signer_role": null,
