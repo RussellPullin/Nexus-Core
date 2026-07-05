@@ -17,7 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { assertStaffOnboardingReady, createAuditEvent } from './onboarding.service.js';
 import { cloneAllLibraryMastersForOrg } from './documentLibrary.service.js';
-import { buildPolicyAttachmentsForEmail } from './onboardingDocumentPacks.service.js';
+import { buildOnboardingAttachments } from './onboardingDocumentPacks.service.js';
 
 /**
  * @param {object} params
@@ -122,30 +122,26 @@ export async function orchestrateStaffOnboarding({
     });
   }
 
-  // --- 5. Resolve policy attachment pack (does not send anything) ---
-  let resolvedPackId = null;
+  // --- 5. Resolve branded onboarding attachments (does not send anything) ---
   let attachmentCount = 0;
   try {
-    const { attachments, resolvedPackId: packId } = buildPolicyAttachmentsForEmail(
+    const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
+    const { attachments } = await buildOnboardingAttachments(
+      providerOrgId,
       profileId,
-      null,
       'staff_onboarding',
-      projectRoot
+      { staff: staffFull }
     );
-    resolvedPackId = packId;
     attachmentCount = attachments?.length || 0;
-    if (resolvedPackId) {
-      db.prepare('UPDATE staff_onboarding SET document_pack_id = ? WHERE id = ?').run(resolvedPackId, onboardingRow.id);
-    }
     push({
-      name: 'resolve_policy_pack',
+      name: 'resolve_onboarding_documents',
       ok: attachmentCount > 0,
-      detail: { pack_id: resolvedPackId, attachment_count: attachmentCount },
-      error: attachmentCount === 0 ? 'No policy PDFs available in the staff pack.' : undefined,
-      error_code: attachmentCount === 0 ? 'EMPTY_STAFF_PACK' : undefined
+      detail: { attachment_count: attachmentCount },
+      error: attachmentCount === 0 ? 'No staff onboarding documents available.' : undefined,
+      error_code: attachmentCount === 0 ? 'EMPTY_STAFF_DOCUMENTS' : undefined
     });
   } catch (err) {
-    push({ name: 'resolve_policy_pack', ok: false, error: err.message });
+    push({ name: 'resolve_onboarding_documents', ok: false, error: err.message });
   }
 
   // --- 6. Audit ---
@@ -158,7 +154,6 @@ export async function orchestrateStaffOnboarding({
     newValue: {
       staff_id: staffId,
       provider_organisation_id: providerOrgId,
-      pack_id: resolvedPackId,
       attachment_count: attachmentCount,
       steps: steps.map(({ name, ok, error_code, skipped }) => ({ name, ok, error_code, skipped }))
     },
@@ -167,7 +162,7 @@ export async function orchestrateStaffOnboarding({
   });
 
   const nextAction = attachmentCount > 0 ? 'send_invite_email' : 'awaiting_staff_form';
-  return finalize(staffId, providerOrgId, steps, onboardingRow.id, resolvedPackId, attachmentCount, nextAction);
+  return finalize(staffId, providerOrgId, steps, onboardingRow.id, null, attachmentCount, nextAction);
 }
 
 function finalize(staffId, providerOrgId, steps, staffOnboardingId, packId, attachmentCount, nextAction, blockingReason, blockingCode) {

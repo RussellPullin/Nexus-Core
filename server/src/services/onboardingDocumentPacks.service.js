@@ -1,210 +1,17 @@
 /**
- * Named collections of company policy PDFs and optional custom form templates
- * for staff / participant onboarding emails and acknowledgement flows.
+ * Onboarding document attachments.
+ *
+ * The branded document library is the single source for onboarding documents.
+ * Attachments come from (1) active, cloned library masters tagged for the
+ * workflow (rendered branded) plus (2) the org's uploaded extra PDFs
+ * (`company_policy_files`) as an escape hatch.
  */
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
-import { getCustomTemplatePath } from './formTemplatePath.service.js';
-
-const WORKFLOWS = new Set(['staff_onboarding', 'participant_onboarding', 'both']);
-
-export function normalizeWorkflow(w) {
-  const s = String(w || '').trim();
-  if (WORKFLOWS.has(s)) return s;
-  return 'both';
-}
-
-export function packMatchesWorkflow(packWorkflow, target) {
-  const pw = packWorkflow || 'both';
-  if (pw === 'both') return true;
-  return pw === target;
-}
-
-/** Pack workflow must accept the template's workflow (templates are staff or participant only). */
-export function templateAllowedInPack(packWorkflow, templateWorkflow) {
-  const pw = packWorkflow || 'both';
-  const tw = templateWorkflow || 'participant_onboarding';
-  if (pw === 'both') return true;
-  return pw === tw;
-}
-
-export function listPacks(providerProfileId) {
-  return db
-    .prepare(
-      `
-    SELECT p.*,
-      (SELECT COUNT(*) FROM onboarding_document_pack_items i WHERE i.pack_id = p.id)
-      + (SELECT COUNT(*) FROM onboarding_document_pack_form_items f WHERE f.pack_id = p.id) AS item_count
-    FROM onboarding_document_packs p
-    WHERE p.provider_profile_id = ?
-    ORDER BY p.display_name COLLATE NOCASE
-  `
-    )
-    .all(providerProfileId);
-}
-
-export function getPack(providerProfileId, packId) {
-  return db
-    .prepare(`SELECT * FROM onboarding_document_packs WHERE id = ? AND provider_profile_id = ?`)
-    .get(packId, providerProfileId);
-}
-
-export function createPack(providerProfileId, { display_name, workflow }) {
-  const name = String(display_name || '').trim();
-  if (!name) throw new Error('display_name is required');
-  const wf = normalizeWorkflow(workflow);
-  const id = uuidv4();
-  db.prepare(
-    `
-    INSERT INTO onboarding_document_packs (id, provider_profile_id, display_name, workflow)
-    VALUES (?, ?, ?, ?)
-  `
-  ).run(id, providerProfileId, name, wf);
-  return db.prepare(`SELECT * FROM onboarding_document_packs WHERE id = ?`).get(id);
-}
-
-export function updatePack(providerProfileId, packId, { display_name, workflow }) {
-  const existing = getPack(providerProfileId, packId);
-  if (!existing) return null;
-  const name = display_name != null ? String(display_name).trim() : existing.display_name;
-  if (!name) throw new Error('display_name cannot be empty');
-  const wf = workflow != null ? normalizeWorkflow(workflow) : existing.workflow;
-  db.prepare(
-    `
-    UPDATE onboarding_document_packs SET display_name = ?, workflow = ?, updated_at = datetime('now') WHERE id = ? AND provider_profile_id = ?
-  `
-  ).run(name, wf, packId, providerProfileId);
-  return getPack(providerProfileId, packId);
-}
-
-export function deletePack(providerProfileId, packId) {
-  const existing = getPack(providerProfileId, packId);
-  if (!existing) return false;
-  db.prepare(`DELETE FROM onboarding_document_packs WHERE id = ? AND provider_profile_id = ?`).run(packId, providerProfileId);
-  return true;
-}
-
-export function getPackItemsDetailed(packId) {
-  return db
-    .prepare(
-      `
-    SELECT pi.policy_file_id AS id, pi.sort_order, pf.display_name, pf.file_path, pf.provider_profile_id
-    FROM onboarding_document_pack_items pi
-    JOIN company_policy_files pf ON pf.id = pi.policy_file_id
-    WHERE pi.pack_id = ?
-    ORDER BY pi.sort_order ASC, pi.policy_file_id ASC
-  `
-    )
-    .all(packId);
-}
-
-export function getPackFormTemplateItemsDetailed(packId) {
-  return db
-    .prepare(
-      `
-    SELECT pi.form_template_id AS id, pi.sort_order, ft.display_name, ft.template_filename, ft.provider_profile_id, ft.workflow
-    FROM onboarding_document_pack_form_items pi
-    JOIN form_templates ft ON ft.id = pi.form_template_id
-    WHERE pi.pack_id = ?
-    ORDER BY pi.sort_order ASC, pi.form_template_id ASC
-  `
-    )
-    .all(packId);
-}
-
-/**
- * @param {string} providerProfileId
- * @param {string} packId
- * @param {string[]|null|undefined} policyFileIds
- * @param {string[]|null|undefined} formTemplateIds
- */
-export function setPackItems(providerProfileId, packId, policyFileIds, formTemplateIds) {
-  const pack = getPack(providerProfileId, packId);
-  if (!pack) throw new Error('Pack not found');
-
-  const policyIds = Array.isArray(policyFileIds) ? policyFileIds.map((x) => String(x || '').trim()).filter(Boolean) : [];
-  const formIds = Array.isArray(formTemplateIds) ? formTemplateIds.map((x) => String(x || '').trim()).filter(Boolean) : [];
-
-  const run = db.transaction(() => {
-    db.prepare(`DELETE FROM onboarding_document_pack_items WHERE pack_id = ?`).run(packId);
-    db.prepare(`DELETE FROM onboarding_document_pack_form_items WHERE pack_id = ?`).run(packId);
-
-    const insertPol = db.prepare(`
-    INSERT INTO onboarding_document_pack_items (id, pack_id, policy_file_id, sort_order)
-    VALUES (?, ?, ?, ?)
-  `);
-    let order = 0;
-    const seenP = new Set();
-    for (const pid of policyIds) {
-      if (seenP.has(pid)) continue;
-      seenP.add(pid);
-      const pol = db
-        .prepare(`SELECT id FROM company_policy_files WHERE id = ? AND provider_profile_id = ?`)
-        .get(pid, providerProfileId);
-      if (!pol) throw new Error(`Policy file not in this organisation: ${pid}`);
-      insertPol.run(uuidv4(), packId, pid, order++);
-    }
-
-    const insertForm = db.prepare(`
-    INSERT INTO onboarding_document_pack_form_items (id, pack_id, form_template_id, sort_order)
-    VALUES (?, ?, ?, ?)
-  `);
-    let ordF = 0;
-    const seenF = new Set();
-    for (const fid of formIds) {
-      if (seenF.has(fid)) continue;
-      seenF.add(fid);
-      const row = db
-        .prepare(
-          `SELECT id, workflow, form_type FROM form_templates WHERE id = ? AND provider_profile_id = ? AND form_type = 'custom'`
-        )
-        .get(fid, providerProfileId);
-      if (!row) throw new Error(`Custom form template not in this organisation: ${fid}`);
-      if (!templateAllowedInPack(pack.workflow, row.workflow)) {
-        throw new Error(`Template “${fid}” workflow does not match this pack’s audience.`);
-      }
-      insertForm.run(uuidv4(), packId, fid, ordF++);
-    }
-  });
-
-  run();
-
-  return {
-    items: getPackItemsDetailed(packId),
-    form_template_items: getPackFormTemplateItemsDetailed(packId)
-  };
-}
-
-/**
- * Policy rows for listing in staff onboarding UI / acknowledgements.
- * @param {string|null} providerProfileId
- * @param {string|null} documentPackId - staff_onboarding.document_pack_id
- */
-export function listPoliciesForStaffOnboarding(providerProfileId, documentPackId) {
-  if (!providerProfileId) return [];
-  if (documentPackId) {
-    const pack = db.prepare(`SELECT id FROM onboarding_document_packs WHERE id = ? AND provider_profile_id = ?`).get(documentPackId, providerProfileId);
-    if (pack) {
-      return db
-        .prepare(
-          `
-        SELECT pf.id, pf.display_name, pf.file_path
-        FROM onboarding_document_pack_items pi
-        JOIN company_policy_files pf ON pf.id = pi.policy_file_id
-        WHERE pi.pack_id = ? AND pf.provider_profile_id = ?
-        ORDER BY pi.sort_order ASC, pi.policy_file_id ASC
-      `
-        )
-        .all(documentPackId, providerProfileId);
-    }
-  }
-  return db
-    .prepare(`SELECT id, display_name, file_path FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`)
-    .all(providerProfileId);
-}
+import { renderLibraryDocument } from './documentLibraryRender.service.js';
+import { fillAcroFormWithTokens } from './formFill.service.js';
 
 function safeAttachmentFilename(name, ext) {
   const base = (name || 'attachment').replace(/[/\\?%*:|"<>]/g, '_').trim() || 'attachment';
@@ -212,134 +19,133 @@ function safeAttachmentFilename(name, ext) {
 }
 
 /**
- * Build email attachments from pack or legacy “all policies”, plus optional form template files.
- * @param {'staff_onboarding'|'participant_onboarding'} targetWorkflow
- * @returns {{ attachments: Array<{ filename: string, content: Buffer, contentType: string }>, resolvedPackId: string|null }}
+ * Resolve a stored `company_policy_files.file_path` to an absolute path.
+ * Paths are stored relative ("data/onboarding/policies/...") and must survive
+ * deploys, so resolve against the persistent DATA_DIR volume.
  */
-export function buildPolicyAttachmentsForEmail(providerProfileId, explicitPackId, targetWorkflow, projectRoot) {
-  if (!providerProfileId) return { attachments: [], resolvedPackId: null };
-
-  let packId = explicitPackId ? String(explicitPackId).trim() : '';
-  if (!packId) {
-    const row = db.prepare(`SELECT default_staff_onboarding_pack_id, default_participant_onboarding_pack_id FROM provider_profiles WHERE id = ?`).get(providerProfileId);
-    packId =
-      targetWorkflow === 'staff_onboarding'
-        ? row?.default_staff_onboarding_pack_id || ''
-        : row?.default_participant_onboarding_pack_id || '';
-  }
-
-  let policies = [];
-  let formRows = [];
-  let resolvedPackId = null;
-
-  if (packId) {
-    const pack = db.prepare(`SELECT id, workflow FROM onboarding_document_packs WHERE id = ? AND provider_profile_id = ?`).get(packId, providerProfileId);
-    if (pack && packMatchesWorkflow(pack.workflow, targetWorkflow)) {
-      const rows = getPackItemsDetailed(pack.id);
-      policies = rows.filter((r) => r.provider_profile_id === providerProfileId);
-      formRows = getPackFormTemplateItemsDetailed(pack.id).filter((r) => r.provider_profile_id === providerProfileId);
-      resolvedPackId = policies.length || formRows.length ? pack.id : null;
-    }
-  }
-
-  if (!policies.length && !formRows.length) {
-    policies = db
-      .prepare(`SELECT id, display_name, file_path FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`)
-      .all(providerProfileId);
-    resolvedPackId = null;
-    formRows = [];
-  }
-
+function resolvePolicyFilePath(filePath) {
+  if (!filePath) return null;
+  if (filePath.startsWith('/')) return filePath;
   const dataDir = process.env.DATA_DIR || '/data';
-  const attachments = [];
-  for (const pf of policies) {
-    // file_path is stored as "data/onboarding/policies/..." (relative to old projectRoot).
-    // Resolve against DATA_DIR so files survive deploys on the persistent volume.
-    const fullPath = pf.file_path.startsWith('/')
-      ? pf.file_path
-      : join(dataDir, pf.file_path.replace(/^data\//, ''));
-    if (!existsSync(fullPath)) continue;
-    try {
-      const content = readFileSync(fullPath);
-      const filename = safeAttachmentFilename(pf.display_name || 'policy', 'pdf');
-      attachments.push({ filename, content, contentType: 'application/pdf' });
-    } catch {
-      /* skip */
-    }
-  }
-
-  for (const fr of formRows) {
-    const resolved = getCustomTemplatePath(fr.id, fr.template_filename);
-    if (!resolved?.path || !existsSync(resolved.path)) continue;
-    try {
-      const content = readFileSync(resolved.path);
-      const lower = resolved.path.toLowerCase();
-      let ext = 'pdf';
-      let mime = 'application/pdf';
-      if (lower.endsWith('.docx')) {
-        ext = 'docx';
-        mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      } else if (/\.jpe?g$/i.test(lower)) {
-        ext = lower.endsWith('.jpeg') ? 'jpeg' : 'jpg';
-        mime = 'image/jpeg';
-      } else if (lower.endsWith('.png')) {
-        ext = 'png';
-        mime = 'image/png';
-      } else if (lower.endsWith('.webp')) {
-        ext = 'webp';
-        mime = 'image/webp';
-      }
-      const filename = safeAttachmentFilename(fr.display_name || 'form', ext);
-      attachments.push({ filename, content, contentType: mime });
-    } catch {
-      /* skip */
-    }
-  }
-
-  return { attachments, resolvedPackId };
+  return join(dataDir, filePath.replace(/^data\//, ''));
 }
 
-export function setProviderPackDefaults(providerProfileId, { default_staff_onboarding_pack_id, default_participant_onboarding_pack_id }) {
-  const updates = [];
-  const vals = [];
-
-  if (default_staff_onboarding_pack_id !== undefined) {
-    const raw = default_staff_onboarding_pack_id;
-    const id = raw === null || raw === '' ? null : String(raw);
-    if (id) {
-      const p = getPack(providerProfileId, id);
-      if (!p) throw new Error('Invalid default staff pack');
-      if (!packMatchesWorkflow(p.workflow, 'staff_onboarding')) {
-        throw new Error('That pack is not available for staff onboarding (choose Staff or Both workflow).');
-      }
-    }
-    updates.push('default_staff_onboarding_pack_id = ?');
-    vals.push(id);
-  }
-
-  if (default_participant_onboarding_pack_id !== undefined) {
-    const raw = default_participant_onboarding_pack_id;
-    const id = raw === null || raw === '' ? null : String(raw);
-    if (id) {
-      const p = getPack(providerProfileId, id);
-      if (!p) throw new Error('Invalid default participant pack');
-      if (!packMatchesWorkflow(p.workflow, 'participant_onboarding')) {
-        throw new Error('That pack is not available for participant onboarding (choose Participant or Both workflow).');
-      }
-    }
-    updates.push('default_participant_onboarding_pack_id = ?');
-    vals.push(id);
-  }
-
-  if (!updates.length) {
-    return db
-      .prepare(`SELECT id, default_staff_onboarding_pack_id, default_participant_onboarding_pack_id FROM provider_profiles WHERE id = ?`)
-      .get(providerProfileId);
-  }
-
-  vals.push(providerProfileId);
-  db.prepare(`UPDATE provider_profiles SET ${updates.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...vals);
+/**
+ * Active cloned library masters for an org whose manifest `pack` tag matches the
+ * given onboarding workflow. These are the branded documents attached to /
+ * acknowledged during onboarding.
+ * @param {string|null} orgId
+ * @param {'staff_onboarding'|'participant_onboarding'} workflow
+ * @returns {Array<{ id: string, slug: string, display_name: string }>}
+ */
+export function listOnboardingLibraryMasters(orgId, workflow) {
+  if (!orgId || !workflow) return [];
   return db
-    .prepare(`SELECT id, default_staff_onboarding_pack_id, default_participant_onboarding_pack_id FROM provider_profiles WHERE id = ?`)
-    .get(providerProfileId);
+    .prepare(
+      `
+    SELECT m.id, m.slug, m.display_name
+    FROM document_library_masters m
+    JOIN document_library_org_clones c ON c.master_id = m.id AND c.org_id = ?
+    WHERE c.is_active = 1
+      AND m.is_active = 1
+      AND JSON_EXTRACT(m.manifest_json, '$.pack') = ?
+    ORDER BY m.display_name COLLATE NOCASE
+  `
+    )
+    .all(orgId, workflow);
+}
+
+/**
+ * Render a single branded library master to an email attachment.
+ * @returns {Promise<{ filename: string, content: Buffer, contentType: string }|null>}
+ */
+export async function renderLibraryMasterAttachment(master, orgId, { participant = null, staff = null } = {}) {
+  const rendered = renderLibraryDocument({ masterId: master.id, orgId, participant, staff });
+  let buf = rendered?.buffer;
+  if (rendered?.needsAcroFormFill && buf) {
+    buf = await fillAcroFormWithTokens(buf, rendered.tokens);
+  }
+  if (!buf) return null;
+  const ext = rendered.mime === 'application/pdf' ? 'pdf' : 'docx';
+  return {
+    filename: safeAttachmentFilename(master.display_name || master.slug, ext),
+    content: buf,
+    contentType: rendered.mime || 'application/pdf'
+  };
+}
+
+/**
+ * Single source of onboarding email attachments:
+ *   1. every branded, active, cloned library document tagged for `workflow`;
+ *   2. the org's uploaded extra PDFs (`company_policy_files`) as an escape hatch.
+ *
+ * @param {string|null} orgId - organisation id (for library clones + branding)
+ * @param {string|null} providerProfileId - provider profile id (for extra uploads)
+ * @param {'staff_onboarding'|'participant_onboarding'} workflow
+ * @param {{ participant?: object|null, staff?: object|null }} [context]
+ * @returns {Promise<{ attachments: Array<{ filename: string, content: Buffer, contentType: string }> }>}
+ */
+export async function buildOnboardingAttachments(orgId, providerProfileId, workflow, { participant = null, staff = null } = {}) {
+  const attachments = [];
+
+  // 1. Branded library documents tagged for this workflow.
+  for (const master of listOnboardingLibraryMasters(orgId, workflow)) {
+    try {
+      const att = await renderLibraryMasterAttachment(master, orgId, { participant, staff });
+      if (att) attachments.push(att);
+    } catch (err) {
+      console.warn(`[onboarding-attachments] library render failed (${master.slug}):`, err?.message);
+    }
+  }
+
+  // 2. Escape hatch: the org's uploaded extra PDFs.
+  if (providerProfileId) {
+    const policies = db
+      .prepare(
+        `SELECT id, display_name, file_path FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`
+      )
+      .all(providerProfileId);
+    for (const pf of policies) {
+      const fullPath = resolvePolicyFilePath(pf.file_path);
+      if (!fullPath || !existsSync(fullPath)) continue;
+      try {
+        attachments.push({
+          filename: safeAttachmentFilename(pf.display_name || 'document', 'pdf'),
+          content: readFileSync(fullPath),
+          contentType: 'application/pdf'
+        });
+      } catch {
+        /* skip unreadable file */
+      }
+    }
+  }
+
+  return { attachments };
+}
+
+/**
+ * Documents a staff member must read/acknowledge during public onboarding:
+ *   - branded, active, cloned library documents tagged `staff_onboarding`
+ *     (kind: 'library' — served rendered/branded);
+ *   - the org's uploaded extra PDFs (kind: 'policy' — escape hatch).
+ * @param {string|null} providerProfileId
+ * @returns {Array<{ id: string, display_name: string, kind: 'library'|'policy', file_path?: string }>}
+ */
+export function listPoliciesForStaffOnboarding(providerProfileId) {
+  if (!providerProfileId) return [];
+  const pp = db.prepare(`SELECT organisation_id FROM provider_profiles WHERE id = ?`).get(providerProfileId);
+  const orgId = pp?.organisation_id || null;
+
+  const libraryDocs = listOnboardingLibraryMasters(orgId, 'staff_onboarding').map((m) => ({
+    id: m.id,
+    display_name: m.display_name,
+    kind: 'library'
+  }));
+
+  const extraDocs = db
+    .prepare(`SELECT id, display_name, file_path FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`)
+    .all(providerProfileId)
+    .map((p) => ({ ...p, kind: 'policy' }));
+
+  return [...libraryDocs, ...extraDocs];
 }

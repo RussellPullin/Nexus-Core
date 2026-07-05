@@ -36,16 +36,6 @@ import {
 } from '../services/formCatalog.service.js';
 import { buildCoreFormSampleBuffer, assessOrgSampleReadiness } from '../services/formSample.service.js';
 import {
-  listPacks,
-  createPack,
-  updatePack,
-  deletePack,
-  getPackItemsDetailed,
-  getPackFormTemplateItemsDetailed,
-  setPackItems,
-  setProviderPackDefaults
-} from '../services/onboardingDocumentPacks.service.js';
-import {
   ingestFormTemplateBatch,
   ingestFormTemplateZip,
   generateSignerPreviewPdf,
@@ -851,106 +841,6 @@ ROUTER.delete('/policy-files/:id', (req, res) => {
     res.status(204).send();
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// --- Onboarding document packs (policy PDF bundles for staff / participant onboarding emails) ---
-
-ROUTER.get('/onboarding-document-packs', (req, res) => {
-  try {
-    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
-    const { profile } = getProviderProfileForUser(req.session.user.id);
-    if (!profile) return res.json({ packs: [], policy_files: [], custom_form_templates: [], defaults: {} });
-    const packs = listPacks(profile.id).map((p) => ({
-      ...p,
-      items: getPackItemsDetailed(p.id).map((row) => ({
-        policy_file_id: row.id,
-        display_name: row.display_name
-      })),
-      form_template_items: getPackFormTemplateItemsDetailed(p.id).map((row) => ({
-        form_template_id: row.id,
-        display_name: row.display_name,
-        workflow: row.workflow
-      }))
-    }));
-    const policy_files = db
-      .prepare(`SELECT id, display_name FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`)
-      .all(profile.id);
-    const custom_form_templates = db
-      .prepare(
-        `SELECT id, display_name, workflow FROM form_templates WHERE provider_profile_id = ? AND form_type = 'custom' AND is_active = 1 ORDER BY display_name COLLATE NOCASE`
-      )
-      .all(profile.id);
-    const defaults = db
-      .prepare(`SELECT default_staff_onboarding_pack_id, default_participant_onboarding_pack_id FROM provider_profiles WHERE id = ?`)
-      .get(profile.id);
-    res.json({ packs, policy_files, custom_form_templates, defaults: defaults || {} });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-ROUTER.post('/onboarding-document-packs', (req, res) => {
-  try {
-    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
-    const { profile } = getProviderProfileForUser(req.session.user.id);
-    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
-    const created = createPack(profile.id, req.body || {});
-    res.status(201).json(created);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-ROUTER.patch('/onboarding-document-packs/:packId', (req, res) => {
-  try {
-    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
-    const { profile } = getProviderProfileForUser(req.session.user.id);
-    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
-    const updated = updatePack(profile.id, req.params.packId, req.body || {});
-    if (!updated) return res.status(404).json({ error: 'Pack not found.' });
-    res.json(updated);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-ROUTER.delete('/onboarding-document-packs/:packId', (req, res) => {
-  try {
-    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
-    const { profile } = getProviderProfileForUser(req.session.user.id);
-    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
-    const ok = deletePack(profile.id, req.params.packId);
-    if (!ok) return res.status(404).json({ error: 'Pack not found.' });
-    res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-ROUTER.put('/onboarding-document-packs/:packId/items', (req, res) => {
-  try {
-    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
-    const { profile } = getProviderProfileForUser(req.session.user.id);
-    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
-    const policyIds = req.body?.policy_file_ids;
-    const formTemplateIds = req.body?.form_template_ids;
-    const items = setPackItems(profile.id, req.params.packId, policyIds, formTemplateIds);
-    res.json({ items: items.items, form_template_items: items.form_template_items });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-ROUTER.patch('/onboarding-document-packs-defaults', (req, res) => {
-  try {
-    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
-    const { profile } = getProviderProfileForUser(req.session.user.id);
-    if (!profile) return res.status(400).json({ error: 'No organisation set.' });
-    const updated = setProviderPackDefaults(profile.id, req.body || {});
-    res.json(updated);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
   }
 });
 

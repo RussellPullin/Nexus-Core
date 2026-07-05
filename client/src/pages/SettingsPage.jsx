@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useParams } from 'react-router-dom';
 import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { useAuth } from '../context/AuthContext';
-import { staff, learning, settings, auth, microsoftDrive, organisations, companyDocuments } from '../lib/api';
+import { staff, learning, settings, auth, microsoftDrive, organisations } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
 import { formatDate } from '../lib/dateUtils';
 
@@ -54,10 +54,6 @@ export default function SettingsPage() {
   const isDrawingRef = useRef(false);
   const [msDriveStatus, setMsDriveStatus] = useState(null);
   const [msDriveBusy, setMsDriveBusy] = useState(false);
-  const [onedriveImportPath, setOnedriveImportPath] = useState('');
-  const [onedriveImportEnabled, setOnedriveImportEnabled] = useState(false);
-  const [onedriveImportMessage, setOnedriveImportMessage] = useState('');
-
   useEffect(() => {
     setBillingIntervalMinutes(user?.billing_interval_minutes ?? 15);
     setStaffId(user?.staff_id || '');
@@ -107,9 +103,6 @@ export default function SettingsPage() {
       .status()
       .then((s) => {
         setMsDriveStatus(s);
-        const imp = s?.import || {};
-        setOnedriveImportPath(imp.import_source_path || '');
-        setOnedriveImportEnabled(Boolean(imp.import_enabled));
       })
       .catch(() => setMsDriveStatus(null));
   }, [isAdmin, searchParams]);
@@ -508,102 +501,6 @@ export default function SettingsPage() {
             <code>{`${window.location.origin}/api/integrations/microsoft-drive/callback`}</code>.
           </p>
 
-          {msDriveStatus?.connected && (
-            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
-              <h4 style={{ margin: '0 0 0.5rem', fontSize: '1rem' }}>Import company documents from OneDrive</h4>
-              <p className="settings-desc" style={{ marginBottom: '0.75rem' }}>
-                Point Nexus at a folder on the connected account (e.g. <code>Policies and procedures</code>). PDF and Word
-                files are imported into <strong>Forms → Company documents</strong> and can sync to onboarding packs.
-              </p>
-              <div className="form-group">
-                <label>OneDrive folder path</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Policies and procedures"
-                  value={onedriveImportPath}
-                  onChange={(e) => setOnedriveImportPath(e.target.value)}
-                  disabled={msDriveBusy}
-                />
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <input
-                  type="checkbox"
-                  checked={onedriveImportEnabled}
-                  onChange={(e) => setOnedriveImportEnabled(e.target.checked)}
-                  disabled={msDriveBusy}
-                />
-                Enable automatic import path (saved for manual sync)
-              </label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  disabled={msDriveBusy}
-                  onClick={async () => {
-                    setMsDriveBusy(true);
-                    setOnedriveImportMessage('');
-                    try {
-                      await companyDocuments.updateOnedriveImportSettings({
-                        import_source_path: onedriveImportPath.trim(),
-                        import_enabled: onedriveImportEnabled
-                      });
-                      setOnedriveImportMessage('Import settings saved.');
-                    } catch (e) {
-                      setOnedriveImportMessage(e.message || 'Save failed');
-                    } finally {
-                      setMsDriveBusy(false);
-                    }
-                  }}
-                >
-                  Save import settings
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  disabled={msDriveBusy || !onedriveImportPath.trim()}
-                  onClick={async () => {
-                    setMsDriveBusy(true);
-                    setOnedriveImportMessage('');
-                    try {
-                      await companyDocuments.updateOnedriveImportSettings({
-                        import_source_path: onedriveImportPath.trim(),
-                        import_enabled: true
-                      });
-                      const result = await companyDocuments.syncFromOnedrive({});
-                      setOnedriveImportEnabled(true);
-                      setOnedriveImportMessage(
-                        `Imported ${result.imported_count || 0} file(s) from OneDrive${
-                          result.onboarding?.synced_count != null
-                            ? `; ${result.onboarding.synced_count} synced to onboarding`
-                            : ''
-                        }.`
-                      );
-                    } catch (e) {
-                      setOnedriveImportMessage(e.message || 'Import failed');
-                    } finally {
-                      setMsDriveBusy(false);
-                    }
-                  }}
-                >
-                  {msDriveBusy ? 'Importing…' : 'Import now from OneDrive'}
-                </button>
-              </div>
-              {msDriveStatus?.import?.import_last_synced_at && (
-                <p className="form-hint" style={{ marginTop: '0.5rem' }}>
-                  Last import: {formatDate(msDriveStatus.import.import_last_synced_at)}
-                </p>
-              )}
-              {onedriveImportMessage && (
-                <p
-                  className={onedriveImportMessage.toLowerCase().includes('fail') ? 'settings-error' : 'settings-success'}
-                  style={{ marginTop: '0.5rem' }}
-                >
-                  {onedriveImportMessage}
-                </p>
-              )}
-            </div>
-          )}
           </div>
         </details>
       )}

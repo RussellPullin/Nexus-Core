@@ -15,9 +15,7 @@ import {
   completeIntakeToken
 } from '../services/participantIntakeToken.service.js';
 import { getOrgRenderContext } from '../services/orgContext.service.js';
-import { buildPolicyAttachmentsForEmail } from '../services/onboardingDocumentPacks.service.js';
-import { renderLibraryDocument } from '../services/documentLibraryRender.service.js';
-import { fillAcroFormWithTokens } from '../services/formFill.service.js';
+import { buildOnboardingAttachments } from '../services/onboardingDocumentPacks.service.js';
 import { sendEmailViaRelay } from '../services/notification.service.js';
 
 const router = Router();
@@ -128,60 +126,20 @@ async function sendIntakePoliciesAndNotify(participantId, organisationId) {
   const orgName = org?.trading_name?.trim() || org?.name?.trim() || 'Your service provider';
 
   // ── 1. Gather all participant onboarding attachments ─────────────────────
+  // Single source: branded, workflow-tagged library documents + the org's
+  // uploaded extra PDFs (escape hatch).
   const allAttachments = [];
-
-  // 1a. Uploaded policy PDFs from the org's participant onboarding pack
   try {
-    const { attachments } = buildPolicyAttachmentsForEmail(
+    const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(participantId);
+    const { attachments } = await buildOnboardingAttachments(
+      organisationId,
       profile.id,
-      profile.default_participant_onboarding_pack_id || null,
       'participant_onboarding',
-      null
+      { participant: fullParticipant }
     );
     allAttachments.push(...attachments);
   } catch (err) {
-    console.warn('[intake-submit] policy pack build failed:', err?.message);
-  }
-
-  // 1b. Document library templates tagged pack=participant_onboarding
-  try {
-    const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(participantId);
-    const libMasters = db.prepare(`
-      SELECT m.id, m.slug, m.display_name, m.engine
-      FROM document_library_masters m
-      JOIN org_library_send_stages s ON s.master_id = m.id
-      WHERE s.org_id = ?
-        AND s.stage = 'participant_intake'
-        AND m.is_active = 1
-      ORDER BY m.display_name COLLATE NOCASE
-    `).all(organisationId);
-
-    for (const master of libMasters) {
-      try {
-        const rendered = renderLibraryDocument({
-          masterId: master.id,
-          orgId: organisationId,
-          participant: fullParticipant
-        });
-        let buf = rendered.buffer;
-        if (rendered.needsAcroFormFill && buf) {
-          buf = await fillAcroFormWithTokens(buf, rendered.tokens);
-        }
-        if (buf) {
-          const safeName = (master.display_name || master.slug).replace(/[/\\?%*:|"<>]/g, '_');
-          const ext = rendered.mime === 'application/pdf' ? 'pdf' : 'docx';
-          allAttachments.push({
-            filename: `${safeName}.${ext}`,
-            content: buf,
-            contentType: rendered.mime || 'application/pdf'
-          });
-        }
-      } catch (err) {
-        console.warn(`[intake-submit] library doc render failed (${master.slug}):`, err?.message);
-      }
-    }
-  } catch (err) {
-    console.warn('[intake-submit] library template query failed:', err?.message);
+    console.warn('[intake-submit] onboarding attachments build failed:', err?.message);
   }
 
   // ── 2. Send participant email with all attachments ────────────────────────

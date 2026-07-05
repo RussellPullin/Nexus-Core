@@ -8,7 +8,6 @@
  *  POST   /document-library/masters/:id/render         – render the document for a participant/staff record
  */
 import { Router } from 'express';
-import { randomUUID } from 'crypto';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
@@ -19,12 +18,6 @@ import {
   listLibraryMasters
 } from '../services/documentLibrary.service.js';
 import { renderLibraryDocument } from '../services/documentLibraryRender.service.js';
-
-const VALID_STAGES = new Set(['participant_intake', 'participant_sa', 'staff_intake', 'staff_contract']);
-const WORKFLOW_STAGES = {
-  participant_onboarding: ['participant_intake', 'participant_sa'],
-  staff_onboarding:       ['staff_intake', 'staff_contract']
-};
 
 const router = Router();
 router.use(requireAuth);
@@ -138,99 +131,6 @@ router.get('/masters/:id/preview', (req, res) => {
       staff,
       extra: {}
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * GET /send-stages?workflow=participant_onboarding|staff_onboarding
- * Returns every library master for this workflow, with an array of which stages it's in for this org.
- */
-router.get('/send-stages', requireAdminOrDelegate, (req, res) => {
-  try {
-    const orgId = requesterOrgId(req);
-    if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
-    const workflow = req.query.workflow || 'participant_onboarding';
-    const stages = WORKFLOW_STAGES[workflow];
-    if (!stages) return res.status(400).json({ error: 'Unknown workflow' });
-
-    const masters = db.prepare(`
-      SELECT m.id, m.slug, m.display_name, m.engine, m.category,
-             JSON_EXTRACT(m.manifest_json, '$.pack') AS pack
-      FROM document_library_masters m
-      JOIN document_library_org_clones c ON c.master_id = m.id
-      WHERE c.org_id = ?
-        AND JSON_EXTRACT(m.manifest_json, '$.pack') = ?
-        AND c.is_active = 1
-        AND m.is_active = 1
-      ORDER BY m.display_name COLLATE NOCASE
-    `).all(orgId, workflow);
-
-    const assigned = db.prepare(`
-      SELECT master_id, stage FROM org_library_send_stages
-      WHERE org_id = ? AND stage IN (${stages.map(() => '?').join(',')})
-    `).all(orgId, ...stages);
-
-    const stageMap = {};
-    for (const r of assigned) {
-      if (!stageMap[r.master_id]) stageMap[r.master_id] = [];
-      stageMap[r.master_id].push(r.stage);
-    }
-
-    res.json({
-      workflow,
-      stages,
-      masters: masters.map((m) => ({ ...m, active_stages: stageMap[m.id] || [] }))
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * PUT /send-stages
- * Body: { workflow: 'participant_onboarding', stages: { participant_intake: [masterId,...], participant_sa: [...] } }
- * Replaces the stage assignments for this org + workflow.
- */
-router.put('/send-stages', requireAdminOrDelegate, (req, res) => {
-  try {
-    const orgId = requesterOrgId(req);
-    if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
-    const { workflow, stages: stageAssignments } = req.body || {};
-    const validStages = WORKFLOW_STAGES[workflow];
-    if (!validStages) return res.status(400).json({ error: 'Unknown workflow' });
-    if (!stageAssignments || typeof stageAssignments !== 'object') {
-      return res.status(400).json({ error: 'stages must be an object' });
-    }
-
-    const run = db.transaction(() => {
-      // Delete all current stage assignments for this org + workflow stages
-      db.prepare(
-        `DELETE FROM org_library_send_stages WHERE org_id = ? AND stage IN (${validStages.map(() => '?').join(',')})`
-      ).run(orgId, ...validStages);
-
-      const insert = db.prepare(
-        `INSERT OR IGNORE INTO org_library_send_stages (id, org_id, master_id, stage) VALUES (?, ?, ?, ?)`
-      );
-
-      for (const stage of validStages) {
-        if (!VALID_STAGES.has(stage)) continue;
-        const ids = Array.isArray(stageAssignments[stage]) ? stageAssignments[stage] : [];
-        for (const masterId of ids) {
-          // Verify the master exists and org has a clone
-          const ok = db.prepare(`
-            SELECT 1 FROM document_library_masters m
-            JOIN document_library_org_clones c ON c.master_id = m.id
-            WHERE m.id = ? AND c.org_id = ? AND m.is_active = 1 AND c.is_active = 1
-          `).get(masterId, orgId);
-          if (ok) insert.run(randomUUID(), orgId, masterId, stage);
-        }
-      }
-    });
-    run();
-
-    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

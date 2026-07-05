@@ -22,30 +22,20 @@ const CATEGORY_ICONS = {
   guide:     '📖',
 };
 
-function workflowLabel(w) {
-  if (w === 'staff_onboarding') return 'Staff only';
-  if (w === 'participant_onboarding') return 'Participant only';
-  return 'Staff and participant';
-}
-
 export default function FormsPage() {
   const { user, isAdmin } = useAuth();
   const orgId = user?.org_id || null;
 
   const [message, setMessage] = useState('');
 
-  // Document Library (104 NDIS templates)
+  // Document Library (NDIS templates)
   const [libraryTemplates, setLibraryTemplates] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryCategoryFilter, setLibraryCategoryFilter] = useState('');
 
-  // Policy packs
-  const [docPackData, setDocPackData] = useState(null);
-  const [packWorking, setPackWorking] = useState(false);
-  const [newPackName, setNewPackName] = useState('');
-  const [newPackWorkflow, setNewPackWorkflow] = useState('both');
-  const [expandedPackId, setExpandedPackId] = useState(null);
-  const [packItemDraft, setPackItemDraft] = useState([]);
+  // Extra organisation documents (escape hatch)
+  const [policyFiles, setPolicyFiles] = useState([]);
+  const [policyBusy, setPolicyBusy] = useState(false);
   const [policyDisplayName, setPolicyDisplayName] = useState('');
   const [policyFile, setPolicyFile] = useState(null);
 
@@ -58,19 +48,13 @@ export default function FormsPage() {
     default_renewal_days: 365,
     dropbox_sign_enabled: false
   });
-
-  // Library send stages (participant)
-  const [sendStagesData, setSendStagesData] = useState(null);
-  const [sendStagesDraft, setSendStagesDraft] = useState({});
-  const [sendStagesBusy, setSendStagesBusy] = useState(false);
-  const [sendStagesMsg, setSendStagesMsg] = useState('');
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
 
   // ── Load ────────────────────────────────────────────────────────────────
 
-  const reloadDocPacks = useCallback(() => {
-    forms.onboardingDocumentPacks().then(setDocPackData).catch(() => {});
+  const reloadPolicyFiles = useCallback(() => {
+    forms.policyFilesList().then((list) => setPolicyFiles(Array.isArray(list) ? list : [])).catch(() => {});
   }, []);
 
   const reloadLibrary = useCallback(() => {
@@ -84,23 +68,6 @@ export default function FormsPage() {
       .catch(() => setLibraryTemplates([]))
       .finally(() => setLibraryLoading(false));
   }, []);
-
-  const reloadSendStages = useCallback(() => {
-    if (!orgId || !isAdmin) return;
-    documentLibrary.getSendStages('participant_onboarding')
-      .then((data) => {
-        setSendStagesData(data);
-        const draft = {};
-        for (const stage of (data.stages || [])) draft[stage] = new Set();
-        for (const m of (data.masters || [])) {
-          for (const stage of (m.active_stages || [])) {
-            if (draft[stage]) draft[stage].add(m.id);
-          }
-        }
-        setSendStagesDraft(draft);
-      })
-      .catch(() => setSendStagesData(null));
-  }, [orgId, isAdmin]);
 
   const reloadSettings = useCallback(() => {
     if (!orgId || !isAdmin) { setSettingsState(null); return; }
@@ -120,132 +87,43 @@ export default function FormsPage() {
   }, [orgId, isAdmin]);
 
   useEffect(() => {
-    reloadDocPacks();
+    reloadPolicyFiles();
     reloadLibrary();
     reloadSettings();
-    reloadSendStages();
-  }, [reloadDocPacks, reloadLibrary, reloadSettings, reloadSendStages]);
+  }, [reloadPolicyFiles, reloadLibrary, reloadSettings]);
 
-  // ── Policy pack handlers ─────────────────────────────────────────────────
-
-  const handleCreatePack = async (e) => {
-    e.preventDefault();
-    const name = newPackName.trim();
-    if (!name) return;
-    setPackWorking(true);
-    setMessage('');
-    try {
-      await forms.createOnboardingDocumentPack({ display_name: name, workflow: newPackWorkflow });
-      setNewPackName('');
-      setMessage('Pack created.');
-      reloadDocPacks();
-    } catch (err) {
-      setMessage(err.message || 'Failed to create pack');
-    } finally {
-      setPackWorking(false);
-    }
-  };
-
-  const handleDeletePack = async (packId) => {
-    if (!confirm('Delete this pack?')) return;
-    setPackWorking(true);
-    setMessage('');
-    try {
-      await forms.deleteOnboardingDocumentPack(packId);
-      if (expandedPackId === packId) { setExpandedPackId(null); setPackItemDraft([]); }
-      setMessage('Pack deleted.');
-      reloadDocPacks();
-    } catch (err) {
-      setMessage(err.message || 'Delete failed');
-    } finally {
-      setPackWorking(false);
-    }
-  };
-
-  const openPackEditor = (pack) => {
-    setExpandedPackId(pack.id);
-    setPackItemDraft((pack.items || []).map((i) => i.policy_file_id));
-  };
-
-  const toggleDraftPolicy = (policyFileId) => {
-    setPackItemDraft((prev) =>
-      prev.includes(policyFileId) ? prev.filter((x) => x !== policyFileId) : [...prev, policyFileId]
-    );
-  };
-
-  const handleSavePackItems = async () => {
-    if (!expandedPackId) return;
-    setPackWorking(true);
-    setMessage('');
-    try {
-      await forms.setOnboardingDocumentPackItems(expandedPackId, { policy_file_ids: packItemDraft, form_template_ids: [] });
-      setMessage('Pack updated.');
-      reloadDocPacks();
-    } catch (err) {
-      setMessage(err.message || 'Save failed');
-    } finally {
-      setPackWorking(false);
-    }
-  };
+  // ── Extra document handlers ──────────────────────────────────────────────
 
   const handlePolicyUpload = async (e) => {
     e.preventDefault();
-    if (!policyFile) { setMessage('Choose a policy PDF.'); return; }
-    setPackWorking(true);
+    if (!policyFile) { setMessage('Choose a PDF to upload.'); return; }
+    setPolicyBusy(true);
     setMessage('');
     try {
       await forms.policyFilesUpload(policyFile, policyDisplayName.trim() || undefined);
       setPolicyFile(null);
       setPolicyDisplayName('');
-      setMessage('Policy PDF uploaded.');
-      reloadDocPacks();
+      setMessage('Document uploaded.');
+      reloadPolicyFiles();
     } catch (err) {
-      setMessage(err.message || 'Policy upload failed');
+      setMessage(err.message || 'Upload failed');
     } finally {
-      setPackWorking(false);
+      setPolicyBusy(false);
     }
   };
 
   const handlePolicyDelete = async (policyId, label) => {
-    if (!confirm(`Remove policy "${label}"?`)) return;
-    setPackWorking(true);
+    if (!confirm(`Remove document "${label}"?`)) return;
+    setPolicyBusy(true);
     setMessage('');
     try {
       await forms.policyFilesDelete(policyId);
-      setMessage('Policy removed.');
-      reloadDocPacks();
+      setMessage('Document removed.');
+      reloadPolicyFiles();
     } catch (err) {
       setMessage(err.message || 'Delete failed');
     } finally {
-      setPackWorking(false);
-    }
-  };
-
-  // ── Send stages handlers ─────────────────────────────────────────────────
-
-  const toggleSendStage = (masterId, stage) => {
-    setSendStagesDraft((prev) => {
-      const current = new Set(prev[stage] || []);
-      if (current.has(masterId)) current.delete(masterId); else current.add(masterId);
-      return { ...prev, [stage]: current };
-    });
-  };
-
-  const handleSaveSendStages = async () => {
-    setSendStagesBusy(true);
-    setSendStagesMsg('');
-    try {
-      const stages = {};
-      for (const [stage, ids] of Object.entries(sendStagesDraft)) {
-        stages[stage] = [...ids];
-      }
-      await documentLibrary.saveSendStages('participant_onboarding', stages);
-      setSendStagesMsg('Saved.');
-      reloadSendStages();
-    } catch (err) {
-      setSendStagesMsg(err.message || 'Save failed');
-    } finally {
-      setSendStagesBusy(false);
+      setPolicyBusy(false);
     }
   };
 
@@ -362,7 +240,7 @@ export default function FormsPage() {
             <h2 className="forms-section-heading" style={{ marginBottom: '0.25rem' }}>NDIS document library</h2>
             <p className="forms-lede" style={{ marginBottom: 0 }}>
               {libraryTemplates.length} compliance documents — policies, procedures, registers, contracts, and guides.
-              Generic and ready to customise with your organisation's branding.
+              Automatically branded with your organisation's details and attached to onboarding emails.
             </p>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
@@ -477,77 +355,12 @@ export default function FormsPage() {
         )}
       </section>
 
-      {/* ── 5. Participant onboarding send stages ────────────────────────── */}
-      {isAdmin && sendStagesData && (
-        <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-          <h2 className="forms-section-heading">Participant onboarding — when to send each document</h2>
-          <p className="forms-lede">
-            Tick which library documents go out at each stage. Changes apply to all future intakes — existing participants are unaffected.
-          </p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '0.75rem' }}>
-            <div>
-              <h3 className="forms-subheading" style={{ marginBottom: '0.25rem' }}>Stage 1 — On intake submit</h3>
-              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.6rem', marginTop: 0 }}>
-                Sent automatically the moment a participant submits their intake form.
-              </p>
-              <div className="forms-policy-checks">
-                {(sendStagesData.masters || []).map((m) => (
-                  <label key={m.id} className="forms-policy-check">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(sendStagesDraft.participant_intake?.has(m.id))}
-                      onChange={() => toggleSendStage(m.id, 'participant_intake')}
-                    />
-                    {m.display_name}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h3 className="forms-subheading" style={{ marginBottom: '0.25rem' }}>Stage 2 — With Service Agreement</h3>
-              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.6rem', marginTop: 0 }}>
-                Attached when the coordinator generates and sends the Service Agreement.
-              </p>
-              <div className="forms-policy-checks">
-                {(sendStagesData.masters || []).map((m) => (
-                  <label key={m.id} className="forms-policy-check">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(sendStagesDraft.participant_sa?.has(m.id))}
-                      onChange={() => toggleSendStage(m.id, 'participant_sa')}
-                    />
-                    {m.display_name}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleSaveSendStages}
-              disabled={sendStagesBusy}
-            >
-              {sendStagesBusy ? 'Saving…' : 'Save stages'}
-            </button>
-            {sendStagesMsg && (
-              <span style={{ fontSize: '0.875rem', color: sendStagesMsg === 'Saved.' ? '#166534' : '#991b1b' }}>
-                {sendStagesMsg}
-              </span>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* ── 6. Policy packs ──────────────────────────────────────────────── */}
+      {/* ── 5. Extra organisation documents (escape hatch) ───────────────── */}
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <h2 className="forms-section-heading">Policy packs — onboarding</h2>
+        <h2 className="forms-section-heading">Extra organisation documents</h2>
         <p className="forms-lede">
-          Upload your own policy PDFs and group them into packs that attach to staff or participant onboarding emails.
+          Optional. Upload your own PDFs to attach to staff and participant onboarding emails alongside the branded
+          NDIS library documents above. Most organisations don't need this.
         </p>
 
         <form onSubmit={handlePolicyUpload} className="forms-add-row" style={{ marginBottom: '1rem' }}>
@@ -560,125 +373,40 @@ export default function FormsPage() {
             style={{ flex: 1, minWidth: 160 }}
           />
           <input type="file" accept=".pdf" onChange={(e) => setPolicyFile(e.target.files?.[0] || null)} />
-          <button type="submit" className="btn btn-primary" disabled={packWorking || !policyFile}>
-            {packWorking ? 'Uploading…' : 'Upload policy PDF'}
+          <button type="submit" className="btn btn-primary" disabled={policyBusy || !policyFile}>
+            {policyBusy ? 'Uploading…' : 'Upload PDF'}
           </button>
         </form>
 
-        {(docPackData?.policy_files || []).length > 0 && (
-          <>
-            <h3 className="forms-subheading">Uploaded policies</h3>
-            <div className="table-wrap">
-              <table className="table-condensed forms-data-table">
-                <thead>
-                  <tr><th>Name</th><th></th></tr>
-                </thead>
-                <tbody>
-                  {(docPackData?.policy_files || []).map((f) => (
-                    <tr key={f.id}>
-                      <td>{f.display_name}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ color: '#b91c1c' }}
-                          disabled={packWorking}
-                          onClick={() => handlePolicyDelete(f.id, f.display_name)}
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+        {policyFiles.length > 0 ? (
+          <div className="table-wrap">
+            <table className="table-condensed forms-data-table">
+              <thead>
+                <tr><th>Name</th><th></th></tr>
+              </thead>
+              <tbody>
+                {policyFiles.map((f) => (
+                  <tr key={f.id}>
+                    <td>{f.display_name}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ color: '#b91c1c' }}
+                        disabled={policyBusy}
+                        onClick={() => handlePolicyDelete(f.id, f.display_name)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="forms-muted" style={{ fontSize: '0.85rem' }}>No extra documents uploaded.</p>
         )}
-
-        <form onSubmit={handleCreatePack} className="forms-add-row" style={{ marginTop: '1.25rem' }}>
-          <input
-            className="form-input"
-            value={newPackName}
-            onChange={(e) => setNewPackName(e.target.value)}
-            placeholder="New pack name"
-            style={{ flex: 1, minWidth: 160 }}
-          />
-          <select
-            className="form-input"
-            value={newPackWorkflow}
-            onChange={(e) => setNewPackWorkflow(e.target.value)}
-            style={{ maxWidth: 220 }}
-          >
-            <option value="both">Staff and participant</option>
-            <option value="staff_onboarding">Staff only</option>
-            <option value="participant_onboarding">Participant only</option>
-          </select>
-          <button type="submit" className="btn btn-primary" disabled={packWorking || !newPackName.trim()}>
-            Create pack
-          </button>
-        </form>
-
-        <div className="forms-pack-list">
-          {(docPackData?.packs || []).map((p) => (
-            <div key={p.id} className="forms-pack-card">
-              <div className="forms-pack-head">
-                <div>
-                  <strong>{p.display_name}</strong>
-                  <span className="forms-muted" style={{ marginLeft: 8, fontSize: '0.9rem' }}>
-                    {workflowLabel(p.workflow)} · {p.item_count ?? 0} item(s)
-                  </span>
-                </div>
-                <div className="forms-pack-actions">
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => openPackEditor(p)}
-                    disabled={packWorking}
-                  >
-                    {expandedPackId === p.id ? 'Editing…' : 'Edit pack'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    style={{ color: '#b91c1c' }}
-                    onClick={() => handleDeletePack(p.id)}
-                    disabled={packWorking}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-              {expandedPackId === p.id && (
-                <div className="forms-pack-body">
-                  <p className="forms-muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-                    Tick policies to include in this pack.
-                  </p>
-                  <div className="forms-policy-checks">
-                    {(docPackData?.policy_files || []).map((f) => (
-                      <label key={f.id} className="forms-policy-check">
-                        <input
-                          type="checkbox"
-                          checked={packItemDraft.includes(f.id)}
-                          onChange={() => toggleDraftPolicy(f.id)}
-                        />
-                        {f.display_name}
-                      </label>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={packWorking}
-                    onClick={handleSavePackItems}
-                  >
-                    Save pack
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
       </section>
 
       {/* ── 6. Onboarding settings ───────────────────────────────────────── */}

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
-import { onboarding, participants, organisations, ndis, smartDefaults, forms } from '../lib/api';
+import { onboarding, participants, organisations, ndis, smartDefaults } from '../lib/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import { formatDate } from '../lib/dateUtils';
 import {
@@ -141,22 +141,7 @@ export default function OnboardingPage() {
     km: [],
     time: []
   });
-  const [docPackMeta, setDocPackMeta] = useState(null);
-  const [participantPackChoice, setParticipantPackChoice] = useState('');
   const [intakeSavedAt, setIntakeSavedAt] = useState(0);
-
-  const participantPackOptions = useMemo(
-    () => (docPackMeta?.packs || []).filter((p) => p.workflow === 'participant_onboarding' || p.workflow === 'both'),
-    [docPackMeta]
-  );
-
-  useEffect(() => {
-    forms.onboardingDocumentPacks().then(setDocPackMeta).catch(() => setDocPackMeta(null));
-  }, []);
-
-  useEffect(() => {
-    setParticipantPackChoice(state?.document_pack_id || '');
-  }, [state?.document_pack_id]);
 
   useEffect(() => {
     organisations.list('', 'plan_manager').then(setOrgs).catch(() => []);
@@ -527,18 +512,17 @@ export default function OnboardingPage() {
 
   const handleSendParticipantPolicyPack = async () => {
     if (!participant?.email?.trim()) {
-      alert('Add a participant email address before sending the policy pack.');
+      alert('Add a participant email address before sending the onboarding documents.');
       return;
     }
-    if (!confirm(`Email policy PDFs to ${participant.email.trim()}? Uses your connected email (Settings).`)) return;
+    if (!confirm(`Email onboarding documents to ${participant.email.trim()}? Uses your connected email (Settings).`)) return;
     setWorking(true);
     try {
-      const body = participantPackChoice ? { pack_id: participantPackChoice } : {};
-      await onboarding.sendOnboardingPack(id, body);
+      await onboarding.sendOnboardingPack(id, {});
       await refresh();
-      alert('Policy documents emailed to the participant.');
+      alert('Onboarding documents emailed to the participant.');
     } catch (err) {
-      alert(err.message || 'Could not send policy pack');
+      alert(err.message || 'Could not send onboarding documents');
     } finally {
       setWorking(false);
     }
@@ -1369,31 +1353,15 @@ export default function OnboardingPage() {
             </div>
 
             <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
-              <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '1rem' }}>Company policy PDFs</h4>
+              <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '1rem' }}>Onboarding documents</h4>
               <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: '#78350f' }}>
-                Send your organisation&apos;s policy documents from your email (same library as staff onboarding). Configure packs under{' '}
-                <strong>Forms</strong>. Participant must have an email; connect yours in Settings.
+                Email the branded participant onboarding documents from your organisation&apos;s NDIS document
+                library, plus any extra PDFs you&apos;ve uploaded under <strong>Forms</strong>. Participant must have an
+                email; connect yours in Settings.
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>Pack for this send</label>
-                  <select
-                    value={participantPackChoice}
-                    onChange={(e) => setParticipantPackChoice(e.target.value)}
-                    style={{ minWidth: 220, padding: '0.35rem' }}
-                    disabled={working}
-                  >
-                    <option value="">Organisation default</option>
-                    {participantPackOptions.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.display_name}
-                        {p.item_count != null ? ` (${p.item_count} PDF${p.item_count === 1 ? '' : 's'})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <button type="button" className="btn btn-secondary" onClick={handleSendParticipantPolicyPack} disabled={working}>
-                  Email policy pack to participant
+                  Email onboarding documents to participant
                 </button>
               </div>
             </div>

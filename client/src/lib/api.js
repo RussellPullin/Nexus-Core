@@ -110,57 +110,6 @@ export const microsoftDrive = {
   refreshRegisters: () => fetchApi('/integrations/microsoft-drive/refresh-registers', { method: 'POST' })
 };
 
-export const companyDocuments = {
-  list: () => fetchApi('/company-documents'),
-  updateSettings: (data) =>
-    fetchApi('/company-documents/settings', { method: 'PATCH', body: JSON.stringify(data || {}) }),
-  bulkUpload: async (files, options = {}) => {
-    const form = new FormData();
-    for (const f of files) form.append('files', f);
-    if (options.sync_to_onboarding != null) {
-      form.append('sync_to_onboarding', String(options.sync_to_onboarding));
-    }
-    if (options.category) form.append('category', options.category);
-    const res = await fetch(`${API}/company-documents/bulk-upload`, {
-      method: 'POST',
-      credentials: 'include',
-      body: form
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
-      throw new Error(err?.error || text || 'Upload failed');
-    }
-    return text ? JSON.parse(text) : null;
-  },
-  bulkUploadZip: async (file) => {
-    const form = new FormData();
-    form.append('file', file);
-    const res = await fetch(`${API}/company-documents/bulk-upload-zip`, {
-      method: 'POST',
-      credentials: 'include',
-      body: form
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
-      throw new Error(err?.error || text || 'ZIP upload failed');
-    }
-    return text ? JSON.parse(text) : null;
-  },
-  update: (id, data) =>
-    fetchApi(`/company-documents/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
-  delete: (id) => fetchApi(`/company-documents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  fileUrl: (id) => `${API}/company-documents/${encodeURIComponent(id)}/file`,
-  mirrorLibrary: () => fetchApi('/company-documents/mirror-library', { method: 'POST' }),
-  syncOnboarding: () => fetchApi('/company-documents/sync-onboarding', { method: 'POST' }),
-  bootstrap: () => fetchApi('/company-documents/bootstrap', { method: 'POST' }),
-  updateOnedriveImportSettings: (data) =>
-    fetchApi('/company-documents/onedrive-import/settings', { method: 'PATCH', body: JSON.stringify(data || {}) }),
-  syncFromOnedrive: (data) =>
-    fetchApi('/company-documents/onedrive-import/sync', { method: 'POST', body: JSON.stringify(data || {}) })
-};
-
 /** Org catalogue of activity (health & safety) risk assessment blank PDFs. */
 export const activityRiskAssessments = {
   list: () => fetchApi('/activity-risk-assessments'),
@@ -661,11 +610,6 @@ export const documentLibrary = {
   renderMaster: (masterId, body = {}) => fetchApi(`/document-library/masters/${masterId}/render`, {
     method: 'POST',
     body: JSON.stringify(body)
-  }),
-  getSendStages: (workflow) => fetchApi(`/document-library/send-stages?workflow=${encodeURIComponent(workflow)}`),
-  saveSendStages: (workflow, stages) => fetchApi('/document-library/send-stages', {
-    method: 'PUT',
-    body: JSON.stringify({ workflow, stages })
   })
 };
 
@@ -1170,15 +1114,6 @@ export const forms = {
     return text ? JSON.parse(text) : null;
   },
   policyFilesDelete: (id) => fetchApi(`/forms/policy-files/${id}`, { method: 'DELETE' }),
-  onboardingDocumentPacks: () => fetchApi('/forms/onboarding-document-packs'),
-  createOnboardingDocumentPack: (data) => fetchApi('/forms/onboarding-document-packs', { method: 'POST', body: JSON.stringify(data || {}) }),
-  updateOnboardingDocumentPack: (packId, data) =>
-    fetchApi(`/forms/onboarding-document-packs/${packId}`, { method: 'PATCH', body: JSON.stringify(data || {}) }),
-  deleteOnboardingDocumentPack: (packId) => fetchApi(`/forms/onboarding-document-packs/${packId}`, { method: 'DELETE' }),
-  setOnboardingDocumentPackItems: (packId, data) =>
-    fetchApi(`/forms/onboarding-document-packs/${packId}/items`, { method: 'PUT', body: JSON.stringify(data || {}) }),
-  patchOnboardingDocumentPackDefaults: (data) =>
-    fetchApi('/forms/onboarding-document-packs-defaults', { method: 'PATCH', body: JSON.stringify(data || {}) }),
   templateDocumentUrl: (templateId) =>
     `${API}/forms/templates/${encodeURIComponent(templateId)}/document`,
   signerPreviewPdfUrl: (templateId) =>

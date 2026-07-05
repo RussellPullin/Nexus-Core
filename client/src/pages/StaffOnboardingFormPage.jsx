@@ -515,7 +515,11 @@ export default function StaffOnboardingFormPage() {
               <ul style={{ marginBottom: '1rem' }}>
                 {context.policyFiles.map((p) => (
                   <li key={p.id}>
-                    <a href={`${API}/public/staff-onboarding/${token}/policy/${p.id}`} target="_blank" rel="noopener noreferrer">{p.display_name}</a>
+                    <a
+                      href={`${API}/public/staff-onboarding/${token}/${p.kind === 'library' ? 'library-doc' : 'policy'}/${p.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >{p.display_name}</a>
                   </li>
                 ))}
               </ul>

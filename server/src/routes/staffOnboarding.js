@@ -28,6 +28,8 @@ import {
 } from '../services/staffContractFill.service.js';
 import { listPoliciesForStaffOnboarding } from '../services/onboardingDocumentPacks.service.js';
 import { upsertStaffComplianceDocument } from '../services/staffComplianceDocuments.service.js';
+import { renderLibraryDocument } from '../services/documentLibraryRender.service.js';
+import { fillAcroFormWithTokens } from '../services/formFill.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -281,13 +283,49 @@ router.get('/:token/policy/:policyId', (req, res) => {
   const policy = db.prepare('SELECT id, display_name, file_path FROM company_policy_files WHERE id = ?').get(req.params.policyId);
   if (!policy) return res.status(404).send('Policy not found');
   const onboarding = getOnboarding(staff.id);
-  const allowed = listPoliciesForStaffOnboarding(onboarding?.provider_profile_id, onboarding?.document_pack_id).some((p) => p.id === req.params.policyId);
+  const allowed = listPoliciesForStaffOnboarding(onboarding?.provider_profile_id).some(
+    (p) => p.kind === 'policy' && p.id === req.params.policyId
+  );
   if (!allowed) return res.status(404).send('Policy not found');
   const fullPath = join(projectRoot, policy.file_path);
   if (!existsSync(fullPath)) return res.status(404).send('File not found');
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${(policy.display_name || 'policy').replace(/"/g, '%22')}.pdf"`);
   createReadStream(fullPath).pipe(res);
+});
+
+// GET /api/public/staff-onboarding/:token/library-doc/:masterId - serve branded library acknowledgement doc (validates token)
+router.get('/:token/library-doc/:masterId', async (req, res) => {
+  const staff = validateToken(req.params.token);
+  if (!staff) return res.status(404).send('Invalid or expired link');
+  const onboarding = getOnboarding(staff.id);
+  if (!onboarding?.provider_profile_id) return res.status(404).send('Document not found');
+
+  const allowed = listPoliciesForStaffOnboarding(onboarding.provider_profile_id).find(
+    (p) => p.kind === 'library' && p.id === req.params.masterId
+  );
+  if (!allowed) return res.status(404).send('Document not found');
+
+  const pp = db.prepare('SELECT organisation_id FROM provider_profiles WHERE id = ?').get(onboarding.provider_profile_id);
+  const orgId = pp?.organisation_id || null;
+  const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff.id);
+
+  try {
+    const rendered = renderLibraryDocument({ masterId: req.params.masterId, orgId, staff: staffFull });
+    let buf = rendered?.buffer;
+    if (rendered?.needsAcroFormFill && buf) {
+      buf = await fillAcroFormWithTokens(buf, rendered.tokens);
+    }
+    if (!buf) return res.status(404).send('Document not available');
+    const ext = rendered.mime === 'application/pdf' ? 'pdf' : 'docx';
+    const safe = (allowed.display_name || 'document').replace(/"/g, '%22');
+    res.setHeader('Content-Type', rendered.mime || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${safe}.${ext}"`);
+    return res.send(buf);
+  } catch (err) {
+    console.error('[staff-onboarding library-doc]', err);
+    return res.status(500).send('Failed to render document');
+  }
 });
 
 // GET /api/public/staff-onboarding/:token - form context for staff (no auth)
@@ -302,9 +340,10 @@ router.get('/:token', (req, res) => {
     const staffRow = db.prepare('SELECT name, email, role, employment_type, hourly_rate FROM staff WHERE id = ?').get(staff.id);
     let policyFiles = [];
     if (onboarding.provider_profile_id) {
-      policyFiles = listPoliciesForStaffOnboarding(onboarding.provider_profile_id, onboarding.document_pack_id).map((p) => ({
+      policyFiles = listPoliciesForStaffOnboarding(onboarding.provider_profile_id).map((p) => ({
         id: p.id,
-        display_name: p.display_name
+        display_name: p.display_name,
+        kind: p.kind
       }));
     }
     const rawIntake = getStaffIntakeFieldMap(onboarding.id);
@@ -426,7 +465,7 @@ router.post('/:token/step', (req, res) => {
     if (stepNum === 4 && stepData && typeof stepData === 'object' && stepData.policy_acknowledged) {
       const sig = stepData.signature != null ? String(stepData.signature) : '';
       if (onboarding.provider_profile_id) {
-        const policies = listPoliciesForStaffOnboarding(onboarding.provider_profile_id, onboarding.document_pack_id);
+        const policies = listPoliciesForStaffOnboarding(onboarding.provider_profile_id);
         db.prepare('DELETE FROM staff_policy_acknowledgements WHERE staff_onboarding_id = ?').run(onboarding.id);
         const insertAck = db.prepare(`
           INSERT INTO staff_policy_acknowledgements (id, staff_onboarding_id, policy_file_id, signature_data, acknowledged_at)

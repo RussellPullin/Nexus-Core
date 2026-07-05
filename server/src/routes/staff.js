@@ -14,9 +14,7 @@ import { computeHoursFromShifts } from '../services/shiftHours.service.js';
 import { ensureProviderProfile, assertStaffOnboardingReady } from '../services/onboarding.service.js';
 import { orchestrateStaffOnboarding } from '../services/staffOnboardingOrchestrator.service.js';
 import { generateStaffContractBuffers } from '../services/staffContractFill.service.js';
-import { buildPolicyAttachmentsForEmail } from '../services/onboardingDocumentPacks.service.js';
-import { renderLibraryDocument } from '../services/documentLibraryRender.service.js';
-import { fillAcroFormWithTokens } from '../services/formFill.service.js';
+import { buildOnboardingAttachments } from '../services/onboardingDocumentPacks.service.js';
 import { getStaffIntakeFieldMap, mergeStaffIntakeForProfile } from '../services/staffOnboardingSync.service.js';
 import { STAFF_ONBOARDING_FIELD_DEFS } from '../../../shared/onboardingFieldRegistry.js';
 import {
@@ -1072,51 +1070,18 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     text += `The form will collect your personal and employment details, compliance documents, and policy acknowledgements. Please sign to confirm you have read and acknowledged the company policies (attached).\n\n`;
     text += `If you have any questions, contact your manager.`;
 
-    const packIdBody = req.body?.pack_id != null && req.body.pack_id !== '' ? String(req.body.pack_id) : null;
-    const { attachments, resolvedPackId } = buildPolicyAttachmentsForEmail(providerProfileId, packIdBody, 'staff_onboarding', projectRoot);
-    db.prepare(`UPDATE staff_onboarding SET document_pack_id = ? WHERE id = ?`).run(resolvedPackId, onboarding.id);
-
-    const allAttachments = [...attachments];
-
-    // Add library documents tagged for the staff_intake stage
+    const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
+    let allAttachments = [];
     try {
-      const libMasters = db.prepare(`
-        SELECT m.id, m.slug, m.display_name
-        FROM document_library_masters m
-        JOIN org_library_send_stages st ON st.master_id = m.id
-        WHERE st.org_id = ?
-          AND st.stage = 'staff_intake'
-          AND m.is_active = 1
-        ORDER BY m.display_name COLLATE NOCASE
-      `).all(profile?.organisation_id);
-
-      const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
-      for (const master of libMasters) {
-        try {
-          const rendered = renderLibraryDocument({
-            masterId: master.id,
-            orgId: profile?.organisation_id,
-            staff: staffFull
-          });
-          let buf = rendered.buffer;
-          if (rendered.needsAcroFormFill && buf) {
-            buf = await fillAcroFormWithTokens(buf, rendered.tokens);
-          }
-          if (buf) {
-            const safeName = (master.display_name || master.slug).replace(/[/\\?%*:|"<>]/g, '_');
-            const ext = rendered.mime === 'application/pdf' ? 'pdf' : 'docx';
-            allAttachments.push({
-              filename: `${safeName}.${ext}`,
-              content: buf,
-              contentType: rendered.mime || 'application/pdf'
-            });
-          }
-        } catch (err) {
-          console.warn(`[start-onboarding] library doc render failed (${master.slug}):`, err?.message);
-        }
-      }
+      const { attachments } = await buildOnboardingAttachments(
+        profile?.organisation_id,
+        providerProfileId,
+        'staff_onboarding',
+        { staff: staffFull }
+      );
+      allAttachments = attachments;
     } catch (err) {
-      console.warn('[start-onboarding] library doc query failed:', err?.message);
+      console.warn('[start-onboarding] onboarding attachments build failed:', err?.message);
     }
 
     const attachmentsForEmail = allAttachments.map((a) => ({

@@ -64,8 +64,6 @@ export default function StaffProfile() {
   const [contractDownloading, setContractDownloading] = useState(false);
   const [complianceDocs, setComplianceDocs] = useState([]);
   const [policyFiles, setPolicyFiles] = useState([]);
-  const [staffOnboardingDocPacks, setStaffOnboardingDocPacks] = useState([]);
-  const [staffOnboardingPackChoice, setStaffOnboardingPackChoice] = useState('');
   const [policyUploading, setPolicyUploading] = useState(false);
   const [renewalSending, setRenewalSending] = useState(false);
   const [intakeViewing, setIntakeViewing] = useState(false);
@@ -103,15 +101,12 @@ export default function StaffProfile() {
       setAssignments(assignList || []);
       setParticipantsList(partList || []);
       setStaffShifts(shiftsList || []);
-      const [compList, policyList, packsRes] = await Promise.all([
+      const [compList, policyList] = await Promise.all([
         staff.getComplianceDocuments(id).catch(() => []),
-        forms.policyFilesList().catch(() => []),
-        forms.onboardingDocumentPacks().catch(() => null)
+        forms.policyFilesList().catch(() => [])
       ]);
       setComplianceDocs(Array.isArray(compList) ? compList : []);
       setPolicyFiles(Array.isArray(policyList) ? policyList : []);
-      const packs = (packsRes?.packs || []).filter((p) => p.workflow === 'staff_onboarding' || p.workflow === 'both');
-      setStaffOnboardingDocPacks(packs);
       setEditForm(staffEditFormFromRow(staffData));
       // Phase 3: pull readiness so the run-onboarding button can show why it's disabled.
       staff
@@ -280,8 +275,7 @@ export default function StaffProfile() {
     if (!confirm(confirmMsg)) return;
     setOnboardingSending(true);
     try {
-      const body = staffOnboardingPackChoice ? { pack_id: staffOnboardingPackChoice } : {};
-      await staff.startOnboarding(id, body);
+      await staff.startOnboarding(id, {});
       alert('Onboarding email sent. The staff member can complete the form using the link in the email.');
       load();
     } catch (err) {
@@ -502,26 +496,6 @@ export default function StaffProfile() {
             {(!data.onboarding_status || data.onboarding_status === 'not_started') && <span className="badge" style={{ background: '#64748b', color: '#fff', padding: '0.2rem 0.5rem', borderRadius: 4, fontSize: '0.8rem' }}>Onboarding not started</span>}
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginLeft: 'auto' }}>
-            {data.email && (
-              <div className="form-group" style={{ marginBottom: 0, minWidth: 0 }}>
-                <label style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: 2 }}>Policy PDF pack</label>
-                <select
-                  value={staffOnboardingPackChoice}
-                  onChange={(e) => setStaffOnboardingPackChoice(e.target.value)}
-                  style={{ maxWidth: 220, padding: '0.35rem' }}
-                  disabled={onboardingSending}
-                  title="Choose which policy PDFs attach to the onboarding email. Organisation default is set under Forms."
-                >
-                  <option value="">Organisation default</option>
-                  {staffOnboardingDocPacks.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.display_name}
-                      {p.item_count != null ? ` (${p.item_count})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
             {staffReadiness?.ready === false && (
               <div
                 style={{
@@ -945,8 +919,8 @@ export default function StaffProfile() {
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h3>Company policy PDFs (for onboarding emails)</h3>
         <p style={{ color: '#64748b', marginBottom: '1rem' }}>
-          These PDFs can be attached to staff welcome emails (Onboard) and participant onboarding packs. Group them into packs and set organisation defaults under{' '}
-          <strong>Forms → Onboarding document packs</strong>.
+          These extra PDFs are attached to staff and participant onboarding emails alongside your branded NDIS
+          library documents. Manage them under <strong>Forms → Extra organisation documents</strong>.
         </p>
         <div style={{ marginBottom: '1rem' }}>
           <input type="file" accept=".pdf" onChange={handlePolicyUpload} disabled={policyUploading} />
