@@ -23,15 +23,15 @@ const ALLOC_FREQUENCIES = ['weekly', 'fortnightly', 'monthly', 'random', 'annual
 
 // Preferred estimate rates (weekday daytime / typical professional rates) used for budget-hour estimates.
 const CATEGORY_PREFERRED_ESTIMATE_RATES = {
-  '01': 70.23,
+  '01': 73.58,
   '02': 58.03,
-  '03': 59.06,
-  '04': 70.23,
+  '03': 61.16,
+  '04': 73.58,
   '05': 193.99,
   '07': 193.99,
-  '08': 70.23,
-  '09': 70.23,
-  '10': 70.23,
+  '08': 73.58,
+  '09': 73.58,
+  '10': 73.58,
   '11': 193.99,
   '12': 193.99,
   '13': 193.99,
@@ -3568,7 +3568,7 @@ export default function ParticipantProfile() {
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
             <h3>{editingAllocation ? 'Edit' : 'Assign'} funding to provider</h3>
             <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '1rem' }}>
-              {allocationForm.budget_name} – assign rate, hours and frequency to a provider (e.g. 10 hrs/week at $70.23/hr).
+              {allocationForm.budget_name} – assign rate, hours and frequency to a provider (e.g. 10 hrs/week at $73.58/hr).
             </p>
             <form onSubmit={handleSaveAllocation}>
               {(() => {

@@ -658,16 +658,16 @@ function extractGoalsFromBudgetNarratives(budgets) {
 // Preferred hourly rates per category for hours estimate (weekday daytime default; core 01-04 prioritise these)
 // Used when auto-picking line items so est. hours use the correct rate
 const CATEGORY_PREFERRED_RATES = {
-  '01': 70.23,   // Assistance with Daily Life - Standard Weekday Daytime (01_011_0107_1_1)
+  '01': 73.58,   // Assistance with Daily Life - Standard Weekday Daytime (01_011_0107_1_1, 2026-27)
   '02': 58.03,   // Transport - typical
-  '03': 59.06,   // Consumables / domestic
-  '04': 70.23,   // Social/Community - similar to 01
+  '03': 61.16,   // Consumables / domestic (01_004_0107_1_1, 2026-27)
+  '04': 73.58,   // Social/Community - similar to 01
   '05': 193.99,  // Assistive Technology
   '06': 0,       // Capital - not hourly
   '07': 193.99,  // Support Coordination
-  '08': 70.23,   // Improved Living
-  '09': 70.23,   // Social/Community Participation
-  '10': 70.23,   // Employment
+  '08': 73.58,   // Improved Living
+  '09': 73.58,   // Social/Community Participation
+  '10': 73.58,   // Employment
   '11': 193.99,  // Improved Relationships - therapy rate
   '12': 193.99,  // Health/Wellbeing - therapy rate
   '13': 193.99,  // Improved Learning

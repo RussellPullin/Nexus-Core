@@ -429,7 +429,7 @@ function isOfficialNdisFormat(headers) {
   const hasSupportItem = h.some(x => x.includes('support item number') || x.includes('support item no') || x.includes('support item'));
   const hasRateColumns = h.some(x =>
     x === 'act' || x === 'nsw' || x === 'vic' || x === 'qld' || x === 'sa' || x === 'wa' || x === 'tas' || x === 'nt' ||
-    x.includes('remote') || x.includes('standard') || x.includes('metropolitan')
+    x === 'national' || x.includes('remote') || x.includes('standard') || x.includes('metropolitan')
   );
   return hasSupportItem && hasRateColumns;
 }
@@ -468,7 +468,8 @@ function parseOfficialImportRows(rows) {
     throw new Error('Not a valid NDIS Support Catalogue format. Expected column: Support Item Number.');
   }
 
-  const STANDARD_RATE_NAMES = ['act', 'nsw', 'vic', 'qld', 'sa', 'wa', 'tas', 'nt', 'standard', 'metropolitan', 'metro'];
+  // From 2026-27 the NDIA publishes a single "National" price column instead of per-state columns.
+  const STANDARD_RATE_NAMES = ['national', 'act', 'nsw', 'vic', 'qld', 'sa', 'wa', 'tas', 'nt', 'standard', 'metropolitan', 'metro'];
   const standardRateIdx = headersLower.findIndex((h) => {
     const t = String(h || '').trim();
     if (t.includes('remote') || t.includes('very')) return false;
