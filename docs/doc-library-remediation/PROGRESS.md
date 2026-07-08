@@ -121,7 +121,7 @@ NEXT: DONE — remediation complete
 | administering-medication-checklist-medication-chart | policy_library | ok | yes | yes |  |
 | administration-business-development-position-description | staff_onboarding | ok | yes | yes |  |
 | advocacy-of-support-person-request-form | policy_library | ok | yes | yes |  |
-| business-continuity-and-disaster-management-plan | policy_library | ok | yes | yes | Minor: first-page header has hardcoded ABN 15 639 893 477 instead of {org.abn} (cosmetic). |
+| business-continuity-and-disaster-management-plan | policy_library | ok | yes | yes | Fixed 2026-07-08: header ABN 15 639 893 477 → ABN {org.abn}. |
 | change-of-supports | policy_library | ok | yes | yes |  |
 | choice-advocacy-and-control-policy | policy_library | ok | yes | yes |  |
 | client-cash-reconciliation | policy_library | ok | yes | yes |  |
@@ -146,7 +146,7 @@ NEXT: DONE — remediation complete
 | disability-support-worker-position-description-travel-and-transport | staff_onboarding | ok | yes | yes |  |
 | diversity-policy | policy_library | ok | yes | yes |  |
 | document-register | compliance_register | ok | yes | yes |  |
-| emergency-and-disaster-preparedness-policy | policy_library | ok | yes | yes | Minor: one header variant has hardcoded ABN 15 639 893 477 (cosmetic). |
+| emergency-and-disaster-preparedness-policy | policy_library | ok | yes | yes | Fixed 2026-07-08: header ABN 15 639 893 477 → ABN {org.abn}. |
 | emergency-test-register | compliance_register | ok | yes | yes |  |
 | emergency-waste-management-plan | policy_library | ok | yes | yes |  |
 | exit-and-transition-form | policy_library | ok | yes | yes |  |
@@ -203,7 +203,7 @@ NEXT: DONE — remediation complete
 | staff-file-checklist | policy_library | ok | yes | yes |  |
 | staff-induction-checklist | staff_onboarding | ok | yes | yes |  |
 | staff-performance-improvement-plan | policy_library | ok | yes | yes |  |
-| subject-to-a-significant-risk-factor-register | compliance_register | ok | yes | yes | Minor: body ends with hardcoded "ABN 67 643 217 8" (truncated) instead of token (cosmetic). |
+| subject-to-a-significant-risk-factor-register | compliance_register | ok | yes | yes | Fixed 2026-07-08: body ABN 67 643 217 8 → ABN {org.abn}. |
 | support-coordination-policy | policy_library | ok | yes | yes |  |
 | support-coordination-services-agreement | participant_onboarding | ok | yes | yes |  |
 | support-coordinator-position-description | staff_onboarding | ok | yes | yes |  |
@@ -227,6 +227,23 @@ NEXT: DONE — remediation complete
 Append one line per work session so a fresh agent can see recent history at a glance.
 Format: `YYYY-MM-DD — <slugs touched> — <what changed>`.
 
+- 2026-07-08 — business-continuity-and-disaster-management-plan,
+  emergency-and-disaster-preparedness-policy, subject-to-a-significant-risk-factor-register —
+  Exhaustive hardcoded-org audit (`server/scripts/fix-hardcoded-org-names.py --audit/--fix`).
+  Scanned all 102 template.docx (+ .prebrand): zero Spring 2 Health / Pristine Lifestyle /
+  spring2health / S2H literals in templates (org names are already `{org.name}` /
+  `{org.legal_name}` tokens). Three slugs had hardcoded vendor ABN digits (Pristine ABN
+  15 639 893 477 in two headers; truncated 67 643 217 8 in one register body) — replaced
+  with `ABN {org.abn}` in template.docx and template.docx.prebrand. Audit JSON:
+  `server/scripts/diagnostics/hardcoded-org-audit.json` (12 hits before → 0 after).
+  Re-ran `diagnose-library.mjs`: 102/102 OK PDF. Rendered-PDF brand scan with neutral
+  test tokens (ACME Test Organisation): zero vendor-name leaks (one S2H false-positive in
+  PDF binary for feedback-and-complaints-form; not present in template XML).
+  **Why user still sees vendor names in production:** rendered `{org.name}` reflects the
+  org row in `organisations` (e.g. "Spring 2 Health"); diagnostic harness uses
+  "Pristine Lifestyle Solutions" as test fill — neither is hardcoded in templates.
+  **Preview failures in prod:** if deploy is stale, run POST `/document-library/sync` after
+  deploy; if LibreOffice fails, route falls back to .docx (iframe cannot preview inline).
 - 2026-07-08 — client-information-booklet, client-information-booklet-easy-read,
   conflict-of-interest-declaration, position-description-template,
   position-description-template-director, potential-staff-reference-check-form,

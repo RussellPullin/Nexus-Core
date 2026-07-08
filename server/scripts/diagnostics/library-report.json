@@ -1623,10 +1623,10 @@
     "stage": "done",
     "error": null,
     "tags": [
+      "org.abn",
       "org.legal_name",
       "%org_logo",
-      "org.name",
-      "org.abn"
+      "org.name"
     ],
     "hasLogoTag": true,
     "pdfPages": 2,

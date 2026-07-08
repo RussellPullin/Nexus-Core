@@ -1,0 +1,1658 @@
+{
+  "generated_at": "2026-07-08T08:01:14.939806+00:00",
+  "phase": "before",
+  "summary": {
+    "total_documents_scanned": 102,
+    "documents_with_hits": 3,
+    "total_hits": 12,
+    "hits_by_pattern": {
+      "abn_label_spring": 4,
+      "abn_digits_spring": 4,
+      "abn_label_truncated": 2,
+      "abn_digits_truncated": 2
+    },
+    "slugs_with_hits": [
+      "business-continuity-and-disaster-management-plan",
+      "emergency-and-disaster-preparedness-policy",
+      "subject-to-a-significant-risk-factor-register"
+    ]
+  },
+  "documents": [
+    {
+      "slug": "business-continuity-and-disaster-management-plan",
+      "hit_count": 4,
+      "hits": [
+        {
+          "file": "template.docx",
+          "location": "header",
+          "xml_part": "word/header1.xml",
+          "pattern_id": "abn_label_spring",
+          "matched_text": "ABN 15 639 893 477",
+          "suggested_token": "header/footer ABN",
+          "context": "{%org_logo} {org.name}   ABN 15 639 893 477 Business Continuity, Emergenc"
+        },
+        {
+          "file": "template.docx",
+          "location": "header",
+          "xml_part": "word/header1.xml",
+          "pattern_id": "abn_digits_spring",
+          "matched_text": "15 639 893 477",
+          "suggested_token": "bare ABN digits",
+          "context": "{%org_logo} {org.name}   ABN 15 639 893 477 Business Continuity, Emergenc"
+        },
+        {
+          "file": "template.docx.prebrand",
+          "location": "header",
+          "xml_part": "word/header1.xml",
+          "pattern_id": "abn_label_spring",
+          "matched_text": "ABN 15 639 893 477",
+          "suggested_token": "header/footer ABN",
+          "context": "{org.name}   ABN 15 639 893 477 Business Continuity, Emergenc"
+        },
+        {
+          "file": "template.docx.prebrand",
+          "location": "header",
+          "xml_part": "word/header1.xml",
+          "pattern_id": "abn_digits_spring",
+          "matched_text": "15 639 893 477",
+          "suggested_token": "bare ABN digits",
+          "context": "{org.name}   ABN 15 639 893 477 Business Continuity, Emergenc"
+        }
+      ]
+    },
+    {
+      "slug": "emergency-and-disaster-preparedness-policy",
+      "hit_count": 4,
+      "hits": [
+        {
+          "file": "template.docx",
+          "location": "header",
+          "xml_part": "word/header1.xml",
+          "pattern_id": "abn_label_spring",
+          "matched_text": "ABN 15 639 893 477",
+          "suggested_token": "header/footer ABN",
+          "context": "{%org_logo} {org.name}   ABN 15 639 893 477 Business Continuity Plan"
+        },
+        {
+          "file": "template.docx",
+          "location": "header",
+          "xml_part": "word/header1.xml",
+          "pattern_id": "abn_digits_spring",
+          "matched_text": "15 639 893 477",
+          "suggested_token": "bare ABN digits",
+          "context": "{%org_logo} {org.name}   ABN 15 639 893 477 Business Continuity Plan"
+        },
+        {
+          "file": "template.docx.prebrand",
+          "location": "header",
+          "xml_part": "word/header1.xml",
+          "pattern_id": "abn_label_spring",
+          "matched_text": "ABN 15 639 893 477",
+          "suggested_token": "header/footer ABN",
+          "context": "{org.name}   ABN 15 639 893 477 Business Continuity Plan"
+        },
+        {
+          "file": "template.docx.prebrand",
+          "location": "header",
+          "xml_part": "word/header1.xml",
+          "pattern_id": "abn_digits_spring",
+          "matched_text": "15 639 893 477",
+          "suggested_token": "bare ABN digits",
+          "context": "{org.name}   ABN 15 639 893 477 Business Continuity Plan"
+        }
+      ]
+    },
+    {
+      "slug": "subject-to-a-significant-risk-factor-register",
+      "hit_count": 4,
+      "hits": [
+        {
+          "file": "template.docx",
+          "location": "body",
+          "xml_part": "word/document.xml",
+          "pattern_id": "abn_label_truncated",
+          "matched_text": "ABN 67 643 217 8",
+          "suggested_token": "body ABN",
+          "context": "ther device. Include details  ABN 67 643 217 8"
+        },
+        {
+          "file": "template.docx",
+          "location": "body",
+          "xml_part": "word/document.xml",
+          "pattern_id": "abn_digits_truncated",
+          "matched_text": "67 643 217 8",
+          "suggested_token": "bare ABN digits",
+          "context": " device. Include details  ABN 67 643 217 8"
+        },
+        {
+          "file": "template.docx.prebrand",
+          "location": "body",
+          "xml_part": "word/document.xml",
+          "pattern_id": "abn_label_truncated",
+          "matched_text": "ABN 67 643 217 8",
+          "suggested_token": "body ABN",
+          "context": "ther device. Include details  ABN 67 643 217 8"
+        },
+        {
+          "file": "template.docx.prebrand",
+          "location": "body",
+          "xml_part": "word/document.xml",
+          "pattern_id": "abn_digits_truncated",
+          "matched_text": "67 643 217 8",
+          "suggested_token": "bare ABN digits",
+          "context": " device. Include details  ABN 67 643 217 8"
+        }
+      ]
+    }
+  ],
+  "fix_applied": true,
+  "fix_results": [
+    {
+      "slug": "accommodation-tenancy-assistance-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/accommodation-tenancy-assistance-position-description/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "accommodation-tenancy-assistance-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/accommodation-tenancy-assistance-position-description/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "administering-medication-checklist-medication-chart",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/administering-medication-checklist-medication-chart/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "administering-medication-checklist-medication-chart",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/administering-medication-checklist-medication-chart/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "administration-business-development-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/administration-business-development-position-description/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "administration-business-development-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/administration-business-development-position-description/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "advocacy-of-support-person-request-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/advocacy-of-support-person-request-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "advocacy-of-support-person-request-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/advocacy-of-support-person-request-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "business-continuity-and-disaster-management-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/business-continuity-and-disaster-management-plan/template.docx",
+      "exists": true,
+      "fixed": true,
+      "changes": [
+        {
+          "xml_part": "word/header1.xml",
+          "details": [
+            {
+              "pattern_id": "abn_label_spring",
+              "count": 1,
+              "replacement": "ABN {org.abn}",
+              "hint": "header/footer ABN"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "business-continuity-and-disaster-management-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/business-continuity-and-disaster-management-plan/template.docx.prebrand",
+      "exists": true,
+      "fixed": true,
+      "changes": [
+        {
+          "xml_part": "word/header1.xml",
+          "details": [
+            {
+              "pattern_id": "abn_label_spring",
+              "count": 1,
+              "replacement": "ABN {org.abn}",
+              "hint": "header/footer ABN"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "change-of-supports",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/change-of-supports/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "change-of-supports",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/change-of-supports/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "choice-advocacy-and-control-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/choice-advocacy-and-control-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "choice-advocacy-and-control-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/choice-advocacy-and-control-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-cash-reconciliation",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-cash-reconciliation/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-cash-reconciliation",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-cash-reconciliation/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-emergency-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-emergency-plan/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-emergency-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-emergency-plan/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-induction-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-induction-checklist/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-induction-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-induction-checklist/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-information-booklet",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-information-booklet/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-information-booklet",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-information-booklet/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-information-booklet-easy-read",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-information-booklet-easy-read/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-information-booklet-easy-read",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-information-booklet-easy-read/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-intake-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-intake-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-intake-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-intake-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-money-and-property-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-money-and-property-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-money-and-property-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-money-and-property-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-support-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-support-plan/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-support-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-support-plan/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-survey",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-survey/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "client-survey",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/client-survey/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "collection-storage-of-medicine-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/collection-storage-of-medicine-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "collection-storage-of-medicine-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/collection-storage-of-medicine-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "complaints-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/complaints-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "complaints-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/complaints-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "conflict-of-interest-declaration",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/conflict-of-interest-declaration/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "conflict-of-interest-declaration",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/conflict-of-interest-declaration/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "conflict-of-interest-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/conflict-of-interest-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "conflict-of-interest-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/conflict-of-interest-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "conflict-of-interest-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/conflict-of-interest-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "conflict-of-interest-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/conflict-of-interest-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "continuous-improvement-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/continuous-improvement-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "continuous-improvement-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/continuous-improvement-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "covid-19-pandemic-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/covid-19-pandemic-management-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "covid-19-pandemic-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/covid-19-pandemic-management-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "delegation-of-authority",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/delegation-of-authority/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "delegation-of-authority",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/delegation-of-authority/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "disability-support-worker-employment-consultant-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/disability-support-worker-employment-consultant-position-description/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "disability-support-worker-employment-consultant-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/disability-support-worker-employment-consultant-position-description/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "disability-support-worker-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/disability-support-worker-position-description/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "disability-support-worker-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/disability-support-worker-position-description/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "disability-support-worker-position-description-travel-and-transport",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/disability-support-worker-position-description-travel-and-transport/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "disability-support-worker-position-description-travel-and-transport",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/disability-support-worker-position-description-travel-and-transport/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "diversity-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/diversity-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "diversity-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/diversity-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "document-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/document-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "document-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/document-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "emergency-and-disaster-preparedness-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/emergency-and-disaster-preparedness-policy/template.docx",
+      "exists": true,
+      "fixed": true,
+      "changes": [
+        {
+          "xml_part": "word/header1.xml",
+          "details": [
+            {
+              "pattern_id": "abn_label_spring",
+              "count": 1,
+              "replacement": "ABN {org.abn}",
+              "hint": "header/footer ABN"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "emergency-and-disaster-preparedness-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/emergency-and-disaster-preparedness-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": true,
+      "changes": [
+        {
+          "xml_part": "word/header1.xml",
+          "details": [
+            {
+              "pattern_id": "abn_label_spring",
+              "count": 1,
+              "replacement": "ABN {org.abn}",
+              "hint": "header/footer ABN"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "emergency-test-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/emergency-test-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "emergency-test-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/emergency-test-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "emergency-waste-management-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/emergency-waste-management-plan/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "emergency-waste-management-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/emergency-waste-management-plan/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "exit-and-transition-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/exit-and-transition-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "exit-and-transition-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/exit-and-transition-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "exit-interview-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/exit-interview-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "exit-interview-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/exit-interview-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-assessment-investigation-and-resolution-considerations",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-assessment-investigation-and-resolution-considerations/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-assessment-investigation-and-resolution-considerations",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-assessment-investigation-and-resolution-considerations/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-criteria-for-complaint-manager-or-incident-manager",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-criteria-for-complaint-manager-or-incident-manager/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-criteria-for-complaint-manager-or-incident-manager",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-criteria-for-complaint-manager-or-incident-manager/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-procedural-fairness-considerations",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-procedural-fairness-considerations/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-procedural-fairness-considerations",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-procedural-fairness-considerations/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-summary",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-summary/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-complaints-summary",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-complaints-summary/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-compliments-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-compliments-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "feedback-and-compliments-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/feedback-and-compliments-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "governance-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/governance-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "governance-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/governance-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "hr-performance-appraisal",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/hr-performance-appraisal/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "hr-performance-appraisal",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/hr-performance-appraisal/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "human-resources-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/human-resources-management-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "human-resources-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/human-resources-management-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "incident-management-and-reporting-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/incident-management-and-reporting-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "incident-management-and-reporting-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/incident-management-and-reporting-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "incident-management-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/incident-management-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "incident-management-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/incident-management-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "incident-report-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/incident-report-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "incident-report-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/incident-report-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "independent-contractor-agreement-including-cover-letter-induction-checklists-and-worker-declarations",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/independent-contractor-agreement-including-cover-letter-induction-checklists-and-worker-declarations/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "independent-contractor-agreement-including-cover-letter-induction-checklists-and-worker-declarations",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/independent-contractor-agreement-including-cover-letter-induction-checklists-and-worker-declarations/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "infection-control-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/infection-control-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "infection-control-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/infection-control-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "information-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/information-management-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "information-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/information-management-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "interview-report-pro-forma",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/interview-report-pro-forma/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "interview-report-pro-forma",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/interview-report-pro-forma/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "legislation-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/legislation-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "legislation-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/legislation-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "letter-of-engagement-casual-employee",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/letter-of-engagement-casual-employee/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "letter-of-engagement-casual-employee",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/letter-of-engagement-casual-employee/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "management-meeting-agenda",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/management-meeting-agenda/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "management-meeting-agenda",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/management-meeting-agenda/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "management-of-medication-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/management-of-medication-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "management-of-medication-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/management-of-medication-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "managing-and-reducing-known-risks-matrix",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/managing-and-reducing-known-risks-matrix/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "managing-and-reducing-known-risks-matrix",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/managing-and-reducing-known-risks-matrix/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "mealtime-management-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/mealtime-management-plan/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "mealtime-management-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/mealtime-management-plan/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "mealtime-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/mealtime-management-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "mealtime-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/mealtime-management-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "money-and-property-declaration",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/money-and-property-declaration/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "money-and-property-declaration",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/money-and-property-declaration/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "my-ndis-support-record",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/my-ndis-support-record/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "my-ndis-support-record",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/my-ndis-support-record/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "policy-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/policy-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "policy-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/policy-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "position-description-template",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/position-description-template/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "position-description-template",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/position-description-template/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "position-description-template-director",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/position-description-template-director/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "position-description-template-director",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/position-description-template-director/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "potential-staff-reference-check-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/potential-staff-reference-check-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "potential-staff-reference-check-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/potential-staff-reference-check-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "pre-employment-collection-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/pre-employment-collection-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "pre-employment-collection-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/pre-employment-collection-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "preventing-and-responding-to-violence-abuse-neglect-exploitation-and-discrimination-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/preventing-and-responding-to-violence-abuse-neglect-exploitation-and-discrimination-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "preventing-and-responding-to-violence-abuse-neglect-exploitation-and-discrimination-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/preventing-and-responding-to-violence-abuse-neglect-exploitation-and-discrimination-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "privacy-consent-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/privacy-consent-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "privacy-consent-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/privacy-consent-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "privacy-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/privacy-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "privacy-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/privacy-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "progress-notes-template",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/progress-notes-template/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "progress-notes-template",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/progress-notes-template/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "promoting-and-protecting-rights",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/promoting-and-protecting-rights/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "promoting-and-protecting-rights",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/promoting-and-protecting-rights/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "provision-of-supports-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/provision-of-supports-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "provision-of-supports-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/provision-of-supports-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "quality-management-and-continuous-improvement-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/quality-management-and-continuous-improvement-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "quality-management-and-continuous-improvement-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/quality-management-and-continuous-improvement-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-assessed-role-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-assessed-role-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-assessed-role-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-assessed-role-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-assessment-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-assessment-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-assessment-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-assessment-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-management-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-management-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-taking-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-taking-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "risk-taking-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/risk-taking-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "sda-and-sil-collaboration-agreement",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/sda-and-sil-collaboration-agreement/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "sda-and-sil-collaboration-agreement",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/sda-and-sil-collaboration-agreement/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "service-schedule",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/service-schedule/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "service-schedule",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/service-schedule/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "services-agreement",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/services-agreement/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "services-agreement",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/services-agreement/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "services-agreement-sil",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/services-agreement-sil/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "services-agreement-sil",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/services-agreement-sil/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "services-medication-and-participant-details",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/services-medication-and-participant-details/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "services-medication-and-participant-details",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/services-medication-and-participant-details/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "staff-exit-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/staff-exit-checklist/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "staff-exit-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/staff-exit-checklist/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "staff-file-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/staff-file-checklist/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "staff-file-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/staff-file-checklist/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "staff-induction-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/staff-induction-checklist/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "staff-induction-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/staff-induction-checklist/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "staff-performance-improvement-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/staff-performance-improvement-plan/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "staff-performance-improvement-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/staff-performance-improvement-plan/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "subject-to-a-significant-risk-factor-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/subject-to-a-significant-risk-factor-register/template.docx",
+      "exists": true,
+      "fixed": true,
+      "changes": [
+        {
+          "xml_part": "word/document.xml",
+          "details": [
+            {
+              "pattern_id": "abn_label_truncated",
+              "count": 1,
+              "replacement": "ABN {org.abn}",
+              "hint": "body ABN"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "subject-to-a-significant-risk-factor-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/subject-to-a-significant-risk-factor-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": true,
+      "changes": [
+        {
+          "xml_part": "word/document.xml",
+          "details": [
+            {
+              "pattern_id": "abn_label_truncated",
+              "count": 1,
+              "replacement": "ABN {org.abn}",
+              "hint": "body ABN"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "support-coordination-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/support-coordination-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "support-coordination-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/support-coordination-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "support-coordination-services-agreement",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/support-coordination-services-agreement/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "support-coordination-services-agreement",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/support-coordination-services-agreement/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "support-coordinator-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/support-coordinator-position-description/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "support-coordinator-position-description",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/support-coordinator-position-description/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "supported-independent-living-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/supported-independent-living-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "supported-independent-living-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/supported-independent-living-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "training-and-development-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/training-and-development-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "training-and-development-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/training-and-development-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "training-feedback-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/training-feedback-form/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "training-feedback-form",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/training-feedback-form/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "waste-management-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/waste-management-plan/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "waste-management-plan",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/waste-management-plan/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "waste-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/waste-management-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "waste-management-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/waste-management-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "waste-management-report",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/waste-management-report/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "waste-management-report",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/waste-management-report/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "waste-removal-records-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/waste-removal-records-register/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "waste-removal-records-register",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/waste-removal-records-register/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "work-health-and-safety-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/work-health-and-safety-checklist/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "work-health-and-safety-checklist",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/work-health-and-safety-checklist/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "work-health-and-safety-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/work-health-and-safety-policy/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "work-health-and-safety-policy",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/work-health-and-safety-policy/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "worker-conflict-of-interest-declaration",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/worker-conflict-of-interest-declaration/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "worker-conflict-of-interest-declaration",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/worker-conflict-of-interest-declaration/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "worker-declarations",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/worker-declarations/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "worker-declarations",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/worker-declarations/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "worker-supervision-record",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/worker-supervision-record/template.docx",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    },
+    {
+      "slug": "worker-supervision-record",
+      "path": "/Users/pristinelifestylesolutions/nexus-core/server/templates/library/worker-supervision-record/template.docx.prebrand",
+      "exists": true,
+      "fixed": false,
+      "changes": []
+    }
+  ],
+  "after_summary": {
+    "total_documents_scanned": 102,
+    "documents_with_hits": 0,
+    "total_hits": 0,
+    "hits_by_pattern": {},
+    "slugs_with_hits": []
+  }
+}
