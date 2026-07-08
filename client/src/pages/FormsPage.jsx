@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { forms, onboarding, documentLibrary } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import ServiceAgreementTemplateEditor from '../components/ServiceAgreementTemplateEditor';
 import ActivityRiskAssessmentsPanel from '../components/ActivityRiskAssessmentsPanel';
 
@@ -24,6 +26,7 @@ const CATEGORY_ICONS = {
 
 export default function FormsPage() {
   const { user, isAdmin } = useAuth();
+  const prefix = useProductPathPrefix();
   const orgId = user?.org_id || null;
 
   const [message, setMessage] = useState('');
@@ -243,7 +246,14 @@ export default function FormsPage() {
               Automatically branded with your organisation's details and attached to onboarding emails.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0, flexWrap: 'wrap' }}>
+            <Link
+              to={`${prefix}/forms/automation-mapping`}
+              className="btn btn-secondary btn-sm"
+              style={{ textDecoration: 'none' }}
+            >
+              View automation mapping
+            </Link>
             <select
               className="form-input"
               style={{ maxWidth: 180 }}

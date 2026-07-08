@@ -208,6 +208,22 @@ export function cloneAllLibraryMastersForOrg(orgId) {
   return { cloned };
 }
 
+function enrichLibraryMasterRow(row) {
+  let manifest = {};
+  try {
+    manifest = row.manifest_json ? JSON.parse(row.manifest_json) : {};
+  } catch {
+    /* ignore malformed manifest */
+  }
+  return {
+    ...row,
+    pack: manifest.pack || null,
+    signature_count: Number(manifest.signature_count) || 0,
+    category: row.category || manifest.category || null,
+    required_signer_role: row.required_signer_role ?? manifest.required_signer_role ?? null
+  };
+}
+
 /**
  * Return all library masters with their per-org clone (if any) for the supplied orgId.
  * Used by the master library admin page and the per-org documents page.
@@ -215,7 +231,7 @@ export function cloneAllLibraryMastersForOrg(orgId) {
  * @param {string|null} orgId
  */
 export function listLibraryMasters(orgId = null) {
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT m.*,
            c.id as clone_id,
            c.is_active as clone_active,
@@ -224,4 +240,5 @@ export function listLibraryMasters(orgId = null) {
     LEFT JOIN document_library_org_clones c ON c.master_id = m.id AND c.org_id = ?
     ORDER BY m.category, m.display_name
   `).all(orgId);
+  return rows.map(enrichLibraryMasterRow);
 }

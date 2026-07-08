@@ -28,6 +28,7 @@ import LoginPage from './pages/LoginPage';
 import SetupOrgPage from './pages/SetupOrgPage';
 import SettingsPage from './pages/SettingsPage';
 import FormsPage from './pages/FormsPage';
+import AutomationMappingPage from './pages/AutomationMappingPage';
 import StaffOnboardingFormPage from './pages/StaffOnboardingFormPage';
 import StaffRenewalPage from './pages/StaffRenewalPage';
 import './App.css';
@@ -140,8 +141,22 @@ function Layout({ productSurface, children }) {
               Client Cases
             </NavLink>
           )}
-          <NavLink to={`${prefix}/forms`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+          <NavLink
+            to={`${prefix}/forms`}
+            className={({ isActive, location }) =>
+              isActive || location.pathname.includes('/forms/')
+                ? 'nav-link active'
+                : 'nav-link'
+            }
+          >
             Forms
+          </NavLink>
+          <NavLink
+            to={`${prefix}/forms/automation-mapping`}
+            className={({ isActive }) => (isActive ? 'nav-link active nav-link-sub' : 'nav-link nav-link-sub')}
+            style={{ paddingLeft: '1.5rem', fontSize: '0.88rem' }}
+          >
+            Automation mapping
           </NavLink>
           {canManageUsers && (
             <NavLink to={`${prefix}/registers`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
@@ -301,6 +316,7 @@ export default function App() {
           <Route path="/financial" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
           <Route path="/case-tasks" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
           <Route path="/onboarding/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
+          <Route path="/forms/automation-mapping" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
           <Route path="/forms" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
           <Route path="/admin/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
@@ -326,6 +342,7 @@ export default function App() {
               <Route path="onboarding" element={<ParticipantsPage />} />
               <Route path="onboarding/:id" element={<OnboardingPage />} />
               <Route path="forms" element={<FormsPage />} />
+              <Route path="forms/automation-mapping" element={<AutomationMappingPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="registers" element={<RegistersPage />} />
               <Route path="admin" element={<AdminPage />} />
