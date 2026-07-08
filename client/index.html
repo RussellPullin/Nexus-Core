@@ -8,34 +8,51 @@
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NexusCore - Where paperwork disappears</title>
-    <style>
-      #boot-fallback { font-family: system-ui, sans-serif; max-width: 28rem; margin: 3rem auto; padding: 0 1rem; color: #0f172a; }
-      #boot-fallback h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
-      #boot-fallback p { margin: 0.35rem 0; line-height: 1.45; color: #475569; }
-      #boot-fallback button { margin-top: 0.75rem; padding: 0.5rem 0.9rem; font-size: 0.95rem; cursor: pointer; }
-    </style>
   </head>
   <body>
-    <div id="root">
-      <div id="boot-fallback">
-        <h1>Loading Nexus Core…</h1>
-        <p>If this screen does not change, your browser may have a cached copy from an older deploy.</p>
+    <div id="nexus-boot-shell" style="position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:#f5f6f8;font-family:system-ui,sans-serif;">
+      <div style="max-width:28rem;padding:1rem;text-align:center;">
+        <h1 style="margin:0 0 0.5rem;font-size:1.25rem;color:#0f172a;">Loading Nexus Core…</h1>
+        <p style="margin:0.35rem 0;line-height:1.45;color:#475569;">If this screen stays blank, your browser may have a cached copy from an older deploy.</p>
+        <button type="button" id="nexus-boot-reload" style="margin-top:0.75rem;padding:0.5rem 0.9rem;font-size:0.95rem;cursor:pointer;">Reload with cache bypass</button>
       </div>
     </div>
+    <div id="root"></div>
     <script>
-      window.addEventListener('error', function (event) {
-        var target = event.target;
-        if (!target || target.tagName !== 'SCRIPT') return;
-        var root = document.getElementById('root');
-        if (!root) return;
-        root.innerHTML =
-          '<div id="boot-fallback">' +
-          '<h1>Nexus Core needs a refresh</h1>' +
-          '<p>Your browser is using an outdated app file after a recent update.</p>' +
-          '<p><strong>Mac:</strong> press Cmd + Shift + R<br><strong>Windows:</strong> press Ctrl + Shift + R</p>' +
-          '<button type="button" onclick="location.reload(true)">Reload now</button>' +
-          '</div>';
-      }, true);
+      (function () {
+        var reloadBtn = document.getElementById('nexus-boot-reload');
+        if (reloadBtn) {
+          reloadBtn.addEventListener('click', function () {
+            var base = location.pathname || '/';
+            location.href = base + (base.indexOf('?') >= 0 ? '&' : '?') + 'v=' + Date.now();
+          });
+        }
+
+        function showBootRecovery() {
+          var shell = document.getElementById('nexus-boot-shell');
+          if (!shell) return;
+          shell.style.display = 'flex';
+          shell.innerHTML =
+            '<div style="max-width:28rem;padding:1rem;text-align:center;">' +
+            '<h1 style="margin:0 0 0.5rem;font-size:1.25rem;color:#0f172a;">Nexus Core needs a refresh</h1>' +
+            '<p style="margin:0.35rem 0;line-height:1.45;color:#475569;">Your browser is using an outdated app file after a recent update.</p>' +
+            '<p style="margin:0.35rem 0;line-height:1.45;color:#475569;"><strong>Mac:</strong> Cmd + Shift + R &nbsp; <strong>Windows:</strong> Ctrl + Shift + R</p>' +
+            '<button type="button" onclick="location.href=(location.pathname||\'/\')+\'?v=\'+Date.now()" style="margin-top:0.75rem;padding:0.5rem 0.9rem;font-size:0.95rem;cursor:pointer;">Reload with cache bypass</button>' +
+            '</div>';
+        }
+
+        window.addEventListener('error', function (event) {
+          var target = event.target;
+          if (!target || target.tagName !== 'SCRIPT') return;
+          showBootRecovery();
+        }, true);
+
+        window.addEventListener('unhandledrejection', function () {
+          showBootRecovery();
+        });
+
+        window.setTimeout(showBootRecovery, 12000);
+      })();
     </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>

@@ -299,7 +299,9 @@ if (process.env.NODE_ENV === 'production') {
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'Not found' });
     }
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(join(distDir, 'index.html'));
   });
 }
