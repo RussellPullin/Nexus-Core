@@ -291,12 +291,14 @@ app.use('/api/reports', requireAuth, reportsRouter);
 if (process.env.NODE_ENV === 'production') {
   const distDir = join(projectRoot, 'client/dist');
   app.use(express.static(distDir, { index: false }));
-  app.get('*', (req, res, next) => {
+  app.get('*', (req, res) => {
     // Never SPA-fallback asset requests — stale cached index.html otherwise loads HTML as JS (white screen).
     if (req.path.startsWith('/assets/')) {
       return res.status(404).type('text/plain').send('Asset not found');
     }
-    if (req.path.startsWith('/api/')) return next();
+    if (req.path.startsWith('/api/')) {
+      return res.status(404).json({ error: 'Not found' });
+    }
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(join(distDir, 'index.html'));
   });
