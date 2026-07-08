@@ -12,7 +12,7 @@
     "org.branding.logo_path",
     "org.name"
   ],
-  "required_signer_role": "participant",
+  "required_signer_role": "worker",
   "signature_count": 1,
   "renewal_days": 365,
   "is_active": true

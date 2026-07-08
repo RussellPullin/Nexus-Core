@@ -6,14 +6,14 @@
   "engine": "docxtemplater",
   "version": "1.0.0",
   "template_file": "template.docx",
-  "pack": "policy_library",
+  "pack": "staff_onboarding",
   "placeholders": [
     "org.abn",
     "org.branding.logo_path",
     "org.legal_name",
     "org.name"
   ],
-  "required_signer_role": "participant",
+  "required_signer_role": "worker",
   "signature_count": 1,
   "renewal_days": 365,
   "is_active": true

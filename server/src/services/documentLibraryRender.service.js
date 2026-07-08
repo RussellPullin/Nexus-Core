@@ -166,6 +166,57 @@ function stripLogoTag(zip) {
 }
 
 /**
+ * Error-path safety net: neutralise malformed / unknown `{…}` delimiters so a single bad
+ * placeholder in an authored template can never 500 the whole preview. Only invoked after a
+ * first render attempt throws. Operates on `<w:t>` text nodes: collapses doubled braces,
+ * drops any `{token}` whose key is not a known merge token, and removes stray lone braces.
+ * Known tokens (and the `%org_logo` image tag) are preserved so branding still renders.
+ * @param {PizZip} zip
+ * @param {string[]} validKeys - valid flat token keys (e.g. org.name, participant.full_name)
+ */
+function sanitizeMalformedTags(zip, validKeys) {
+  const known = new Set([...validKeys, '%org_logo', 'org_logo']);
+  zip.file(/word\/[^/]*\.xml$/).forEach((f) => {
+    let xml = f.asText();
+    if (!xml.includes('{') && !xml.includes('}')) return;
+    xml = xml.replace(/<w:t([^>]*)>([\s\S]*?)<\/w:t>/g, (full, attrs, content) => {
+      if (!content.includes('{') && !content.includes('}')) return full;
+      let c = content
+        .replace(/\{\{+/g, '{')
+        .replace(/\}\}+/g, '}')
+        .replace(/\{([^{}]*)\}/g, (m, inner) => (known.has(inner.trim()) ? `{${inner}}` : ''))
+        .replace(/[{}]/g, '');
+      return `<w:t${attrs}>${c}</w:t>`;
+    });
+    zip.file(f.name, xml);
+  });
+}
+
+/**
+ * Build a docxtemplater instance, embedding the org logo image module when a logo exists
+ * (otherwise stripping the placeholder). Shared by the initial render and the sanitised retry.
+ */
+function buildDocxInstance(zip, logoPath) {
+  const modules = [];
+  if (logoPath) {
+    modules.push(new ImageModule({
+      centered: false,
+      getImage: (tagValue) => readFileSync(tagValue),
+      getSize: (img) => computeLogoSize(img)
+    }));
+  } else {
+    stripLogoTag(zip);
+  }
+  return new Docxtemplater(zip, {
+    modules,
+    delimiters: { start: '{', end: '}' },
+    paragraphLoop: true,
+    linebreaks: true,
+    nullGetter: () => ''
+  });
+}
+
+/**
  * Render a library master to a Buffer, branded for the org (logo + name + ABN etc.).
  * @param {object} params
  * @param {string} params.masterId - document_library_masters.id
@@ -185,29 +236,27 @@ export function renderLibraryDocument({ masterId, orgId, participant = null, sta
 
   switch (master.engine) {
     case 'docxtemplater': {
-      const zip = new PizZip(readFileSync(master.template_file_path));
-
+      const templateBytes = readFileSync(master.template_file_path);
       const logoPath = resolveOrgLogoPath(orgId);
-      const modules = [];
-      if (logoPath) {
-        tokens.org_logo = logoPath;
-        modules.push(new ImageModule({
-          centered: false,
-          getImage: (tagValue) => readFileSync(tagValue),
-          getSize: (img) => computeLogoSize(img)
-        }));
-      } else {
-        stripLogoTag(zip);
-      }
+      if (logoPath) tokens.org_logo = logoPath;
 
-      const doc = new Docxtemplater(zip, {
-        modules,
-        delimiters: { start: '{', end: '}' },
-        paragraphLoop: true,
-        linebreaks: true,
-        nullGetter: () => ''
-      });
-      doc.render(tokens);
+      let doc;
+      try {
+        doc = buildDocxInstance(new PizZip(templateBytes), logoPath);
+        doc.render(tokens);
+      } catch (renderErr) {
+        // A malformed/unknown placeholder in the authored template broke parsing.
+        // Retry once on a sanitised copy so the document still previews instead of 500-ing.
+        try {
+          const cleanZip = new PizZip(templateBytes);
+          sanitizeMalformedTags(cleanZip, Object.keys(tokens));
+          doc = buildDocxInstance(cleanZip, logoPath);
+          doc.render(tokens);
+          console.warn(`[document-library] rendered "${master.slug}" after sanitising malformed tags:`, renderErr?.message);
+        } catch {
+          throw renderErr; // surface the original, more descriptive error
+        }
+      }
       const docxBuffer = doc.getZip().generate({ type: 'nodebuffer' });
 
       const pdfBuffer = convertDocxToPdf(docxBuffer);

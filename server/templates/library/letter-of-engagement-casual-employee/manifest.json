@@ -16,7 +16,7 @@
     "org.primary_contact.name",
     "org.signatory.name"
   ],
-  "required_signer_role": "participant",
+  "required_signer_role": "worker",
   "signature_count": 2,
   "renewal_days": 365,
   "is_active": true

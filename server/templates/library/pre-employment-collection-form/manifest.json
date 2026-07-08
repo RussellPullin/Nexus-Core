@@ -12,8 +12,8 @@
     "org.branding.logo_path",
     "org.name"
   ],
-  "required_signer_role": null,
-  "signature_count": 0,
+  "required_signer_role": "worker",
+  "signature_count": 1,
   "renewal_days": null,
   "is_active": true
 }

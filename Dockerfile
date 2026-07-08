@@ -29,7 +29,15 @@ COPY --from=builder /app/client/dist /app/client/dist
 COPY --from=builder /app/database /app/database
 COPY --from=builder /app/package.json /app/package.json
 
-RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils \
+# poppler-utils: PDF tooling. libreoffice-writer + fonts: docx→PDF conversion
+# (convertDocxToPdf shells out to `soffice`). Without this the document library
+# previews fall back to serving raw .docx, which browsers cannot display inline.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils \
+    libreoffice-writer \
+    libreoffice-core \
+    fonts-liberation \
+    fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /data

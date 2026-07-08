@@ -1,0 +1,1916 @@
+[
+  {
+    "slug": "accommodation-tenancy-assistance-position-description",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "guide",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "administering-medication-checklist-medication-chart",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.phone",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 14,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "administration-business-development-position-description",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "guide",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "advocacy-of-support-person-request-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "business-continuity-and-disaster-management-plan",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.email",
+      "org.phone",
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 10,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "change-of-supports",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "choice-advocacy-and-control-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 10,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "client-cash-reconciliation",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "client-emergency-plan",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn",
+      "org.legal_name"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 15,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "client-induction-checklist",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "participant_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "client-information-booklet",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.phone",
+      "org.email",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 10,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "participant_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "client-information-booklet-easy-read",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.phone",
+      "org.email",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 7,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "participant_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "client-intake-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 16,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "participant_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "client-money-and-property-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 9,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "client-support-plan",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 37,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "client-survey",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "collection-storage-of-medicine-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "complaints-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 1,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "conflict-of-interest-declaration",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "conflict-of-interest-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "conflict-of-interest-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "continuous-improvement-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 1,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "covid-19-pandemic-management-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 7,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "delegation-of-authority",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 8,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "disability-support-worker-employment-consultant-position-description",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "guide",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "disability-support-worker-position-description",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "guide",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "disability-support-worker-position-description-travel-and-transport",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "guide",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "diversity-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 8,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "document-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 9,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "emergency-and-disaster-preparedness-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.email",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 13,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "emergency-test-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 1,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "emergency-waste-management-plan",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "exit-and-transition-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 8,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "exit-interview-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 6,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "feedback-and-complaints-assessment-investigation-and-resolution-considerations",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 7,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "feedback-and-complaints-criteria-for-complaint-manager-or-incident-manager",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.abn",
+      "org.legal_name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 1,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "feedback-and-complaints-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.phone",
+      "org.email",
+      "%org_logo",
+      "org.abn",
+      "org.legal_name"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "feedback-and-complaints-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.email",
+      "org.phone",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 14,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "feedback-and-complaints-procedural-fairness-considerations",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "feedback-and-complaints-summary",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.email",
+      "org.phone",
+      "%org_logo",
+      "org.abn",
+      "org.legal_name"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "feedback-and-compliments-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.abn",
+      "org.legal_name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 1,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "governance-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 11,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "hr-performance-appraisal",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 7,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "human-resources-management-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 28,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "incident-management-and-reporting-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 12,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "incident-management-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "incident-report-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 11,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "independent-contractor-agreement-including-cover-letter-induction-checklists-and-worker-declarations",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 12,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "infection-control-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 6,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "information-management-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 6,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "interview-report-pro-forma",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "legislation-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 13,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "letter-of-engagement-casual-employee",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.phone",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "management-meeting-agenda",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "management-of-medication-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 5,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "managing-and-reducing-known-risks-matrix",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 13,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "mealtime-management-plan",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 13,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "mealtime-management-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 15,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "money-and-property-declaration",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.legal_name",
+      "org.email",
+      "org.phone",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "my-ndis-support-record",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "org.abn",
+      "org.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "policy-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "position-description-template",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "guide",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "position-description-template-director",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "guide",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "potential-staff-reference-check-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "pre-employment-collection-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 5,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "preventing-and-responding-to-violence-abuse-neglect-exploitation-and-discrimination-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 15,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "privacy-consent-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "org.name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 5,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "participant_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "privacy-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 9,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "progress-notes-template",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "promoting-and-protecting-rights",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 8,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "provision-of-supports-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 28,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "quality-management-and-continuous-improvement-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 9,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "risk-assessed-role-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.name",
+      "org.legal_name",
+      "org.phone",
+      "org.email",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 5,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "risk-assessment-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 18,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "risk-management-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 7,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "risk-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.name",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 9,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "risk-taking-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.phone",
+      "org.legal_name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 6,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "sda-and-sil-collaboration-agreement",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "org.abn",
+      "org.email",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo",
+      "org.name"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 15,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "service-schedule",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "participant_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "services-agreement",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.email",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.phone",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 20,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "participant_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "services-agreement-sil",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.email",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.phone",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 19,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "participant_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "services-medication-and-participant-details",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.phone",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 8,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "staff-exit-checklist",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn",
+      "org.legal_name"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "staff-file-checklist",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "staff-induction-checklist",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 5,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "staff-performance-improvement-plan",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "subject-to-a-significant-risk-factor-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "support-coordination-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "support-coordination-services-agreement",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.email",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "org.phone",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 15,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "participant_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "support-coordinator-position-description",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "guide",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "supported-independent-living-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 11,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "training-and-development-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 8,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "training-feedback-form",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 5,
+    "mode": "pdf",
+    "category": "form",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "waste-management-plan",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 14,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "waste-management-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 17,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "waste-management-report",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 2,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "waste-removal-records-register",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 5,
+    "mode": "pdf",
+    "category": "register",
+    "pack": "compliance_register",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "work-health-and-safety-checklist",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.legal_name",
+      "org.abn",
+      "org.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 5,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "work-health-and-safety-policy",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "org.abn",
+      "org.primary_contact.name",
+      "org.signatory.name",
+      "%org_logo"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 25,
+    "mode": "pdf",
+    "category": "policy",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "worker-conflict-of-interest-declaration",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "org.legal_name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 1,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "worker-declarations",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "org.name",
+      "%org_logo",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 4,
+    "mode": "pdf",
+    "category": "contract",
+    "pack": "staff_onboarding",
+    "engine": "docxtemplater"
+  },
+  {
+    "slug": "worker-supervision-record",
+    "ok": true,
+    "stage": "done",
+    "error": null,
+    "tags": [
+      "%org_logo",
+      "org.name",
+      "org.abn"
+    ],
+    "hasLogoTag": true,
+    "pdfPages": 3,
+    "mode": "pdf",
+    "category": "procedure",
+    "pack": "policy_library",
+    "engine": "docxtemplater"
+  }
+]
