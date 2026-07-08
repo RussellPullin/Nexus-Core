@@ -64,7 +64,7 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
   return (
     <div className="activity-risk-assessments-panel">
       <p className="forms-lede">
-        Generic health &amp; safety risk assessment (4-page fillable PDF, no organisation branding). Add one entry per activity
+        Generic health &amp; safety risk assessment (fillable PDF, no organisation branding). Add one entry per activity
         (e.g. Rock climbing, Kayaking). From a participant profile, assign a blank copy to their documents — entries
         also append to the <strong>Risk register</strong> in Registers (OneDrive) and sync to the participant&apos;s{' '}
         <strong>Risk assessments</strong> folder when connected. For your own branded PDFs, use{' '}

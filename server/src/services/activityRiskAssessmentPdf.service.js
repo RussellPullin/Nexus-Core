@@ -34,35 +34,52 @@ const CW = PW - M * 2; // content width
 
 // ── AcroForm field registry (PDFKit top-left coords; converted in embed step) ─
 
-let currentPageIndex = 0;
 const formFieldRegistry = [];
 
 function resetFormFieldRegistry() {
-  currentPageIndex = 0;
   formFieldRegistry.length = 0;
 }
 
-function registerTextField(name, x, y, width, height, { multiline = false } = {}) {
-  formFieldRegistry.push({ type: 'text', name, pageIndex: currentPageIndex, x, y, width, height, multiline });
+const CONTENT_BOTTOM = PH - 30; // keep above footer band
+
+function pageIndex(doc) {
+  return doc.bufferedPageRange().count - 1;
 }
 
-function registerCheckbox(name, x, y, size = 10) {
-  formFieldRegistry.push({ type: 'checkbox', name, pageIndex: currentPageIndex, x, y, width: size, height: size });
+function beginSectionPage(doc) {
+  newPage(doc);
+  return drawBanner(doc);
+}
+
+function ensureSpace(doc, y, needed) {
+  if (y + needed <= CONTENT_BOTTOM) return y;
+  return beginSectionPage(doc) + 2;
+}
+
+function registerTextField(doc, name, x, y, width, height, { multiline = false } = {}) {
+  const idx = doc.bufferedPageRange().count - 1;
+  formFieldRegistry.push({ type: 'text', name, pageIndex: idx, x, y, width, height, multiline });
+}
+
+function registerCheckbox(doc, name, x, y, size = 10) {
+  const idx = doc.bufferedPageRange().count - 1;
+  formFieldRegistry.push({ type: 'checkbox', name, pageIndex: idx, x, y, width: size, height: size });
 }
 
 // ── Drawing helpers ───────────────────────────────────────────────────────────
 
 function newPage(doc) {
   doc.addPage({ size: 'A4', margin: M });
-  currentPageIndex++;
 }
 
-/** Teal section header bar */
+/** Teal section header bar (height grows for wrapped titles) */
 function sectionBar(doc, text, y) {
-  doc.rect(M, y, CW, 16).fill(TEAL);
-  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(WHITE)
-     .text(text, M + 5, y + 4, { width: CW - 10 });
-  return y + 16;
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(WHITE);
+  const textH = doc.heightOfString(text, { width: CW - 10 });
+  const h = Math.max(16, textH + 8);
+  doc.rect(M, y, CW, h).fill(TEAL);
+  textBox(doc, text, M + 5, y + 4, CW - 10, h - 8, { size: 8.5, color: WHITE, bold: true });
+  return y + h;
 }
 
 /** Two-column label row */
@@ -80,9 +97,8 @@ function cell(doc, x, y, w, h, bg) {
 /** Checkbox square + label on one line */
 function cbLine(doc, label, x, y, width, fieldName = null) {
   doc.rect(x, y + 1, 8, 8).stroke(DARK);
-  if (fieldName) registerCheckbox(fieldName, x, y + 1, 8);
-  doc.font('Helvetica').fontSize(8).fillColor(DARK)
-     .text(label, x + 11, y, { width: width - 14, lineBreak: false });
+  if (fieldName) registerCheckbox(doc, fieldName, x, y + 1, 8);
+  textBox(doc, label, x + 11, y, width - 14, 12, { size: 8 });
   return y + 13;
 }
 
@@ -98,12 +114,11 @@ function riskBadge(doc, level, x, y, w, h) {
 /** Page footer */
 function drawFooter(doc, pageNum, totalPages) {
   const y = PH - 22;
+  doc.save();
   doc.rect(0, y, PW, 22).fill(TEAL);
-  doc.font('Helvetica').fontSize(7).fillColor(WHITE)
-     .text('Health & Safety Risk Assessment', M, y + 7);
-  doc.font('Helvetica').fontSize(7).fillColor(WHITE)
-     .text(`Page ${pageNum} of ${totalPages}`,
-           0, y + 7, { width: PW - M, align: 'right' });
+  textBox(doc, 'Health & Safety Risk Assessment', M, y + 7, 220, 10, { size: 7, color: WHITE });
+  textBox(doc, `Page ${pageNum} of ${totalPages}`, PW - M - 140, y + 7, 140, 10, { size: 7, color: WHITE, align: 'right' });
+  doc.restore();
 }
 
 /** Page banner header */
@@ -113,16 +128,22 @@ function drawBanner(doc, subtitle) {
   doc.rect(M, M, CW, 3).fill(GOLD);
   doc.font('Helvetica-Bold').fontSize(15).fillColor(WHITE)
      .text('Activity Risk Assessment', M + 8, M + 8);
-  doc.font('Helvetica').fontSize(7.5).fillColor('#CCEEEA')
-     .text(subtitle || 'Identify, assess and control health & safety risks for participant activities',
-           M + 8, M + 25, { width: CW - 16 });
+  doc.font('Helvetica').fontSize(7.5).fillColor('#CCEEEA');
+  textBox(doc, subtitle || 'Identify, assess and control health & safety risks for participant activities',
+    M + 8, M + 25, CW - 16, 10, { size: 7.5, color: '#CCEEEA' });
   return M + bH + 6;
 }
 
-/** Thin horizontal rule */
-function rule(doc, y) {
-  doc.moveTo(M, y).lineTo(M + CW, y).stroke('#DDDDDD');
-  return y + 4;
+/** Draw text clipped to a box so PDFKit cannot spill onto extra pages */
+function textBox(doc, text, x, y, w, h, { font = 'Helvetica', size = 7.5, color = DARK, align = 'left', bold = false } = {}) {
+  doc.font(bold ? `${font}-Bold` : font).fontSize(size).fillColor(color)
+     .text(String(text ?? ''), x, y, { width: w, height: h, align, ellipsis: true });
+}
+
+/** Instruction line below a section bar */
+function sectionIntro(doc, text, y, height = 14) {
+  textBox(doc, text, M + 2, y + 4, CW - 4, height - 4, { size: 7.5, color: MID_GREY });
+  return y + height;
 }
 
 // ── Field grid helpers ────────────────────────────────────────────────────────
@@ -133,24 +154,27 @@ function rule(doc, y) {
  */
 function fieldRow2(doc, left, right, y, rowH = 22, fieldNames = null) {
   const half = CW / 2;
-  // left label
-  cell(doc, M,          y, half * 0.42, rowH, TEAL_LIGHT);
-  cell(doc, M + half * 0.42, y, half * 0.58, rowH, null);
-  // right label
-  cell(doc, M + half,   y, half * 0.42, rowH, TEAL_LIGHT);
-  cell(doc, M + half + half * 0.42, y, half * 0.58, rowH, null);
+  doc.font('Helvetica-Bold').fontSize(7.5);
+  const leftH = doc.heightOfString(left, { width: half * 0.38 });
+  const rightH = doc.heightOfString(right, { width: half * 0.38 });
+  const rowHeight = Math.max(rowH, leftH + 6, rightH + 6);
+
+  cell(doc, M,          y, half * 0.42, rowHeight, TEAL_LIGHT);
+  cell(doc, M + half * 0.42, y, half * 0.58, rowHeight, null);
+  cell(doc, M + half,   y, half * 0.42, rowHeight, TEAL_LIGHT);
+  cell(doc, M + half + half * 0.42, y, half * 0.58, rowHeight, null);
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
-     .text(left,  M + 3, y + 3, { width: half * 0.4 });
+     .text(left,  M + 3, y + 3, { width: half * 0.38, height: rowHeight - 6, ellipsis: true });
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
-     .text(right, M + half + 3, y + 3, { width: half * 0.4 });
+     .text(right, M + half + 3, y + 3, { width: half * 0.38, height: rowHeight - 6, ellipsis: true });
   if (fieldNames?.length === 2) {
     const pad = 3;
     const leftW = half * 0.58 - pad * 2;
     const rightW = half * 0.58 - pad * 2;
-    registerTextField(fieldNames[0], M + half * 0.42 + pad, y + pad, leftW, rowH - pad * 2);
-    registerTextField(fieldNames[1], M + half + half * 0.42 + pad, y + pad, rightW, rowH - pad * 2);
+    registerTextField(doc, fieldNames[0], M + half * 0.42 + pad, y + pad, leftW, rowHeight - pad * 2);
+    registerTextField(doc, fieldNames[1], M + half + half * 0.42 + pad, y + pad, rightW, rowHeight - pad * 2);
   }
-  return y + rowH;
+  return y + rowHeight;
 }
 
 /** Single full-width label row (tall, for multi-line fields) */
@@ -161,7 +185,7 @@ function fieldRowFull(doc, label, y, rowH = 28, fieldName = null) {
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
      .text(label, M + 3, y + 3, { width: lW - 6 });
   if (fieldName) {
-    registerTextField(fieldName, M + lW + 3, y + 3, CW - lW - 6, rowH - 6, { multiline: true });
+    registerTextField(doc, fieldName, M + lW + 3, y + 3, CW - lW - 6, rowH - 6, { multiline: true });
   }
   return y + rowH;
 }
@@ -169,26 +193,33 @@ function fieldRowFull(doc, label, y, rowH = 28, fieldName = null) {
 // ── Hazard checklist block ────────────────────────────────────────────────────
 
 function hazardBlock(doc, category, items, y, cols = 3, fieldPrefix = 'hazard') {
-  const needed = 16 + Math.ceil(items.length / cols) * 13 + 18;
-  if (y + needed > PH - 60) { newPage(doc); y = drawBanner(doc) + 2; }
+  const rowStep = 13;
+  const otherH = 16;
+  const needed = 20 + Math.ceil(items.length / cols) * rowStep + otherH + 4;
+  y = ensureSpace(doc, y, needed);
 
   y = sectionBar(doc, category, y);
   const colW = CW / cols;
   let col = 0;
   let rowY = y;
   items.forEach((item, idx) => {
+    if (rowY + rowStep > CONTENT_BOTTOM) {
+      newPage(doc);
+      rowY = M + 4;
+      col = 0;
+    }
     const fieldName = `${fieldPrefix}_${idx + 1}`;
     cbLine(doc, item.label ?? item, M + col * colW + 4, rowY, colW - 4, fieldName);
     col++;
-    if (col >= cols) { col = 0; rowY += 13; }
+    if (col >= cols) { col = 0; rowY += rowStep; }
   });
-  if (col > 0) rowY += 13;
-  // Other/details line
-  doc.rect(M, rowY, CW, 16).fill(LIGHT_GREY).stroke('#CCCCCC');
+  if (col > 0) rowY += rowStep;
+  rowY = ensureSpace(doc, rowY, otherH + 4);
+  doc.rect(M, rowY, CW, otherH).fill(LIGHT_GREY).stroke('#CCCCCC');
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
      .text('Other / Details:', M + 4, rowY + 4);
-  registerTextField(`${fieldPrefix}_other`, M + 80, rowY + 2, CW - 86, 12);
-  return rowY + 16 + 2;
+  registerTextField(doc, `${fieldPrefix}_other`, M + 80, rowY + 2, CW - 86, 12);
+  return rowY + otherH + 2;
 }
 
 // ── Risk matrix ───────────────────────────────────────────────────────────────
@@ -208,11 +239,9 @@ function drawRiskMatrix(doc, y) {
 
   // Header
   doc.rect(M, y, CW, rH).fill(HEADER_ROW);
-  doc.font('Helvetica-Bold').fontSize(7.5).fillColor(WHITE)
-     .text('Likelihood \\ Consequence', M + 2, y + 3, { width: cW0 - 4 });
+  textBox(doc, 'Likelihood \\ Consequence', M + 2, y + 2, cW0 - 4, rH - 4, { size: 7.5, color: WHITE, bold: true });
   cols.slice(1).forEach((h, i) => {
-    doc.font('Helvetica-Bold').fontSize(7).fillColor(WHITE)
-       .text(h, M + cW0 + i * cWn + 2, y + 3, { width: cWn - 4, align: 'center' });
+    textBox(doc, h, M + cW0 + i * cWn + 2, y + 2, cWn - 4, rH - 4, { size: 7, color: WHITE, bold: true, align: 'center' });
   });
   y += rH;
 
@@ -221,13 +250,12 @@ function drawRiskMatrix(doc, y) {
     const bg = ri % 2 === 0 ? WHITE : LIGHT_GREY;
     doc.rect(M, y, cW0, rH).fill(TEAL_LIGHT).stroke('#CCCCCC');
     doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
-       .text(row[0], M + 3, y + 3, { width: cW0 - 6 });
+       .text(row[0], M + 3, y + 3, { width: cW0 - 6, height: rH - 6, ellipsis: true });
     row.slice(1).forEach((val, ci) => {
       const x = M + cW0 + ci * cWn;
       const c = colourMap[val] || bg;
       doc.rect(x, y, cWn, rH).fill(c).stroke(WHITE);
-      doc.font('Helvetica-Bold').fontSize(7).fillColor(WHITE)
-         .text(val, x, y + 3, { width: cWn, align: 'center' });
+      textBox(doc, val, x, y + 3, cWn, rH - 6, { size: 7, color: WHITE, bold: true, align: 'center' });
     });
     y += rH;
   });
@@ -257,19 +285,15 @@ function drawDescriptors(doc, y) {
 
   [[cons, M], [like, M + half + 4]].forEach(([data, x]) => {
     doc.rect(x, y, half, rH).fill(HEADER_ROW);
-    doc.font('Helvetica-Bold').fontSize(7.5).fillColor(WHITE)
-       .text(x === M ? 'Consequence' : 'Likelihood', x + 3, y + 3, { width: half * 0.35 - 6 });
-    doc.font('Helvetica-Bold').fontSize(7.5).fillColor(WHITE)
-       .text('Description', x + half * 0.35, y + 3, { width: half * 0.65 - 6 });
+    textBox(doc, x === M ? 'Consequence' : 'Likelihood', x + 3, y + 2, half * 0.35 - 6, rH - 4, { size: 7.5, color: WHITE, bold: true });
+    textBox(doc, 'Description', x + half * 0.35, y + 2, half * 0.65 - 6, rH - 4, { size: 7.5, color: WHITE, bold: true });
     let dy = y + rH;
     data.forEach((row, i) => {
       const bg = i % 2 === 0 ? WHITE : LIGHT_GREY;
       doc.rect(x, dy, half * 0.35, rH).fill(TEAL_LIGHT).stroke('#CCCCCC');
       doc.rect(x + half * 0.35, dy, half * 0.65, rH).fill(bg).stroke('#CCCCCC');
-      doc.font('Helvetica-Bold').fontSize(6.5).fillColor(DARK)
-         .text(row[0], x + 2, dy + 3, { width: half * 0.35 - 4 });
-      doc.font('Helvetica').fontSize(6.5).fillColor(DARK)
-         .text(row[1], x + half * 0.35 + 2, dy + 3, { width: half * 0.65 - 4 });
+      textBox(doc, row[0], x + 2, dy + 2, half * 0.35 - 4, rH - 4, { size: 6.5, bold: true });
+      textBox(doc, row[1], x + half * 0.35 + 2, dy + 2, half * 0.65 - 4, rH - 4, { size: 6.5 });
       dy += rH;
     });
   });
@@ -286,13 +310,12 @@ function drawActionTable(doc, y) {
     { level: 'Extreme', colour: EXTREME, desc: 'Likely permanent/debilitating injury or death.',       action: 'Consider alternatives. Management approval required.' },
   ];
   const cW1 = CW * 0.11, cW2 = CW * 0.42, cW3 = CW * 0.47;
-  const rH = 13;
+  const rH = 22;
 
   doc.rect(M, y, CW, rH).fill(HEADER_ROW);
   [['Risk Level', M, cW1], ['Description', M + cW1, cW2], ['Required Action', M + cW1 + cW2, cW3]]
     .forEach(([t, x, w]) => {
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(WHITE)
-         .text(t, x + 2, y + 3, { width: w - 4 });
+      textBox(doc, t, x + 2, y + 2, w - 4, rH - 4, { size: 7.5, color: WHITE, bold: true });
     });
   y += rH;
 
@@ -303,10 +326,8 @@ function drawActionTable(doc, y) {
     doc.rect(M + cW1 + cW2,   y, cW3, rH).fill(bg).stroke('#CCCCCC');
     doc.font('Helvetica-Bold').fontSize(7.5).fillColor(WHITE)
        .text(level, M, y + 3, { width: cW1, align: 'center' });
-    doc.font('Helvetica').fontSize(7).fillColor(DARK)
-       .text(desc,   M + cW1 + 2,       y + 3, { width: cW2 - 4 });
-    doc.font('Helvetica').fontSize(7).fillColor(DARK)
-       .text(action, M + cW1 + cW2 + 2, y + 3, { width: cW3 - 4 });
+    textBox(doc, desc, M + cW1 + 2, y + 2, cW2 - 4, rH - 4, { size: 7 });
+    textBox(doc, action, M + cW1 + cW2 + 2, y + 2, cW3 - 4, rH - 4, { size: 7 });
     y += rH;
   });
   return y + 4;
@@ -323,21 +344,18 @@ function drawHierarchy(doc, y) {
     ['5. Administration', 'Put rules, training, signage or safe work procedures in place.'],
     ['6. PPE',            'Personal protective equipment as a last resort (gloves, helmets, sun protection).'],
   ];
-  const lW = CW * 0.22, rW = CW * 0.78, rH = 14;
+  const lW = CW * 0.22, rW = CW * 0.78, rH = 20;
 
   doc.rect(M, y, CW, rH).fill(TEAL);
-  doc.font('Helvetica-Bold').fontSize(8).fillColor(WHITE)
-     .text('Hierarchy of Controls (most → least effective)', M + 4, y + 3, { width: CW - 8 });
+  textBox(doc, 'Hierarchy of Controls (most → least effective)', M + 4, y + 2, CW - 8, rH - 4, { size: 8, color: WHITE, bold: true });
   y += rH;
 
   steps.forEach((row, i) => {
     const bg = i % 2 === 0 ? WHITE : LIGHT_GREY;
     doc.rect(M,      y, lW, rH).fill(TEAL_LIGHT).stroke('#CCCCCC');
     doc.rect(M + lW, y, rW, rH).fill(bg).stroke('#CCCCCC');
-    doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
-       .text(row[0], M + 3, y + 3, { width: lW - 6 });
-    doc.font('Helvetica').fontSize(7.5).fillColor(DARK)
-       .text(row[1], M + lW + 3, y + 3, { width: rW - 6 });
+    textBox(doc, row[0], M + 3, y + 2, lW - 6, rH - 4, { size: 7.5, bold: true });
+    textBox(doc, row[1], M + lW + 3, y + 2, rW - 6, rH - 4, { size: 7.5 });
     y += rH;
   });
   return y + 4;
@@ -348,14 +366,15 @@ function drawHierarchy(doc, y) {
 function drawControlTable(doc, y) {
   const widths = [CW*0.04, CW*0.22, CW*0.10, CW*0.38, CW*0.12, CW*0.14];
   const headers = ['#', 'Hazard / Risk Description', 'Risk Level\n(pre)', 'Control Measures (hierarchy level applied)', 'Residual Risk\n(post)', 'Responsible\nPerson'];
-  const rH = 14;
+  const rH = 24;
 
   // header row
   doc.rect(M, y, CW, rH).fill(HEADER_ROW);
   let x = M;
   headers.forEach((h, i) => {
-    doc.font('Helvetica-Bold').fontSize(6.5).fillColor(WHITE)
-       .text(h, x + 2, y + 2, { width: widths[i] - 4, align: i === 0 ? 'center' : 'left' });
+    textBox(doc, h, x + 2, y + 2, widths[i] - 4, rH - 4, {
+      size: 6.5, color: WHITE, bold: true, align: i === 0 ? 'center' : 'left'
+    });
     x += widths[i];
   });
   y += rH;
@@ -372,7 +391,7 @@ function drawControlTable(doc, y) {
       } else {
         const fieldKeys = ['desc', 'pre_risk', 'controls', 'post_risk', 'responsible'];
         const key = fieldKeys[ci - 1];
-        registerTextField(`control_${i}_${key}`, x + 2, y + 2, w - 4, rowH - 4, { multiline: ci === 3 });
+        registerTextField(doc, `control_${i}_${key}`, x + 2, y + 2, w - 4, rowH - 4, { multiline: ci === 3 });
       }
       x += w;
     });
@@ -395,10 +414,9 @@ function drawSignOff(doc, fields, y, fieldPrefix = 'signoff') {
       const x = M + pi * half;
       doc.rect(x,       y, lW, rH).fill(TEAL_LIGHT).stroke('#CCCCCC');
       doc.rect(x + lW,  y, vW, rH).fill(WHITE).stroke('#CCCCCC');
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
-         .text(label, x + 3, y + 4, { width: lW - 6 });
+      textBox(doc, label, x + 3, y + 4, lW - 6, rH - 8, { size: 7.5, bold: true });
       if (fieldKey) {
-        registerTextField(`${fieldPrefix}_${fieldKey}`, x + lW + 3, y + 3, vW - 6, rH - 6);
+        registerTextField(doc, `${fieldPrefix}_${fieldKey}`, x + lW + 3, y + 3, vW - 6, rH - 6);
       }
     });
     y += rH;
@@ -415,24 +433,23 @@ function drawReviewTable(doc, questions, y) {
   doc.rect(M, y, CW, rH - 4).fill(HEADER_ROW);
   [['Question', M, qW], ['Yes', M+qW, yW], ['No', M+qW+yW, nW], ['Details / Actions', M+qW+yW+nW, dW]]
     .forEach(([t, x, w]) => {
-      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(WHITE)
-         .text(t, x + 2, y + 3, { width: w - 4, align: 'center' });
+      textBox(doc, t, x + 2, y + 2, w - 4, (rH - 4) - 4, { size: 7.5, color: WHITE, bold: true, align: 'center' });
     });
   y += rH - 4;
 
   questions.forEach((q, i) => {
     const bg = i % 2 === 0 ? WHITE : LIGHT_GREY;
-    const h = 20;
+    doc.font('Helvetica').fontSize(7.5);
+    const h = Math.max(24, doc.heightOfString(q, { width: qW - 6 }) + 10);
     doc.rect(M,           y, qW, h).fill(bg).stroke('#CCCCCC');
     doc.rect(M+qW,        y, yW, h).fill(bg).stroke('#CCCCCC');
     doc.rect(M+qW+yW,     y, nW, h).fill(bg).stroke('#CCCCCC');
     doc.rect(M+qW+yW+nW,  y, dW, h).fill(bg).stroke('#CCCCCC');
-    doc.font('Helvetica').fontSize(7.5).fillColor(DARK)
-       .text(q, M + 3, y + 4, { width: qW - 6 });
+    textBox(doc, q, M + 3, y + 4, qW - 6, h - 8, { size: 7.5 });
     const qNum = i + 1;
-    registerCheckbox(`review_q${qNum}_yes`, M + qW + yW / 2 - 4, y + 6, 8);
-    registerCheckbox(`review_q${qNum}_no`, M + qW + yW + nW / 2 - 4, y + 6, 8);
-    registerTextField(`review_q${qNum}_details`, M + qW + yW + nW + 2, y + 2, dW - 4, h - 4);
+    registerCheckbox(doc, `review_q${qNum}_yes`, M + qW + yW / 2 - 4, y + 6, 8);
+    registerCheckbox(doc, `review_q${qNum}_no`, M + qW + yW + nW / 2 - 4, y + 6, 8);
+    registerTextField(doc, `review_q${qNum}_details`, M + qW + yW + nW + 2, y + 2, dW - 4, h - 4);
     y += h;
   });
   return y + 4;
@@ -484,20 +501,19 @@ function renderActivityRiskAssessmentLayout() {
 
     // ── PAGE 1: Details + Hazard identification ────────────────────────────
     doc.addPage({ size: 'A4' });
-    currentPageIndex = 0;
     let y = drawBanner(doc, 'Use this form to identify, assess and control health & safety risks for participant activities.');
 
     // Doc info strip
     doc.rect(M, y, CW, 14).fill(TEAL_LIGHT).stroke('#AADDD8');
     doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
        .text('Approved By:', M + 4, y + 3, { width: CW * 0.15 });
-    registerTextField('approved_by', M + 58, y + 1, CW * 0.32, 12);
+    registerTextField(doc, 'approved_by', M + 58, y + 1, CW * 0.32, 12);
     doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
        .text('Version:', M + CW * 0.5, y + 3, { width: CW * 0.08 });
-    registerTextField('version', M + CW * 0.5 + 38, y + 1, CW * 0.12, 12);
+    registerTextField(doc, 'version', M + CW * 0.5 + 38, y + 1, CW * 0.12, 12);
     doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
        .text('Review Date:', M + CW * 0.7, y + 3, { width: CW * 0.12 });
-    registerTextField('review_date', M + CW * 0.7 + 52, y + 1, CW * 0.28 - 52, 12);
+    registerTextField(doc, 'review_date', M + CW * 0.7 + 52, y + 1, CW * 0.28 - 52, 12);
     y += 18;
 
     // Section: Activity & Participant Details
@@ -566,33 +582,25 @@ function renderActivityRiskAssessmentLayout() {
       'Volunteers / community members', 'Members of public',
     ], y, 3, 'hazard_people');
 
-    // ── PAGE 2: Risk Matrix + Step 3 intro ────────────────────────────────
-    newPage(doc);
-    y = drawBanner(doc);
-
+    // ── Risk matrix + control planning ─────────────────────────────────────
+    y = beginSectionPage(doc);
     y = sectionBar(doc, 'STEP 2 — ASSESS THE LEVEL OF RISK', y);
-    doc.font('Helvetica').fontSize(7.5).fillColor(MID_GREY)
-       .text('Use the matrix and descriptors below to assign a risk level (Likelihood × Consequence) to each hazard from Step 1.', M+2, y+2);
-    y += 14;
+    y = sectionIntro(doc, 'Use the matrix and descriptors below to assign a risk level (Likelihood × Consequence) to each hazard from Step 1.', y);
 
     y = drawRiskMatrix(doc, y);
     y = drawDescriptors(doc, y);
     y = drawActionTable(doc, y);
     y += 4;
 
+    y = ensureSpace(doc, y, 120);
     y = sectionBar(doc, 'STEP 3 — CONTROL THE RISK', y);
-    doc.font('Helvetica').fontSize(7.5).fillColor(MID_GREY)
-       .text('Control measures should follow the Hierarchy of Controls (most to least effective). If only Administration or PPE controls are used, explain why.', M+2, y+2);
-    y += 14;
+    y = sectionIntro(doc, 'Control measures should follow the Hierarchy of Controls (most to least effective). If only Administration or PPE controls are used, explain why.', y);
     y = drawHierarchy(doc, y);
 
-    // ── PAGE 3: Control measures table ────────────────────────────────────
-    newPage(doc);
-    y = drawBanner(doc);
+    // ── Control measures table + sign-off ───────────────────────────────────
+    y = beginSectionPage(doc);
     y = sectionBar(doc, 'STEP 3 (continued) — HAZARDS / RISKS AND CONTROL MEASURES', y);
-    doc.font('Helvetica').fontSize(7.5).fillColor(MID_GREY)
-       .text('List each hazard, rate its risk level before and after controls, describe control measures applied, and name the responsible person.', M+2, y+2);
-    y += 12;
+    y = sectionIntro(doc, 'List each hazard, rate its risk level before and after controls, describe control measures applied, and name the responsible person.', y, 12);
     y = drawControlTable(doc, y);
 
     // Other details box
@@ -600,14 +608,13 @@ function renderActivityRiskAssessmentLayout() {
        .text('Additional notes / other details:', M, y + 2);
     y += 12;
     doc.rect(M, y, CW, 38).fill(WHITE).stroke('#CCCCCC');
-    registerTextField('additional_notes', M + 3, y + 3, CW - 6, 32, { multiline: true });
+    registerTextField(doc, 'additional_notes', M + 3, y + 3, CW - 6, 32, { multiline: true });
     y += 42;
 
     // Submission / Pre-activity sign-off
+    y = ensureSpace(doc, y, 130);
     y = sectionBar(doc, 'SUBMISSION & PRE-ACTIVITY SIGN-OFF', y);
-    doc.font('Helvetica').fontSize(7.5).fillColor(MID_GREY)
-       .text('This activity will be conducted in accordance with this risk assessment. Control measures listed in Step 3 will be implemented. Any emerging risks will be managed and documented.', M+2, y+2, { width: CW - 4 });
-    y += 22;
+    y = sectionIntro(doc, 'This activity will be conducted in accordance with this risk assessment. Control measures listed in Step 3 will be implemented. Any emerging risks will be managed and documented.', y, 22);
 
     y = drawSignOff(doc, [
       ['Prepared by (name):', 'prepared_by', 'Role / Designation:', 'prepared_role'],
@@ -621,19 +628,15 @@ function renderActivityRiskAssessmentLayout() {
     const consentX = M + CW / 2 + CW / 2 * 0.42 + 3;
     doc.font('Helvetica').fontSize(7).fillColor(DARK)
        .text('Yes', consentX + 12, consentY + 4);
-    registerCheckbox('consent_yes', consentX, consentY + 3, 8);
+    registerCheckbox(doc, 'consent_yes', consentX, consentY + 3, 8);
     doc.font('Helvetica').fontSize(7).fillColor(DARK)
        .text('N/A', consentX + 52, consentY + 4);
-    registerCheckbox('consent_na', consentX + 40, consentY + 3, 8);
+    registerCheckbox(doc, 'consent_na', consentX + 40, consentY + 3, 8);
 
-    // ── PAGE 4: Monitor & Review ───────────────────────────────────────────
-    newPage(doc);
-    y = drawBanner(doc);
-
+    // ── Monitor & review ────────────────────────────────────────────────────
+    y = beginSectionPage(doc);
     y = sectionBar(doc, 'STEP 4 — MONITOR & REVIEW CONTROLS', y);
-    doc.font('Helvetica').fontSize(7.5).fillColor(MID_GREY)
-       .text('Complete this section during and/or after the activity.', M+2, y+2);
-    y += 14;
+    y = sectionIntro(doc, 'Complete this section during and/or after the activity.', y);
 
     y = drawReviewTable(doc, [
       'Were the planned control measures sufficient and effective in minimising risk?',
@@ -648,7 +651,7 @@ function renderActivityRiskAssessmentLayout() {
        .text('Details:', M, y + 2);
     y += 12;
     doc.rect(M, y, CW, 40).fill(WHITE).stroke('#CCCCCC');
-    registerTextField('review_details', M + 3, y + 3, CW - 6, 34, { multiline: true });
+    registerTextField(doc, 'review_details', M + 3, y + 3, CW - 6, 34, { multiline: true });
     y += 44;
 
     // Post-activity sign-off
@@ -663,6 +666,8 @@ function renderActivityRiskAssessmentLayout() {
       doc.switchToPage(range.start + i);
       drawFooter(doc, i + 1, range.count);
     }
+    // Return to the last page so PDFKit does not append blank pages after footer pass.
+    doc.switchToPage(range.start + range.count - 1);
 
     doc.end();
     doc.on('end', () => resolve(Buffer.concat(chunks)));
