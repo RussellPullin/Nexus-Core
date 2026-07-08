@@ -27,7 +27,9 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const AUTH_BOOT_TIMEOUT_MS = 12_000;
+
+    const bootstrapAuth = async () => {
       try {
         const data = await authApi.me();
         if (!cancelled) setUser(data?.user);
@@ -49,10 +51,23 @@ export function AuthProvider({ children }) {
         } else if (!cancelled) {
           setUser(null);
         }
+      }
+    };
+
+    const timeout = new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error('Auth bootstrap timed out')), AUTH_BOOT_TIMEOUT_MS);
+    });
+
+    (async () => {
+      try {
+        await Promise.race([bootstrapAuth(), timeout]);
+      } catch {
+        if (!cancelled) setUser(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };

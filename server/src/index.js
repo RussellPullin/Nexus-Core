@@ -289,9 +289,16 @@ app.use('/api/reports', requireAuth, reportsRouter);
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(join(projectRoot, 'client/dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(join(projectRoot, 'client/dist/index.html'));
+  const distDir = join(projectRoot, 'client/dist');
+  app.use(express.static(distDir, { index: false }));
+  app.get('*', (req, res, next) => {
+    // Never SPA-fallback asset requests — stale cached index.html otherwise loads HTML as JS (white screen).
+    if (req.path.startsWith('/assets/')) {
+      return res.status(404).type('text/plain').send('Asset not found');
+    }
+    if (req.path.startsWith('/api/')) return next();
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(join(distDir, 'index.html'));
   });
 }
 
