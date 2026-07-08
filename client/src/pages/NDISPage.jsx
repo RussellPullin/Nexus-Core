@@ -4,7 +4,8 @@ import { ndis } from '../lib/api';
 import { formatRate } from '../lib/format';
 
 export default function NDISPage() {
-  const { canManageUsers } = useAuth();
+  const { canManageUsers, user } = useAuth();
+  const isSuperAdmin = Boolean(user?.is_super_admin);
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19,7 +20,6 @@ export default function NDISPage() {
   const fileInputRef = useRef(null);
   const [importResult, setImportResult] = useState(null);
   const [lastImportedIds, setLastImportedIds] = useState([]);
-  const [importMode, setImportMode] = useState('official'); // 'generic' | 'official'
   const [preview, setPreview] = useState(null);
 
   const load = async () => {
@@ -54,7 +54,7 @@ export default function NDISPage() {
   const handlePreview = async () => {
     const file = fileInputRef.current?.files?.[0];
     if (!file) {
-      alert('Select a CSV file first');
+      alert('Select the official NDIS Support Catalogue (.xlsx or .csv) first');
       return;
     }
     try {
@@ -69,7 +69,7 @@ export default function NDISPage() {
     e.preventDefault();
     const file = fileInputRef.current?.files?.[0];
     if (!file) {
-      alert('Select a CSV file');
+      alert('Select the official NDIS Support Catalogue (.xlsx or .csv)');
       return;
     }
     try {
@@ -154,16 +154,22 @@ export default function NDISPage() {
     <div>
       <div className="page-header">
         <h2>NDIS Pricing Schedule</h2>
-        {canManageUsers && (
+        {(canManageUsers || isSuperAdmin) && (
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-primary" onClick={() => setShowImportModal(true)}>Import CSV</button>
-          {lastImportedIds.length > 0 && (
-            <button type="button" className="btn btn-secondary" onClick={handleUndoImport}>
-              Undo last import ({lastImportedIds.length} items)
-            </button>
+          {isSuperAdmin && (
+            <>
+              <button type="button" className="btn btn-primary" onClick={() => setShowImportModal(true)}>Refresh official catalogue</button>
+              {lastImportedIds.length > 0 && (
+                <button type="button" className="btn btn-secondary" onClick={handleUndoImport}>
+                  Undo last import ({lastImportedIds.length} items)
+                </button>
+              )}
+            </>
           )}
-          <button type="button" className="btn btn-primary" onClick={() => setShowModal(true)}>Add Line Item</button>
-          {items.length > 0 && (
+          {canManageUsers && (
+            <button type="button" className="btn btn-primary" onClick={() => setShowModal(true)}>Add Line Item</button>
+          )}
+          {isSuperAdmin && items.length > 0 && (
             <>
               <button type="button" className="btn btn-danger" onClick={handleDeleteSelectedClick} disabled={!someSelected}>
                 Delete Selected ({selectedIds.size})
@@ -174,6 +180,11 @@ export default function NDISPage() {
         </div>
         )}
       </div>
+      {canManageUsers && !isSuperAdmin && (
+        <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '1rem' }}>
+          Official NDIS price limits are managed by the platform. Use <strong>Add Line Item</strong> for subcontractor billing or other agreed rates not in the national catalogue.
+        </p>
+      )}
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
         <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
           <label>Search</label>
@@ -194,11 +205,13 @@ export default function NDISPage() {
           <p>Loading...</p>
         ) : items.length === 0 ? (
           <div className="empty-state">
-            <p>No NDIS line items.{canManageUsers ? ' Import from CSV, or add manually.' : ''}</p>
+            <p>No NDIS line items.{canManageUsers ? ' Add a custom line item, or ask your platform administrator to load the official catalogue.' : ''}</p>
             {canManageUsers && (
               <>
-                <button type="button" className="btn btn-primary" onClick={() => setShowImportModal(true)}>Import CSV</button>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(true)}>Add Manually</button>
+                {isSuperAdmin && (
+                  <button type="button" className="btn btn-primary" onClick={() => setShowImportModal(true)}>Refresh official catalogue</button>
+                )}
+                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(true)}>Add Line Item</button>
               </>
             )}
           </div>
@@ -207,7 +220,7 @@ export default function NDISPage() {
             <table>
               <thead>
                 <tr>
-                  {canManageUsers && (
+                  {isSuperAdmin && (
                     <th style={{ width: 40 }}>
                       <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                         <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
@@ -220,13 +233,13 @@ export default function NDISPage() {
                   <th>Rate</th>
                   <th>Unit</th>
                   <th>Category</th>
-                  {canManageUsers && <th></th>}
+                  {isSuperAdmin && <th></th>}
                 </tr>
               </thead>
               <tbody>
                 {items.map((item) => (
                   <tr key={item.id}>
-                    {canManageUsers && (
+                    {isSuperAdmin && (
                       <td>
                         <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} />
                       </td>
@@ -236,7 +249,7 @@ export default function NDISPage() {
                     <td>{formatRate(item.rate)}</td>
                     <td>{item.unit || 'hour'}</td>
                     <td>{item.category || '-'}</td>
-                    {canManageUsers && (
+                    {isSuperAdmin && (
                       <td>
                         <button type="button" className="btn btn-danger" style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }} onClick={() => handleDelete(item.id)}>Delete</button>
                       </td>
@@ -253,6 +266,9 @@ export default function NDISPage() {
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Add NDIS Line Item</h3>
+            <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '1rem' }}>
+              For subcontractor billing or other agreed rates. Do not use this to replace the official NDIS price guide.
+            </p>
             <form onSubmit={handleCreate}>
               <div className="form-group">
                 <label>Support Item Number *</label>
@@ -311,26 +327,17 @@ export default function NDISPage() {
         </div>
       )}
 
-      {showImportModal && (
+      {showImportModal && isSuperAdmin && (
         <div className="modal-overlay" onClick={() => { setShowImportModal(false); setImportResult(null); setPreview(null); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Import NDIS Pricing (CSV)</h3>
-            <div className="form-group">
-              <label>Import format</label>
-              <select value={importMode} onChange={(e) => setImportMode(e.target.value)}>
-                <option value="generic">Generic CSV (support item, description, rate, unit, category)</option>
-                <option value="official">Official NDIS Support Catalogue (Support Item Number, Remote, Very Remote)</option>
-              </select>
-            </div>
+            <h3>Refresh official NDIS catalogue</h3>
             <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '1rem' }}>
-              {importMode === 'official'
-                ? 'Use the official NDIS Support Catalogue exported as CSV. Includes standard, remote and very remote rates.'
-                : 'File should have a header row. Columns: support item number (or code), description, rate, unit (optional), category (optional).'}
+              Upload the official NDIS Support Catalogue from the NDIA website (.xlsx). Existing support items are updated in place; new items are added. Shift and invoice links are preserved.
             </p>
             <form onSubmit={handleImport}>
               <div className="form-group">
-                <label>Select CSV file</label>
-                <input ref={fileInputRef} type="file" accept=".csv" onChange={() => setPreview(null)} />
+                <label>Select official catalogue file</label>
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xlsm,.csv" onChange={() => setPreview(null)} />
               </div>
               {preview && (
                 <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#f8fafc', borderRadius: 6, fontSize: '0.85rem', maxHeight: 200, overflow: 'auto' }}>
@@ -346,7 +353,10 @@ export default function NDISPage() {
               )}
               {importResult && (
                 <div style={{ marginBottom: '1rem' }}>
-                  <p style={{ color: '#047857' }}>Imported {importResult.imported} of {importResult.total} rows.</p>
+                  <p style={{ color: '#047857' }}>
+                    Processed {importResult.parsedCount ?? importResult.imported} items
+                    {typeof importResult.updated === 'number' ? ` (${importResult.inserted ?? 0} new, ${importResult.updated} updated)` : ''}.
+                  </p>
                   {lastImportedIds.length > 0 && (
                     <button type="button" className="btn btn-secondary" style={{ marginTop: '0.5rem' }} onClick={handleUndoImport}>
                       Undo import
@@ -355,7 +365,7 @@ export default function NDISPage() {
                 </div>
               )}
               <button type="button" className="btn btn-secondary" onClick={handlePreview}>Preview</button>
-              <button type="submit" className="btn btn-primary">Import</button>
+              <button type="submit" className="btn btn-primary">Refresh catalogue</button>
               <button type="button" className="btn btn-secondary" onClick={() => { setShowImportModal(false); setImportResult(null); setPreview(null); }}>Close</button>
             </form>
           </div>
