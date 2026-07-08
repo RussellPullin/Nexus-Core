@@ -1,9 +1,9 @@
 /**
- * Spring 2 Health — Activity Risk Assessment master PDF generator.
- * Branded for Spring 2 Health (NDIS Adventure Therapy, Gold Coast QLD).
- * Replaces the generic unbranded version.
+ * Generic Activity Risk Assessment master PDF generator (unbranded).
+ * Renders layout with PDFKit, then embeds AcroForm fields via pdf-lib so the PDF is fillable.
  */
 import PDFDocument from 'pdfkit';
+import { PDFDocument as PdfLibDocument, StandardFonts } from 'pdf-lib';
 import { writeFileSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -32,10 +32,29 @@ const PW = 595.28;   // A4 width pts
 const PH = 841.89;   // A4 height pts
 const CW = PW - M * 2; // content width
 
+// ── AcroForm field registry (PDFKit top-left coords; converted in embed step) ─
+
+let currentPageIndex = 0;
+const formFieldRegistry = [];
+
+function resetFormFieldRegistry() {
+  currentPageIndex = 0;
+  formFieldRegistry.length = 0;
+}
+
+function registerTextField(name, x, y, width, height, { multiline = false } = {}) {
+  formFieldRegistry.push({ type: 'text', name, pageIndex: currentPageIndex, x, y, width, height, multiline });
+}
+
+function registerCheckbox(name, x, y, size = 10) {
+  formFieldRegistry.push({ type: 'checkbox', name, pageIndex: currentPageIndex, x, y, width: size, height: size });
+}
+
 // ── Drawing helpers ───────────────────────────────────────────────────────────
 
 function newPage(doc) {
   doc.addPage({ size: 'A4', margin: M });
+  currentPageIndex++;
 }
 
 /** Teal section header bar */
@@ -59,8 +78,9 @@ function cell(doc, x, y, w, h, bg) {
 }
 
 /** Checkbox square + label on one line */
-function cbLine(doc, label, x, y, width) {
+function cbLine(doc, label, x, y, width, fieldName = null) {
   doc.rect(x, y + 1, 8, 8).stroke(DARK);
+  if (fieldName) registerCheckbox(fieldName, x, y + 1, 8);
   doc.font('Helvetica').fontSize(8).fillColor(DARK)
      .text(label, x + 11, y, { width: width - 14, lineBreak: false });
   return y + 13;
@@ -80,9 +100,9 @@ function drawFooter(doc, pageNum, totalPages) {
   const y = PH - 22;
   doc.rect(0, y, PW, 22).fill(TEAL);
   doc.font('Helvetica').fontSize(7).fillColor(WHITE)
-     .text('Spring 2 Health  |  NDIS Adventure Therapy  |  spring2health.com.au', M, y + 7);
+     .text('Health & Safety Risk Assessment', M, y + 7);
   doc.font('Helvetica').fontSize(7).fillColor(WHITE)
-     .text(`Page ${pageNum} of ${totalPages}  |  Version 2.0  |  June 2026`,
+     .text(`Page ${pageNum} of ${totalPages}`,
            0, y + 7, { width: PW - M, align: 'right' });
 }
 
@@ -94,12 +114,8 @@ function drawBanner(doc, subtitle) {
   doc.font('Helvetica-Bold').fontSize(15).fillColor(WHITE)
      .text('Activity Risk Assessment', M + 8, M + 8);
   doc.font('Helvetica').fontSize(7.5).fillColor('#CCEEEA')
-     .text(subtitle || 'Spring 2 Health  |  NDIS Adventure Therapy  |  spring2health.com.au',
-           M + 8, M + 25, { width: CW * 0.65 });
-  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(WHITE)
-     .text('Spring 2 Health', M + CW * 0.68, M + 10, { width: CW * 0.3, align: 'right' });
-  doc.font('Helvetica').fontSize(7).fillColor('#CCEEEA')
-     .text('NDIS Adventure Therapy Provider', M + CW * 0.68, M + 22, { width: CW * 0.3, align: 'right' });
+     .text(subtitle || 'Identify, assess and control health & safety risks for participant activities',
+           M + 8, M + 25, { width: CW - 16 });
   return M + bH + 6;
 }
 
@@ -115,7 +131,7 @@ function rule(doc, y) {
  * Draw a 2-column label+blank grid row.
  * Returns new Y after the row.
  */
-function fieldRow2(doc, left, right, y, rowH = 22) {
+function fieldRow2(doc, left, right, y, rowH = 22, fieldNames = null) {
   const half = CW / 2;
   // left label
   cell(doc, M,          y, half * 0.42, rowH, TEAL_LIGHT);
@@ -127,22 +143,32 @@ function fieldRow2(doc, left, right, y, rowH = 22) {
      .text(left,  M + 3, y + 3, { width: half * 0.4 });
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
      .text(right, M + half + 3, y + 3, { width: half * 0.4 });
+  if (fieldNames?.length === 2) {
+    const pad = 3;
+    const leftW = half * 0.58 - pad * 2;
+    const rightW = half * 0.58 - pad * 2;
+    registerTextField(fieldNames[0], M + half * 0.42 + pad, y + pad, leftW, rowH - pad * 2);
+    registerTextField(fieldNames[1], M + half + half * 0.42 + pad, y + pad, rightW, rowH - pad * 2);
+  }
   return y + rowH;
 }
 
 /** Single full-width label row (tall, for multi-line fields) */
-function fieldRowFull(doc, label, y, rowH = 28) {
+function fieldRowFull(doc, label, y, rowH = 28, fieldName = null) {
   const lW = CW * 0.28;
   cell(doc, M,      y, lW,      rowH, TEAL_LIGHT);
   cell(doc, M + lW, y, CW - lW, rowH, null);
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
      .text(label, M + 3, y + 3, { width: lW - 6 });
+  if (fieldName) {
+    registerTextField(fieldName, M + lW + 3, y + 3, CW - lW - 6, rowH - 6, { multiline: true });
+  }
   return y + rowH;
 }
 
 // ── Hazard checklist block ────────────────────────────────────────────────────
 
-function hazardBlock(doc, category, items, y, cols = 3) {
+function hazardBlock(doc, category, items, y, cols = 3, fieldPrefix = 'hazard') {
   const needed = 16 + Math.ceil(items.length / cols) * 13 + 18;
   if (y + needed > PH - 60) { newPage(doc); y = drawBanner(doc) + 2; }
 
@@ -150,8 +176,9 @@ function hazardBlock(doc, category, items, y, cols = 3) {
   const colW = CW / cols;
   let col = 0;
   let rowY = y;
-  items.forEach((item) => {
-    cbLine(doc, item, M + col * colW + 4, rowY, colW - 4);
+  items.forEach((item, idx) => {
+    const fieldName = `${fieldPrefix}_${idx + 1}`;
+    cbLine(doc, item.label ?? item, M + col * colW + 4, rowY, colW - 4, fieldName);
     col++;
     if (col >= cols) { col = 0; rowY += 13; }
   });
@@ -160,7 +187,7 @@ function hazardBlock(doc, category, items, y, cols = 3) {
   doc.rect(M, rowY, CW, 16).fill(LIGHT_GREY).stroke('#CCCCCC');
   doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
      .text('Other / Details:', M + 4, rowY + 4);
-  doc.moveTo(M + 80, rowY + 11).lineTo(M + CW - 6, rowY + 11).stroke('#AAAAAA');
+  registerTextField(`${fieldPrefix}_other`, M + 80, rowY + 2, CW - 86, 12);
   return rowY + 16 + 2;
 }
 
@@ -342,6 +369,10 @@ function drawControlTable(doc, y) {
       if (ci === 0) {
         doc.font('Helvetica-Bold').fontSize(8).fillColor(DARK)
            .text(String(i), x, y + 9, { width: w, align: 'center' });
+      } else {
+        const fieldKeys = ['desc', 'pre_risk', 'controls', 'post_risk', 'responsible'];
+        const key = fieldKeys[ci - 1];
+        registerTextField(`control_${i}_${key}`, x + 2, y + 2, w - 4, rowH - 4, { multiline: ci === 3 });
       }
       x += w;
     });
@@ -352,20 +383,23 @@ function drawControlTable(doc, y) {
 
 // ── Sign-off grid ─────────────────────────────────────────────────────────────
 
-function drawSignOff(doc, fields, y) {
+function drawSignOff(doc, fields, y, fieldPrefix = 'signoff') {
   // fields: array of [label, label, label, label] rows (2 pairs per row)
   const half = CW / 2;
   const lW = half * 0.42, vW = half * 0.58;
   const rH = 22;
 
-  fields.forEach((row) => {
+  fields.forEach((row, rowIdx) => {
     const pairs = [[row[0], row[1]], [row[2], row[3]]];
-    pairs.forEach(([label, _val], pi) => {
+    pairs.forEach(([label, fieldKey], pi) => {
       const x = M + pi * half;
       doc.rect(x,       y, lW, rH).fill(TEAL_LIGHT).stroke('#CCCCCC');
       doc.rect(x + lW,  y, vW, rH).fill(WHITE).stroke('#CCCCCC');
       doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
          .text(label, x + 3, y + 4, { width: lW - 6 });
+      if (fieldKey) {
+        registerTextField(`${fieldPrefix}_${fieldKey}`, x + lW + 3, y + 3, vW - 6, rH - 6);
+      }
     });
     y += rH;
   });
@@ -395,10 +429,10 @@ function drawReviewTable(doc, questions, y) {
     doc.rect(M+qW+yW+nW,  y, dW, h).fill(bg).stroke('#CCCCCC');
     doc.font('Helvetica').fontSize(7.5).fillColor(DARK)
        .text(q, M + 3, y + 4, { width: qW - 6 });
-    // checkbox pairs
-    [[M+qW, yW], [M+qW+yW, nW]].forEach(([cx, cw]) => {
-      doc.rect(cx + cw/2 - 4, y + 6, 8, 8).stroke(DARK);
-    });
+    const qNum = i + 1;
+    registerCheckbox(`review_q${qNum}_yes`, M + qW + yW / 2 - 4, y + 6, 8);
+    registerCheckbox(`review_q${qNum}_no`, M + qW + yW + nW / 2 - 4, y + 6, 8);
+    registerTextField(`review_q${qNum}_details`, M + qW + yW + nW + 2, y + 2, dW - 4, h - 4);
     y += h;
   });
   return y + 4;
@@ -406,8 +440,43 @@ function drawReviewTable(doc, questions, y) {
 
 // ── Main generator ────────────────────────────────────────────────────────────
 
-export function generateBlankActivityRiskAssessmentPdfBuffer() {
+async function embedAcroFormFields(pdfBytes, fields) {
+  const pdfDoc = await PdfLibDocument.load(pdfBytes);
+  const form = pdfDoc.getForm();
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const pages = pdfDoc.getPages();
+
+  for (const f of fields) {
+    const page = pages[f.pageIndex];
+    if (!page) continue;
+    const pageHeight = page.getHeight();
+    const pdfY = pageHeight - f.y - f.height;
+
+    if (f.type === 'text') {
+      const tf = form.createTextField(f.name);
+      tf.setText('');
+      tf.addToPage(page, {
+        x: f.x,
+        y: pdfY,
+        width: f.width,
+        height: f.height,
+        borderWidth: 0,
+        backgroundColor: undefined
+      });
+      if (f.multiline) tf.enableMultiline();
+      tf.updateAppearances(font);
+    } else if (f.type === 'checkbox') {
+      const cb = form.createCheckBox(f.name);
+      cb.addToPage(page, { x: f.x, y: pdfY, width: f.width, height: f.height });
+    }
+  }
+
+  return Buffer.from(await pdfDoc.save({ updateFieldAppearances: false }));
+}
+
+function renderActivityRiskAssessmentLayout() {
   return new Promise((resolve, reject) => {
+    resetFormFieldRegistry();
     const doc = new PDFDocument({ size: 'A4', margin: M, bufferPages: true, autoFirstPage: false });
     const chunks = [];
     doc.on('data', (c) => chunks.push(c));
@@ -415,25 +484,29 @@ export function generateBlankActivityRiskAssessmentPdfBuffer() {
 
     // ── PAGE 1: Details + Hazard identification ────────────────────────────
     doc.addPage({ size: 'A4' });
-    let y = drawBanner(doc, 'Use this form to identify, assess and control health & safety risks for adventure therapy activities.');
+    currentPageIndex = 0;
+    let y = drawBanner(doc, 'Use this form to identify, assess and control health & safety risks for participant activities.');
 
     // Doc info strip
     doc.rect(M, y, CW, 14).fill(TEAL_LIGHT).stroke('#AADDD8');
     doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
-       .text('Approved By: Spring 2 Health Management', M+4, y+3, { width: CW*0.5 });
-    doc.font('Helvetica').fontSize(7.5).fillColor(DARK)
-       .text('Version: 2.0', M + CW*0.5, y+3, { width: CW*0.2, align: 'center' });
-    doc.font('Helvetica').fontSize(7.5).fillColor(DARK)
-       .text('Review Date: June 2027', M + CW*0.7, y+3, { width: CW*0.3, align: 'right' });
+       .text('Approved By:', M + 4, y + 3, { width: CW * 0.15 });
+    registerTextField('approved_by', M + 58, y + 1, CW * 0.32, 12);
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
+       .text('Version:', M + CW * 0.5, y + 3, { width: CW * 0.08 });
+    registerTextField('version', M + CW * 0.5 + 38, y + 1, CW * 0.12, 12);
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor(DARK)
+       .text('Review Date:', M + CW * 0.7, y + 3, { width: CW * 0.12 });
+    registerTextField('review_date', M + CW * 0.7 + 52, y + 1, CW * 0.28 - 52, 12);
     y += 18;
 
     // Section: Activity & Participant Details
     y = sectionBar(doc, 'ACTIVITY & PARTICIPANT DETAILS', y);
-    y = fieldRow2(doc, 'Activity Name / Description:', 'Activity Date:', y, 22);
-    y = fieldRow2(doc, 'Activity Location:', 'Duration:', y, 22);
-    y = fieldRow2(doc, 'Participant Name:', 'NDIS Number:', y, 22);
-    y = fieldRow2(doc, 'Support Worker / Therapist:', 'Supervisor:', y, 22);
-    y = fieldRow2(doc, "Participant's Key Support Needs\n(relevant to this activity):", 'Emergency Contact & Number:', y, 28);
+    y = fieldRow2(doc, 'Activity Name / Description:', 'Activity Date:', y, 22, ['activity_name', 'activity_date']);
+    y = fieldRow2(doc, 'Activity Location:', 'Duration:', y, 22, ['activity_location', 'duration']);
+    y = fieldRow2(doc, 'Participant Name:', 'NDIS Number:', y, 22, ['participant_name', 'ndis_number']);
+    y = fieldRow2(doc, 'Support Worker / Therapist:', 'Supervisor:', y, 22, ['support_worker', 'supervisor']);
+    y = fieldRow2(doc, "Participant's Key Support Needs\n(relevant to this activity):", 'Emergency Contact & Number:', y, 28, ['support_needs', 'emergency_contact']);
     y += 4;
 
     // Section: Step 1 Hazards
@@ -443,41 +516,41 @@ export function generateBlankActivityRiskAssessmentPdfBuffer() {
     y = hazardBlock(doc, 'Biological (hygiene, disease, infection)', [
       'Blood / bodily fluids', 'Virus / disease', 'Food handling',
       'Insect / tick-borne illness', 'Skin infection risk (cuts near natural water)',
-    ], y, 3);
+    ], y, 3, 'hazard_bio');
 
     y = hazardBlock(doc, 'Chemicals  (refer to label and SDS for classification and management)', [
       'Non-hazardous chemical(s)', 'Hazardous chemical (refer to completed chemical risk assessment)',
       'Sunscreen / insect repellent', 'Cleaning agents / sanitisers',
-    ], y, 2);
+    ], y, 2, 'hazard_chem');
 
     y = hazardBlock(doc, 'Critical Incident — may result in:', [
       'Serious injury / death', 'Evacuation required', 'Minor injury',
       'Participant elopement / missing person', 'Medical emergency (seizure, anaphylaxis, cardiac)',
-    ], y, 3);
+    ], y, 3, 'hazard_critical');
 
     y = hazardBlock(doc, 'Environment — Outdoor / Natural Setting', [
       'Sun exposure / UV', 'Water (creek, river, beach, dam, pool)',
       'Animals / insects / wildlife', 'Storms / lightning / severe weather',
       'Extreme temperature (heat / cold)', 'Uneven terrain / remote location',
       'Flooding / fast-moving water', 'Sound / noise',
-    ], y, 3);
+    ], y, 3, 'hazard_env');
 
     y = hazardBlock(doc, 'Facilities / Built Environment', [
       'Workshops / work rooms', 'Buildings and fixtures', 'Driveways / paths',
       'Playground equipment', 'Furniture', 'Swimming pool / water feature',
-    ], y, 3);
+    ], y, 3, 'hazard_facility');
 
     y = hazardBlock(doc, 'Machinery, Plant & Equipment', [
       'Power tools', 'Hand tools', 'Vehicles / transport',
       'Ropes / climbing equipment', 'Craft / art equipment',
-    ], y, 3);
+    ], y, 3, 'hazard_machinery');
 
     y = hazardBlock(doc, 'Manual Tasks / Physical Demands', [
       'Repetitive or heavy manual tasks', 'Working at heights', 'Restricted / confined space',
       'Physical overexertion', 'Lifting / carrying loads',
-    ], y, 3);
+    ], y, 3, 'hazard_manual');
 
-    y = hazardBlock(doc, 'Participant-Specific Considerations (NDIS / Adventure Therapy)', [
+    y = hazardBlock(doc, 'Participant-Specific Considerations (NDIS)', [
       'Behavioural support needs (aggression, elopement)',
       'Sensory sensitivities (noise, texture, heat, light)',
       'Communication support needs',
@@ -486,12 +559,12 @@ export function generateBlankActivityRiskAssessmentPdfBuffer() {
       'Physical disability / reduced mobility',
       'Fatigue or medication side-effects',
       'Participant / carer consent requirements',
-    ], y, 2);
+    ], y, 2, 'hazard_participant');
 
     y = hazardBlock(doc, 'People', [
       'Participant', 'Support worker / therapist', 'Other participants',
       'Volunteers / community members', 'Members of public',
-    ], y, 3);
+    ], y, 3, 'hazard_people');
 
     // ── PAGE 2: Risk Matrix + Step 3 intro ────────────────────────────────
     newPage(doc);
@@ -527,6 +600,7 @@ export function generateBlankActivityRiskAssessmentPdfBuffer() {
        .text('Additional notes / other details:', M, y + 2);
     y += 12;
     doc.rect(M, y, CW, 38).fill(WHITE).stroke('#CCCCCC');
+    registerTextField('additional_notes', M + 3, y + 3, CW - 6, 32, { multiline: true });
     y += 42;
 
     // Submission / Pre-activity sign-off
@@ -536,11 +610,21 @@ export function generateBlankActivityRiskAssessmentPdfBuffer() {
     y += 22;
 
     y = drawSignOff(doc, [
-      ['Prepared by (name):', '', 'Role / Designation:', ''],
-      ['Date prepared:', '', 'Others involved in preparation:', ''],
-      ['Reviewed / approved by:', '', 'Approval date:', ''],
-      ['Signature:', '', 'Participant / Guardian consent obtained:  ☐ Yes   ☐ N/A', ''],
-    ], y);
+      ['Prepared by (name):', 'prepared_by', 'Role / Designation:', 'prepared_role'],
+      ['Date prepared:', 'date_prepared', 'Others involved in preparation:', 'others_involved'],
+      ['Reviewed / approved by:', 'reviewed_by', 'Approval date:', 'approval_date'],
+      ['Signature:', 'signature', 'Participant / Guardian consent obtained:', 'consent_notes'],
+    ], y, 'pre_activity');
+
+    // Consent yes / N/A checkboxes (right column of last sign-off row)
+    const consentY = y - 22 - 4;
+    const consentX = M + CW / 2 + CW / 2 * 0.42 + 3;
+    doc.font('Helvetica').fontSize(7).fillColor(DARK)
+       .text('Yes', consentX + 12, consentY + 4);
+    registerCheckbox('consent_yes', consentX, consentY + 3, 8);
+    doc.font('Helvetica').fontSize(7).fillColor(DARK)
+       .text('N/A', consentX + 52, consentY + 4);
+    registerCheckbox('consent_na', consentX + 40, consentY + 3, 8);
 
     // ── PAGE 4: Monitor & Review ───────────────────────────────────────────
     newPage(doc);
@@ -564,13 +648,14 @@ export function generateBlankActivityRiskAssessmentPdfBuffer() {
        .text('Details:', M, y + 2);
     y += 12;
     doc.rect(M, y, CW, 40).fill(WHITE).stroke('#CCCCCC');
+    registerTextField('review_details', M + 3, y + 3, CW - 6, 34, { multiline: true });
     y += 44;
 
     // Post-activity sign-off
     y = drawSignOff(doc, [
-      ['Review completed by:', '', 'Designation:', ''],
-      ['Signature:', '', 'Date:', ''],
-    ], y);
+      ['Review completed by:', 'completed_by', 'Designation:', 'designation'],
+      ['Signature:', 'signature', 'Date:', 'date'],
+    ], y, 'post_activity');
 
     // ── Add footers to all pages ───────────────────────────────────────────
     const range = doc.bufferedPageRange();
@@ -582,6 +667,11 @@ export function generateBlankActivityRiskAssessmentPdfBuffer() {
     doc.end();
     doc.on('end', () => resolve(Buffer.concat(chunks)));
   });
+}
+
+export async function generateBlankActivityRiskAssessmentPdfBuffer() {
+  const layoutBuffer = await renderActivityRiskAssessmentLayout();
+  return embedAcroFormFields(layoutBuffer, formFieldRegistry);
 }
 
 export async function writeGenericActivityRiskMaster(targetPath) {
