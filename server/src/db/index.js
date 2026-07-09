@@ -612,7 +612,13 @@ try {
       try { db.exec('ALTER TABLE form_templates DROP COLUMN adobe_template_id'); } catch { /* old sqlite */ }
     }
     const bsCols = new Set(db.prepare('PRAGMA table_info(business_settings)').all().map((c) => c.name));
-    for (const legacy of ['adobe_sign_refresh_token', 'adobe_sign_api_access_point', 'adobe_sign_web_access_point']) {
+    for (const legacy of [
+      'adobe_sign_refresh_token',
+      'adobe_sign_api_access_point',
+      'adobe_sign_web_access_point',
+      'dropbox_sign_access_token',
+      'dropbox_sign_refresh_token'
+    ]) {
       if (bsCols.has(legacy)) {
         try { db.exec(`ALTER TABLE business_settings DROP COLUMN ${legacy}`); } catch { /* old sqlite */ }
       }
@@ -758,7 +764,7 @@ try {
         participant_onboarding_id TEXT NOT NULL,
         participant_id TEXT NOT NULL,
         packet_mode TEXT DEFAULT 'hybrid',
-        provider_name TEXT DEFAULT 'dropbox_sign',
+        provider_name TEXT DEFAULT 'docuseal',
         external_envelope_id TEXT,
         status TEXT DEFAULT 'draft',
         packet_reasoning TEXT,
@@ -797,7 +803,7 @@ try {
         id TEXT PRIMARY KEY,
         envelope_id TEXT NOT NULL,
         form_instance_id TEXT,
-        provider_name TEXT DEFAULT 'dropbox_sign',
+        provider_name TEXT DEFAULT 'docuseal',
         external_event_id TEXT,
         event_type TEXT NOT NULL,
         event_timestamp TEXT NOT NULL,
@@ -1380,9 +1386,7 @@ try {
       'xero_redirect_uri',
       'xero_refresh_token',
       'xero_tenant_id',
-      'xero_tenant_name',
-      'dropbox_sign_access_token',
-      'dropbox_sign_refresh_token'
+      'xero_tenant_name'
     ]) {
       businessCols = db.prepare("PRAGMA table_info(business_settings)").all();
       if (!businessCols.some((c) => c.name === col)) {

@@ -49,7 +49,7 @@ export default function FormsPage() {
     onboarding_pilot: false,
     signature_mode: 'hybrid',
     default_renewal_days: 365,
-    dropbox_sign_enabled: false
+    docuseal_enabled: false
   });
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
@@ -83,7 +83,7 @@ export default function FormsPage() {
           onboarding_pilot: Boolean(profile.onboarding_pilot),
           signature_mode: profile.signature_mode || 'hybrid',
           default_renewal_days: Number(profile.default_renewal_days || 365),
-          dropbox_sign_enabled: Boolean(data?.config?.dropbox_sign_enabled)
+          docuseal_enabled: Boolean(data?.config?.docuseal_enabled ?? data?.config?.dropbox_sign_enabled)
         });
       })
       .catch(() => setSettingsState(null));
@@ -139,7 +139,7 @@ export default function FormsPage() {
     setSettingsMessage('');
     try {
       const existingConfig = settingsState?.config || {};
-      const nextConfig = { ...existingConfig, dropbox_sign_enabled: Boolean(settingsForm.dropbox_sign_enabled) };
+      const nextConfig = { ...existingConfig, docuseal_enabled: Boolean(settingsForm.docuseal_enabled) };
       await onboarding.providerSettings(orgId, {
         onboarding_enabled: settingsForm.onboarding_enabled,
         onboarding_pilot: settingsForm.onboarding_pilot,
@@ -460,13 +460,10 @@ export default function FormsPage() {
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <input
                 type="checkbox"
-                checked={settingsForm.dropbox_sign_enabled}
-                onChange={(e) => setSettingsForm((s) => ({ ...s, dropbox_sign_enabled: e.target.checked }))}
+                checked={settingsForm.docuseal_enabled}
+                onChange={(e) => setSettingsForm((s) => ({ ...s, docuseal_enabled: e.target.checked }))}
               />
-              Enable Sign with Nexus Core (Dropbox Sign)
-              <span className="forms-muted" style={{ fontSize: '0.8rem' }}>
-                Requires Dropbox Sign connected in Settings → Integrations.
-              </span>
+              Enable Sign with Nexus Core (DocuSeal)
             </label>
 
             <div className="form-group" style={{ marginBottom: 0 }}>

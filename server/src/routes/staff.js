@@ -1136,7 +1136,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
         }
       }
     } catch (err) {
-      if (err.code === 'DROPBOX_SIGN_NOT_CONNECTED' || err.code === 'DROPBOX_SIGN_NOT_ENABLED') {
+      if (err.code === 'DOCUSEAL_NOT_CONFIGURED' || err.code === 'DOCUSEAL_NOT_ENABLED') {
         return res.status(400).json({ error: err.message, code: err.code });
       }
       if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING') {
@@ -1147,7 +1147,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     }
 
     if (signatureRequests.length) {
-      text += `\n\n${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately via Dropbox Sign for e-signature. Check your inbox for signing requests from Dropbox Sign.\n`;
+      text += `\n\n${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately via DocuSeal for e-signature. Check your inbox for signing requests.\n`;
     }
     if (allAttachments.length) {
       text += `\nPolicy and information documents are attached to this email.\n`;

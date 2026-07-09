@@ -157,7 +157,7 @@ export function masterRequiresSignature(master) {
 }
 
 /**
- * Split selected (or all) onboarding masters into policy PDFs vs Dropbox Sign forms.
+ * Split selected (or all) onboarding masters into policy PDFs vs DocuSeal forms.
  * @returns {{ policyMasters: object[], formMasters: object[], policyMasterIds: string[], formMasterIds: string[] }}
  */
 export function splitOnboardingMasters(orgId, workflow, masterIds) {

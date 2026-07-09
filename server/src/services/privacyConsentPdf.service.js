@@ -34,7 +34,7 @@ function safeText(v) {
  * Produces a human-readable PDF matching the same fields as the supplied policy PDF,
  * but rendered via pdfkit so it is always auto-fillable.
  *
- * Also returns an embedded signing_layout for Dropbox Sign field placement.
+ * Also returns an embedded signing_layout for DocuSeal field placement.
  */
 export function generatePrivacyConsentPdfBuffer(snapshot) {
   return new Promise((resolvePromise, reject) => {
@@ -278,7 +278,7 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
       'Need help understanding? Let us know if you need help to understand this document. We can arrange bilingual staff, interpreters or advocates to support you.'
     );
 
-    // Signing layout for Dropbox Sign - place a single signer (participant) over Client Consent (A)
+    // Signing layout for DocuSeal - place a single signer (participant) over Client Consent (A)
     // signature + printed name + date. This is the minimum viable signing flow.
     // Coordinates are derived from current y positions; we anchor to the Client Consent (A) lines by
     // replaying rough offsets. For stability we compute them using fixed positions on the last page.

@@ -1,6 +1,6 @@
 /**
  * Signer-view preview for custom form templates: fields labelled with merge names
- * (admin check before Dropbox Sign — flattened so labels are visible in all PDF viewers).
+ * (admin check before DocuSeal — flattened so labels are visible in all PDF viewers).
  */
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';

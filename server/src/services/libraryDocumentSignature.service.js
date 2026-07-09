@@ -1,28 +1,27 @@
 /**
- * Send branded library masters (signature_count > 0) via Dropbox Sign.
+ * Send branded library masters (signature_count > 0) via DocuSeal.
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import {
-  hasConfiguredDropboxForOrg,
-  sendMultiDocumentSignatureRequest
-} from './dropboxSign.service.js';
+  hasDocuSealConfigured,
+  sendMultiDocumentAgreement
+} from './docuSeal.service.js';
 import {
   renderLibraryMasterAttachment,
   splitOnboardingMasters
 } from './onboardingDocumentPacks.service.js';
 import { suggestSigningLayoutFromPdf } from './formTemplateSigningLayout.service.js';
 import {
-  buildCustomFormDropboxFields,
-  resolveOrgSignatoryForDropbox
-} from './customFormDropboxFields.service.js';
+  buildCustomFormDocuSealFields,
+  resolveOrgSignatoryForDocuSeal
+} from './customFormDocuSealFields.service.js';
 
-const DROPBOX_SIGN_SETTINGS_HINT =
-  'Connect Dropbox Sign under Settings → Integrations and enable it under Forms → Onboarding settings.';
+const DOCUSEAL_SETTINGS_HINT = 'Enable e-signing under Forms → Onboarding settings.';
 
-export function isDropboxSignEnabledForOrg(orgId) {
-  if (!orgId) return Boolean(process.env.DROPBOX_SIGN_API_KEY?.trim());
+export function isDocuSealEnabledForOrg(orgId) {
+  if (!orgId) return hasDocuSealConfigured();
   const row = db.prepare(`SELECT config_json FROM provider_profiles WHERE organisation_id = ?`).get(orgId);
   let config = {};
   try {
@@ -30,20 +29,21 @@ export function isDropboxSignEnabledForOrg(orgId) {
   } catch {
     config = {};
   }
-  if (config.dropbox_sign_enabled === true) return true;
-  if (config.dropbox_sign_enabled === false) return false;
-  return Boolean(process.env.DROPBOX_SIGN_API_KEY?.trim());
+  const enabled = config.docuseal_enabled ?? config.dropbox_sign_enabled;
+  if (enabled === true) return true;
+  if (enabled === false) return false;
+  return hasDocuSealConfigured();
 }
 
-export function assertDropboxSignReady(orgId) {
-  if (!hasConfiguredDropboxForOrg(orgId)) {
-    const err = new Error(`Dropbox Sign is not connected. ${DROPBOX_SIGN_SETTINGS_HINT}`);
-    err.code = 'DROPBOX_SIGN_NOT_CONNECTED';
+export function assertDocuSealReady(orgId) {
+  if (!hasDocuSealConfigured()) {
+    const err = new Error(`DocuSeal is not configured on this server. Set DOCUSEAL_API_KEY.`);
+    err.code = 'DOCUSEAL_NOT_CONFIGURED';
     throw err;
   }
-  if (!isDropboxSignEnabledForOrg(orgId)) {
-    const err = new Error(`Dropbox Sign is not enabled for this organisation. ${DROPBOX_SIGN_SETTINGS_HINT}`);
-    err.code = 'DROPBOX_SIGN_NOT_ENABLED';
+  if (!isDocuSealEnabledForOrg(orgId)) {
+    const err = new Error(`E-signing is not enabled for this organisation. ${DOCUSEAL_SETTINGS_HINT}`);
+    err.code = 'DOCUSEAL_NOT_ENABLED';
     throw err;
   }
 }
@@ -54,7 +54,7 @@ export function getProviderSignatureMode(orgId) {
 }
 
 /**
- * Group library form masters into Dropbox Sign packets (hybrid / packet / separate).
+ * Group library form masters into DocuSeal packets (hybrid / packet / separate).
  * @param {object[]} formMasters
  * @param {'hybrid'|'packet'|'separate'} signatureMode
  */
@@ -161,8 +161,8 @@ async function prepareMasterDocument(master, orgId, workflow, { staff, participa
     throw new Error(`Could not render ${master.display_name || master.slug} as PDF for signature.`);
   }
   const layout = await resolveSigningLayout(master, att.content, workflow);
-  const orgSignatory = resolveOrgSignatoryForDropbox(orgId);
-  const dropboxFields = buildCustomFormDropboxFields(layout, {
+  const orgSignatory = resolveOrgSignatoryForDocuSeal(orgId);
+  const docuSealFields = buildCustomFormDocuSealFields(layout, {
     workflow,
     org: orgSignatory,
     participant: participant || {},
@@ -172,8 +172,8 @@ async function prepareMasterDocument(master, orgId, workflow, { staff, participa
     master,
     buffer: att.content,
     filename: att.filename,
-    formFields: dropboxFields.formFieldsPerDocument?.[0] || [],
-    signers: dropboxFields.signers
+    formFields: docuSealFields.formFieldsPerDocument?.[0] || [],
+    signers: docuSealFields.signers
   };
 }
 
@@ -227,7 +227,7 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
       ? `${prepared[0].master.display_name || 'Form'} – ${recipient.name}`
       : `${orgName || 'Onboarding'} forms – ${recipient.name}`;
 
-  const externalEnvelopeId = await sendMultiDocumentSignatureRequest(orgId, {
+  const externalEnvelopeId = await sendMultiDocumentAgreement(orgId, {
     signers,
     title,
     subject: `Please sign: ${docNames}`,
@@ -249,7 +249,7 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
 }
 
 /**
- * Send library form masters via Dropbox Sign.
+ * Send library form masters via DocuSeal.
  * @returns {Promise<Array<{ master_id: string, envelope_id: string, external_envelope_id: string, status: string, display_name: string }>>}
  */
 export async function sendLibraryMastersForSignature({
@@ -262,7 +262,7 @@ export async function sendLibraryMastersForSignature({
   orgName = null
 }) {
   if (!formMasters?.length) return [];
-  assertDropboxSignReady(orgId);
+  assertDocuSealReady(orgId);
 
   const packets = computeLibrarySignaturePackets(formMasters, signatureMode);
   const signatureRequests = [];

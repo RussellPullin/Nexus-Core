@@ -12,7 +12,7 @@
  *   7. Emit a structured audit event so the timeline reflects the orchestrated run.
  *
  * IMPORTANT: This service deliberately does NOT touch any signing layer. Signature
- * handoff (Dropbox Sign) is performed by the user separately via existing endpoints —
+ * handoff (DocuSeal) is performed by the user separately via existing endpoints —
  * the orchestrator only prepares everything those flows expect to find.
  */
 import { db } from '../db/index.js';

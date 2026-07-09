@@ -331,7 +331,7 @@ ROUTER.get('/templates/:id/merge-preview-rows', async (req, res) => {
   }
 });
 
-// GET /api/forms/templates/:id/signing-layout — field box layout for Dropbox Sign + pre-fill
+// GET /api/forms/templates/:id/signing-layout — field box layout for DocuSeal + pre-fill
 ROUTER.get('/templates/:id/signing-layout', async (req, res) => {
   try {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -414,7 +414,7 @@ ROUTER.put('/templates/:id/signing-layout', async (req, res) => {
   }
 });
 
-// GET /api/forms/templates/:id/signer-preview.pdf — highlighted empty fields with merge labels (Dropbox Sign view)
+// GET /api/forms/templates/:id/signer-preview.pdf — highlighted empty fields with merge labels (DocuSeal view)
 ROUTER.get('/templates/:id/signer-preview.pdf', async (req, res) => {
   try {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });

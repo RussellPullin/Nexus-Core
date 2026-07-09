@@ -10,8 +10,6 @@ export const settings = {
   xeroConnect: () => fetchApi('/settings/xero/connect', { method: 'POST' }),
   xeroDisconnect: () => fetchApi('/settings/xero/disconnect', { method: 'POST' }),
   xeroTestInvoice: () => fetchApi('/settings/xero/test-invoice', { method: 'POST' }),
-  dropboxSignConnect: () => fetchApi('/settings/dropbox-sign/connect', { method: 'POST' }),
-  dropboxSignDisconnect: () => fetchApi('/settings/dropbox-sign/disconnect', { method: 'POST' }),
   uploadLogo: async (file) => {
     const formData = new FormData();
     formData.append('file', file);

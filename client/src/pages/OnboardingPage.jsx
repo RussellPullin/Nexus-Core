@@ -12,7 +12,7 @@ import {
   composeParticipantLegalName,
   splitParticipantNameFromFull
 } from '@nexus-shared/onboardingFieldRegistry.js';
-import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useDropboxSignEnabled } from '../lib/featureFlags.js';
+import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useSignEnabled } from '../lib/featureFlags.js';
 import ServiceAgreementOnboardingBlock from '../components/ServiceAgreementOnboardingBlock.jsx';
 
 const PARTICIPANT_LABELS = participantFieldLabels();
@@ -122,7 +122,7 @@ export default function OnboardingPage() {
   const { id } = useParams();
   const idRef = useRef(id);
   idRef.current = id;
-  const signEnabled = useDropboxSignEnabled();
+  const signEnabled = useSignEnabled();
   const [participant, setParticipant] = useState(null);
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -537,11 +537,11 @@ export default function OnboardingPage() {
       const sigCount = result?.signature_request_count ?? result?.signature_requests?.length ?? 0;
       let message;
       if (policyCount > 0 && sigCount > 0) {
-        message = `Email sent with ${policyCount} policy PDF${policyCount === 1 ? '' : 's'}. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Dropbox Sign.`;
+        message = `Email sent with ${policyCount} policy PDF${policyCount === 1 ? '' : 's'}. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via DocuSeal.`;
       } else if (policyCount > 0) {
         message = `Onboarding documents emailed with ${policyCount} PDF attachment${policyCount === 1 ? '' : 's'}.`;
       } else if (sigCount > 0) {
-        message = `${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Dropbox Sign. A notification email was also sent.`;
+        message = `${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via DocuSeal. A notification email was also sent.`;
       } else {
         message = 'Onboarding documents emailed to the participant.';
       }
@@ -569,7 +569,7 @@ export default function OnboardingPage() {
     try {
       await onboarding.sendFormForSignature(id, formInstanceId);
       await refresh();
-      alert('Form sent via Nexus Core (Dropbox Sign).');
+      alert('Form sent via Nexus Core (DocuSeal).');
     } catch (err) {
       alert(err.message);
     } finally {
@@ -644,7 +644,7 @@ export default function OnboardingPage() {
       alert(
         signEnabled
           ? 'Document updated. Download to sign or use Sign with Nexus Core when ready.'
-          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once Dropbox Sign is enabled in Forms → Onboarding settings.'
+          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once enabled in Forms → Onboarding settings.'
       );
     } catch (err) {
       alert(err.message);
@@ -1452,7 +1452,7 @@ export default function OnboardingPage() {
                               disabled={working || !signEnabled}
                               title={
                                 signEnabled
-                                  ? 'Send for signature via Nexus Core (Dropbox Sign)'
+                                  ? 'Send for signature via Nexus Core (DocuSeal)'
                                   : NEXUS_CORE_SIGN_COMING_SOON_TITLE
                               }
                             >

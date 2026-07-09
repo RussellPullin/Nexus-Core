@@ -1,5 +1,5 @@
 /**
- * signing_layout for custom uploaded form templates — field boxes for Dropbox Sign + pre-fill.
+ * signing_layout for custom uploaded form templates — field boxes for DocuSeal + pre-fill.
  * Coordinates use top-left origin in PDF points (same convention as Service Agreement / PDFKit).
  */
 

@@ -824,7 +824,7 @@ export function createEnvelopeRecords({
     INSERT INTO signature_envelopes (
       id, participant_onboarding_id, participant_id, packet_mode, provider_name,
       status, packet_reasoning, sent_at
-    ) VALUES (?, ?, ?, ?, 'dropbox_sign', 'sent', ?, ?)
+    ) VALUES (?, ?, ?, ?, 'docuseal', 'sent', ?, ?)
   `);
   const linkForm = db.prepare(`
     INSERT INTO envelope_form_instances (id, envelope_id, form_instance_id)
@@ -848,7 +848,7 @@ export function createEnvelopeRecords({
       db.prepare(`
         INSERT INTO signature_events (
           id, envelope_id, form_instance_id, provider_name, event_type, event_timestamp, payload_json
-        ) VALUES (?, ?, ?, 'dropbox_sign', 'agreement_sent', ?, ?)
+        ) VALUES (?, ?, ?, 'docuseal', 'agreement_sent', ?, ?)
       `).run(uuidv4(), envelopeId, form.id, nowIso(), JSON.stringify({ reason: packetReasoning }));
     });
     created.push({ envelope_id: envelopeId, form_instance_ids: forms.map((f) => f.id), packet_reasoning: packetReasoning });
@@ -940,7 +940,7 @@ export function archiveSignedEnvelopeDocument({ envelopeId, signedBuffer, certif
         buffer: signedBuffer,
         originalFilename: safeFilename,
         mimeType: 'application/pdf',
-        notes: `Signed via Dropbox Sign envelope ${envelopeId}`
+        notes: `Signed via DocuSeal envelope ${envelopeId}`
       }).catch((e) => console.warn('[onboarding] OneDrive push signed PDF failed:', e?.message));
 
       try {
@@ -1014,7 +1014,7 @@ export function markEnvelopeCompleted({
       INSERT INTO signature_events (
         id, envelope_id, form_instance_id, provider_name, external_event_id,
         event_type, event_timestamp, payload_json
-      ) VALUES (?, ?, ?, 'dropbox_sign', ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, 'docuseal', ?, ?, ?, ?)
     `).run(
       uuidv4(),
       envelopeId,
@@ -1048,7 +1048,7 @@ export function markEnvelopeCompleted({
     participantId: envelope.participant_id,
     participantOnboardingId: envelope.participant_onboarding_id,
     actorType: 'webhook',
-    actorId: 'dropbox_sign',
+    actorId: 'docuseal',
     eventType: 'signature_completed',
     entityType: 'envelope',
     entityId: envelopeId,
@@ -1070,7 +1070,7 @@ export function markEnvelopeCompleted({
  * Today nexus_generated_form_documents is parallel to participant_form_instances, so the
  * "complete onboarding when all forms signed" rule never sees the Nexus SA. This helper
  * ensures the same SA also exists as a participant_form_instances row of form_type='service_agreement'
- * so that Dropbox Sign + completion criteria apply uniformly.
+ * so that DocuSeal + completion criteria apply uniformly.
  *
  * Idempotent: if a non-superseded SA form instance already exists for this onboarding it is
  * updated to point at the new PDF and bumped in version; otherwise a new row is inserted.

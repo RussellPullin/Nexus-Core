@@ -1,6 +1,6 @@
 /**
  * Pre-fill custom form PDFs from signing_layout text/date fields (intake merge data).
- * Signature and checkbox fields are left for Dropbox Sign overlays.
+ * Signature and checkbox fields are left for DocuSeal overlays.
  */
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';

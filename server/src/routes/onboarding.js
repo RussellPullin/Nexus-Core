@@ -21,15 +21,16 @@ import {
   createAuditEvent,
   assertProviderOnboardingReady
 } from '../services/onboarding.service.js';
-import { createAgreementPacket, createAgreementWithDocument, uploadTransientDocument } from '../services/dropboxSign.service.js';
+import { createAgreementPacket, createAgreementWithDocument, uploadTransientDocument } from '../services/docuSeal.service.js';
 import {
-  buildServiceAgreementDropboxFields,
+  buildServiceAgreementDocuSealFields,
   isServiceAgreementSnapshot
-} from '../services/serviceAgreementDropboxFields.service.js';
+} from '../services/serviceAgreementDocuSealFields.service.js';
 import {
-  buildCustomFormDropboxFields,
-  resolveOrgSignatoryForDropbox
-} from '../services/customFormDropboxFields.service.js';
+  buildCustomFormDocuSealFields,
+  resolveOrgSignatoryForDocuSeal
+} from '../services/customFormDocuSealFields.service.js';
+import { buildPrivacyConsentDocuSealFields } from '../services/privacyConsentDocuSealFields.service.js';
 import { parseSigningLayout } from '../services/formTemplateSigningLayout.service.js';
 import { isPrivacyConsentSnapshot, buildPrivacyConsentSnapshot } from '../services/privacyConsentSnapshot.service.js';
 import { generatePrivacyConsentPdfBuffer } from '../services/privacyConsentPdf.service.js';
@@ -300,7 +301,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
       attachments = splitSend.policyAttachments;
       signatureRequests = splitSend.signatureRequests;
     } catch (err) {
-      if (err.code === 'DROPBOX_SIGN_NOT_CONNECTED' || err.code === 'DROPBOX_SIGN_NOT_ENABLED') {
+      if (err.code === 'DOCUSEAL_NOT_CONFIGURED' || err.code === 'DOCUSEAL_NOT_ENABLED') {
         return res.status(400).json({ error: err.message, code: err.code });
       }
       if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING') {
@@ -329,7 +330,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
       text += `${orgName} has sent you onboarding forms to complete.\n\n`;
     }
     if (signatureRequests.length) {
-      text += `${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately via Dropbox Sign for e-signature. Check your inbox for signing requests from Dropbox Sign.\n\n`;
+      text += `${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately via DocuSeal for e-signature. Check your inbox for signing requests.\n\n`;
     }
     text += `Your coordinator will guide you through the rest of onboarding in Nexus Core.\n\n`;
     text += `If you have questions, reply to this email.\n`;
@@ -479,10 +480,10 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
           mimeType: 'application/pdf',
           category: 'Consent and service agreement'
         };
-        const dropboxFields = buildPrivacyConsentDropboxFields(pcSnap);
+        const docuSealFields = buildPrivacyConsentDocuSealFields(pcSnap);
         const transientId = await uploadTransientDocument(pdfBuffer, filename, organisationId, {
-          formFieldsPerDocument: dropboxFields.formFieldsPerDocument,
-          customFields: dropboxFields.customFields
+          formFieldsPerDocument: docuSealFields.formFieldsPerDocument,
+          signers: docuSealFields.signers?.participant ? [docuSealFields.signers.participant] : null
         });
         agreement = await createAgreementWithDocument({
           participantName: participant.name,
@@ -534,7 +535,7 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
             : 'application/pdf',
         category: form.display_name || form.form_type || 'Service agreement'
       };
-      let dropboxFieldOpts = {};
+      let docuSealFieldOpts = {};
       let twoSignerSigners = null;
       if (form.form_type === 'service_agreement' && ext === 'pdf') {
         let snap = {};
@@ -544,8 +545,8 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
           snap = {};
         }
         if (isServiceAgreementSnapshot(snap)) {
-          dropboxFieldOpts = buildServiceAgreementDropboxFields(snap);
-          const derived = dropboxFieldOpts.signers || {};
+          docuSealFieldOpts = buildServiceAgreementDocuSealFields(snap);
+          const derived = docuSealFieldOpts.signers || {};
           const orgEmail = (derived.org?.email || '').trim();
           const orgName = (derived.org?.name || '').trim();
           const participantEmail = (participant.email || '').trim();
@@ -575,16 +576,16 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
         }
         const signingLayout = parseSigningLayout(templateMapping);
         if (signingLayout?.fields?.length) {
-          const orgSignatory = resolveOrgSignatoryForDropbox(organisationId);
-          dropboxFieldOpts = buildCustomFormDropboxFields(signingLayout, {
+          const orgSignatory = resolveOrgSignatoryForDocuSeal(organisationId);
+          docuSealFieldOpts = buildCustomFormDocuSealFields(signingLayout, {
             workflow: form.workflow || 'participant_onboarding',
             org: orgSignatory,
             participant: { name: participant.name, email: participant.email },
             staff: { name: participant.name, email: participant.email }
           });
-          if (dropboxFieldOpts.signers?.length) {
-            const orgEmail = (dropboxFieldOpts.signers[0]?.email || '').trim();
-            const primaryEmail = (dropboxFieldOpts.signers[1]?.email || '').trim();
+          if (docuSealFieldOpts.signers?.length) {
+            const orgEmail = (docuSealFieldOpts.signers[0]?.email || '').trim();
+            const primaryEmail = (docuSealFieldOpts.signers[1]?.email || '').trim();
             if (!orgEmail) {
               return res
                 .status(400)
@@ -593,13 +594,12 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
             if (!primaryEmail) {
               return res.status(400).json({ error: 'Add a participant email before sending for signature.' });
             }
-            twoSignerSigners = dropboxFieldOpts.signers;
+            twoSignerSigners = docuSealFieldOpts.signers;
           }
         }
       }
       const transientId = await uploadTransientDocument(docBuffer, filename, organisationId, {
-        formFieldsPerDocument: dropboxFieldOpts.formFieldsPerDocument,
-        customFields: dropboxFieldOpts.customFields,
+        formFieldsPerDocument: docuSealFieldOpts.formFieldsPerDocument,
         signers: twoSignerSigners
       });
       agreement = await createAgreementWithDocument({
@@ -624,7 +624,7 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
       UPDATE signature_envelopes
       SET external_envelope_id = ?, provider_name = ?, status = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(agreement.external_envelope_id, agreement.provider || 'dropbox_sign', agreement.status || 'sent', envelope.envelope_id);
+    `).run(agreement.external_envelope_id, agreement.provider || 'docuseal', agreement.status || 'sent', envelope.envelope_id);
 
     if (oneDriveCopy) {
       try {
@@ -684,7 +684,7 @@ router.post('/participants/:id/send-signatures', async (req, res) => {
         UPDATE signature_envelopes
         SET external_envelope_id = ?, provider_name = ?, status = ?, updated_at = datetime('now')
         WHERE id = ?
-      `).run(agreement.external_envelope_id, agreement.provider || 'dropbox_sign', agreement.status || 'sent', envelope.envelope_id);
+      `).run(agreement.external_envelope_id, agreement.provider || 'docuseal', agreement.status || 'sent', envelope.envelope_id);
       envelopeResponses.push({ ...envelope, ...agreement });
     }
 

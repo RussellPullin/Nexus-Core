@@ -887,7 +887,6 @@ function BusinessSetup() {
 
   useEffect(() => {
     const xero = searchParams.get('xero');
-    const dropbox = searchParams.get('dropbox_sign');
     const message = searchParams.get('message');
     if (xero === 'linked') {
       setMsg('Successfully linked to Xero.');
@@ -895,13 +894,6 @@ function BusinessSetup() {
       settings.getBusiness().then(setBiz).catch(() => {});
     } else if (xero === 'error') {
       setMsg('Xero connection failed: ' + (message || 'Unknown error'));
-      setSearchParams({}, { replace: true });
-    } else if (dropbox === 'linked') {
-      setMsg('Successfully linked to Dropbox Sign.');
-      setSearchParams({}, { replace: true });
-      settings.getBusiness().then(setBiz).catch(() => {});
-    } else if (dropbox === 'error') {
-      setMsg('Dropbox Sign connection failed: ' + (message || 'Unknown error'));
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -982,7 +974,7 @@ function BusinessSetup() {
       <summary className="settings-collapsible-summary">
         <span className="settings-collapsible-summary-main">
           <span className="settings-collapsible-title">Business setup</span>
-          <span className="settings-collapsible-hint">Company details, logo, bank details, Xero, Dropbox Sign</span>
+          <span className="settings-collapsible-hint">Company details, logo, bank details, Xero, DocuSeal</span>
         </span>
       </summary>
       <div className="settings-collapsible-body">
@@ -1243,82 +1235,30 @@ function BusinessSetup() {
         </div>
       )}
 
-      <h4 className="settings-subsection-title">Signatures – Dropbox Sign</h4>
+      <h4 className="settings-subsection-title">Signatures – DocuSeal</h4>
       <p className="settings-desc">
-        Connect your Dropbox Sign account so participant onboarding agreements are sent for e-signature automatically.
-        Use an API key for simple setup, or OAuth to connect a specific Dropbox Sign account per organisation.
+        Participant onboarding agreements are sent for e-signature via Nexus Core's shared DocuSeal instance —
+        no per-organisation connection needed.
       </p>
-      {biz.dropbox_sign_linked ? (
-        <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: '1rem' }}>
-          <strong style={{ color: '#166534' }}>Dropbox Sign is connected</strong>
-          <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', color: '#166534' }}>
-            {biz.dropbox_sign_oauth_linked
-              ? 'OAuth tokens for this organisation are stored and refreshed automatically.'
-              : 'Using API key from server environment.'}
+      <div
+        style={{
+          padding: '1rem',
+          background: biz.docuseal_configured ? '#f0fdf4' : '#fffbeb',
+          border: `1px solid ${biz.docuseal_configured ? '#86efac' : '#fcd34d'}`,
+          borderRadius: 8,
+          marginBottom: '1rem'
+        }}
+      >
+        <strong style={{ color: biz.docuseal_configured ? '#166534' : '#b45309' }}>
+          {biz.docuseal_configured ? 'DocuSeal is connected' : 'DocuSeal is not configured on this server'}
+        </strong>
+        {!biz.docuseal_configured && (
+          <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', color: '#b45309' }}>
+            Set <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>DOCUSEAL_API_KEY</code> in the
+            server environment.
           </p>
-          {biz.dropbox_sign_oauth_linked ? (
-            <div style={{ marginTop: '0.5rem' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={async () => {
-                  setMsg('');
-                  try {
-                    await settings.dropboxSignDisconnect();
-                    const fresh = await settings.getBusiness();
-                    setBiz(fresh);
-                    setMsg('Disconnected from Dropbox Sign.');
-                  } catch (err) {
-                    setMsg(err?.message || 'Failed to disconnect');
-                  }
-                }}
-              >
-                Disconnect Dropbox Sign
-              </button>
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <div style={{ marginBottom: '1rem' }}>
-          {!biz.dropbox_sign_oauth_via_env && (
-            <p
-              className="settings-desc"
-              style={{
-                marginBottom: '0.75rem',
-                color: '#b45309',
-                background: '#fffbeb',
-                border: '1px solid #fcd34d',
-                padding: '0.75rem 1rem',
-                borderRadius: 8,
-              }}
-            >
-              To enable one-click connect, add{' '}
-              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>DROPBOX_SIGN_CLIENT_ID</code> and{' '}
-              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>DROPBOX_SIGN_CLIENT_SECRET</code> to the
-              server. Alternatively, set{' '}
-              <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>DROPBOX_SIGN_API_KEY</code> for simple
-              API key auth (no OAuth needed).
-            </p>
-          )}
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!biz.dropbox_sign_oauth_via_env}
-            onClick={async () => {
-              setMsg('');
-              try {
-                const { redirectUrl } = await settings.dropboxSignConnect();
-                if (redirectUrl) window.location.href = redirectUrl;
-                else setMsg('No redirect URL returned.');
-              } catch (err) {
-                setMsg(err?.message || 'Failed to connect');
-              }
-            }}
-          >
-            Connect to Dropbox Sign
-          </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {msg && (
         <div
@@ -1327,10 +1267,8 @@ function BusinessSetup() {
             msg.includes('uploaded') ||
             msg.includes('removed') ||
             msg.includes('Disconnected') ||
-            msg.includes('Disconnected from Dropbox') ||
             msg.includes('created in Xero') ||
             msg.includes('Invoice #') ||
-            msg.includes('Successfully linked to Dropbox') ||
             msg.includes('Successfully linked to Xero')
               ? 'settings-success'
               : 'settings-error'

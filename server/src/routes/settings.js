@@ -11,7 +11,6 @@ import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { frontendBaseUrl } from '../lib/frontendBaseUrl.js';
 import { oauthPublicApiOriginFromEnv } from '../lib/oauthPublicOrigin.js';
-import { exchangeDropboxAuthorizationCode } from '../services/dropboxSign.service.js';
 import { getShifterOrgTimezoneSpecForNexusOrg } from '../services/supabaseStaffShifter.service.js';
 import { normalizeOrgTimezoneRaw } from '../lib/shiftTimezone.js';
 
@@ -87,16 +86,7 @@ function mergeWithEnv(row, options = {}) {
     xero_linked: noOrgRowYet ? false : !!(row?.xero_refresh_token && row?.xero_tenant_id),
     /** When true, Settings shows one-click Xero connect (credentials from server env). */
     xero_oauth_via_env: xeroOauthConfiguredViaEnv(),
-    dropbox_sign_linked:
-      noOrgRowYet
-        ? false
-        : !!(row?.dropbox_sign_access_token) || !!process.env.DROPBOX_SIGN_API_KEY?.trim(),
-    dropbox_sign_oauth_linked: noOrgRowYet ? false : !!(row?.dropbox_sign_access_token),
-    dropbox_sign_oauth_via_env: dropboxOauthConfiguredViaEnv(),
-    dropbox_sign_via_api_key_only:
-      noOrgRowYet
-        ? false
-        : !!process.env.DROPBOX_SIGN_API_KEY?.trim() && !row?.dropbox_sign_access_token
+    docuseal_configured: !!process.env.DOCUSEAL_API_KEY?.trim()
   };
 }
 
@@ -126,21 +116,6 @@ function xeroOauthConfiguredViaEnv() {
   const secret = process.env.XERO_CLIENT_SECRET?.trim();
   const redirect = getEffectiveXeroRedirectUri();
   return !!(id && secret && redirect);
-}
-
-function dropboxOauthConfiguredViaEnv() {
-  const id = process.env.DROPBOX_SIGN_CLIENT_ID?.trim();
-  const secret = process.env.DROPBOX_SIGN_CLIENT_SECRET?.trim();
-  const redirect = getEffectiveDropboxRedirectUri();
-  return !!(id && secret && redirect);
-}
-
-function getEffectiveDropboxRedirectUri() {
-  const explicit = process.env.DROPBOX_SIGN_REDIRECT_URI?.trim();
-  if (explicit) return explicit;
-  const origin = oauthPublicApiOriginFromEnv();
-  if (origin) return `${origin}/api/settings/dropbox-sign-callback`;
-  return '';
 }
 
 /**
@@ -767,117 +742,6 @@ router.post('/xero/disconnect', requireAdminOrDelegate, (req, res) => {
         accounting_provider = NULL, updated_at = datetime('now')
       WHERE org_id = ?
     `).run(orgId);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── Dropbox Sign OAuth ────────────────────────────────────────────────────
-// Each org connects their own Dropbox Sign account. Credentials (client_id/secret) live in Fly secrets.
-
-// POST /api/settings/dropbox-sign/connect
-router.post('/dropbox-sign/connect', requireAdminOrDelegate, (req, res) => {
-  try {
-    const orgId = resolveTargetOrgId(req);
-    if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
-    if (!dropboxOauthConfiguredViaEnv()) {
-      return res.status(400).json({
-        error:
-          'Dropbox Sign OAuth is not configured on this server. Set DROPBOX_SIGN_CLIENT_ID, DROPBOX_SIGN_CLIENT_SECRET, and OAUTH_PUBLIC_URL in your environment.'
-      });
-    }
-    const redirectUri = getEffectiveDropboxRedirectUri();
-    if (!isAllowedXeroRedirectUri(redirectUri)) {
-      return res.status(400).json({
-        error: 'Redirect URI must use HTTPS, or http://localhost for local dev. Fix OAUTH_PUBLIC_URL.'
-      });
-    }
-
-    if (!hasBusinessSettingsForOrg(orgId)) {
-      db.prepare(`INSERT INTO business_settings (id, org_id, updated_at) VALUES (?, ?, datetime('now'))`).run(orgId, orgId);
-    }
-
-    const state = randomBytes(24).toString('hex');
-    req.session.dropbox_sign_oauth_state = state;
-    req.session.dropbox_sign_oauth_org_id = orgId;
-
-    const params = new URLSearchParams({
-      response_type: 'code',
-      client_id: process.env.DROPBOX_SIGN_CLIENT_ID.trim(),
-      redirect_uri: redirectUri,
-      state
-    });
-    const redirectUrl = `https://app.hellosign.com/oauth/authorize?${params.toString()}`;
-    res.json({ redirectUrl });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/settings/dropbox-sign-callback
-router.get('/dropbox-sign-callback', requireAdminOrDelegate, async (req, res) => {
-  const base = frontendBaseUrl(req);
-  const settingsUrl = base.replace(/\/api\/?$/, '').replace(/\/$/, '') + '/settings';
-
-  try {
-    const { code, state, error } = req.query || {};
-    if (error) {
-      return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent(String(error)));
-    }
-    if (req.session.dropbox_sign_oauth_state !== state) {
-      return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent('Invalid state'));
-    }
-    delete req.session.dropbox_sign_oauth_state;
-
-    if (!code) {
-      return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent('No authorization code'));
-    }
-
-    const orgId = req.session?.dropbox_sign_oauth_org_id || resolveTargetOrgId(req);
-    if (!orgId) {
-      return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent('No organisation on your account.'));
-    }
-
-    const redirectUri = getEffectiveDropboxRedirectUri();
-    const tokens = await exchangeDropboxAuthorizationCode({
-      code: String(code),
-      redirectUri,
-      state: String(state)
-    });
-
-    if (!hasBusinessSettingsForOrg(orgId)) {
-      db.prepare(`INSERT INTO business_settings (id, org_id, updated_at) VALUES (?, ?, datetime('now'))`).run(orgId, orgId);
-    }
-
-    db.prepare(
-      `UPDATE business_settings SET
-        dropbox_sign_access_token = ?,
-        dropbox_sign_refresh_token = ?,
-        updated_at = datetime('now')
-      WHERE org_id = ?`
-    ).run(tokens.access_token, tokens.refresh_token, orgId);
-
-    if (req.session) delete req.session.dropbox_sign_oauth_org_id;
-
-    return res.redirect(settingsUrl + '?dropbox_sign=linked');
-  } catch (err) {
-    return res.redirect(settingsUrl + '?dropbox_sign=error&message=' + encodeURIComponent(err.message || 'Unknown error'));
-  }
-});
-
-// POST /api/settings/dropbox-sign/disconnect
-router.post('/dropbox-sign/disconnect', requireAdminOrDelegate, (req, res) => {
-  try {
-    const orgId = resolveTargetOrgId(req);
-    if (!orgId) return res.status(400).json({ error: 'No organisation on your account. Complete setup first.' });
-    db.prepare(
-      `UPDATE business_settings SET
-        dropbox_sign_access_token = NULL,
-        dropbox_sign_refresh_token = NULL,
-        updated_at = datetime('now')
-      WHERE org_id = ?`
-    ).run(orgId);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

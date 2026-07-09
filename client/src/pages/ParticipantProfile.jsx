@@ -4,7 +4,7 @@ import { backToPreviousListPath, participantProfileBackLabel } from '../lib/list
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { participants, organisations, ndis, smartDefaults, onboarding, formTemplates } from '../lib/api';
-import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useDropboxSignEnabled } from '../lib/featureFlags.js';
+import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useSignEnabled } from '../lib/featureFlags.js';
 import CopyableField from '../components/CopyableField';
 import ActivityRiskAssessmentAssign from '../components/ActivityRiskAssessmentAssign';
 import AddressAutocomplete from '../components/AddressAutocomplete';
@@ -230,7 +230,7 @@ export default function ParticipantProfile() {
   const [saGaps, setSaGaps] = useState(null);
   const [saPreflightLoading, setSaPreflightLoading] = useState(false);
   const [saSignBusy, setSaSignBusy] = useState(false);
-  const signEnabled = useDropboxSignEnabled();
+  const signEnabled = useSignEnabled();
   const [saScrollTarget, setSaScrollTarget] = useState(null);
 
   const saInstanceOverridesPayload = useMemo(() => {
@@ -3349,8 +3349,8 @@ export default function ParticipantProfile() {
               <h4 style={{ marginTop: '1.5rem' }}>Generated agreements</h4>
               <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem' }}>
                 Download to review the full pre-filled agreement, or click <strong>Sign with Nexus Core</strong> to send it for signatures.
-                The Sign button is enabled only once the pre-send checklist above is complete. The PDF goes first to the organisation default signatory, then to the participant — both only sign, no editing in Dropbox Sign.
-                Set the default signatory under <Link to="/settings">Settings → Business</Link>, enable signing under Forms → Onboarding settings, and connect Dropbox Sign in Settings.
+                The Sign button is enabled only once the pre-send checklist above is complete. The PDF goes first to the organisation default signatory, then to the participant — both only sign, no editing in DocuSeal.
+                Set the default signatory under <Link to="/settings">Settings → Business</Link> and enable signing under Forms → Onboarding settings.
               </p>
               {saAgreements.length === 0 ? (
                 <p className="empty-state">None yet.</p>
@@ -3394,7 +3394,7 @@ export default function ParticipantProfile() {
                                     ? 'Add participant email in Edit (use your email for a self-test)'
                                     : !saReadyToSend
                                       ? `Complete the pre-send checklist first: ${saChecklistMissing.map((m) => m.label).join(', ')}`
-                                      : 'Send this agreement for signature via Dropbox Sign'
+                                      : 'Send this agreement for signature via DocuSeal'
                             }
                             onClick={async () => {
                               if (!g.form_instance_id) return;
@@ -3404,7 +3404,7 @@ export default function ParticipantProfile() {
                               }
                               if (
                                 !confirm(
-                                  `Send the service agreement to ${data.email.trim()} for signature via Dropbox Sign?`
+                                  `Send the service agreement to ${data.email.trim()} for signature via DocuSeal?`
                                 )
                               ) {
                                 return;

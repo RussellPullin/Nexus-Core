@@ -1,5 +1,5 @@
 /**
- * Split onboarding pack send: policy PDFs via email, signature forms via Dropbox Sign.
+ * Split onboarding pack send: policy PDFs via email, signature forms via DocuSeal.
  */
 
 import {
@@ -8,7 +8,7 @@ import {
   validateOnboardingMasterIds
 } from './onboardingDocumentPacks.service.js';
 import {
-  assertDropboxSignReady,
+  assertDocuSealReady,
   getProviderSignatureMode,
   sendLibraryMastersForSignature
 } from './libraryDocumentSignature.service.js';
@@ -52,8 +52,8 @@ export async function buildPolicyEmailAttachments(
 }
 
 /**
- * Send signature-required library masters via Dropbox Sign.
- * Fails fast if Dropbox Sign is not connected/enabled when forms are selected.
+ * Send signature-required library masters via DocuSeal.
+ * Fails fast if DocuSeal is not configured/enabled when forms are selected.
  */
 export async function sendOnboardingSignatureForms({
   orgId,
@@ -65,7 +65,7 @@ export async function sendOnboardingSignatureForms({
   orgName = null
 }) {
   if (!formMasters?.length) return [];
-  assertDropboxSignReady(orgId);
+  assertDocuSealReady(orgId);
   const mode = signatureMode || getProviderSignatureMode(orgId);
   return sendLibraryMastersForSignature({
     orgId,
@@ -79,7 +79,7 @@ export async function sendOnboardingSignatureForms({
 }
 
 /**
- * Full split send orchestration (attachments + Dropbox Sign forms).
+ * Full split send orchestration (attachments + DocuSeal forms).
  * Does not send email — callers attach `policyAttachments` and compose message.
  */
 export async function prepareSplitOnboardingSend({
@@ -95,7 +95,7 @@ export async function prepareSplitOnboardingSend({
 }) {
   const split = resolveOnboardingSendSplit(orgId, workflow, masterIds);
   if (split.formMasters.length) {
-    assertDropboxSignReady(orgId);
+    assertDocuSealReady(orgId);
   }
 
   const policyAttachments = await buildPolicyEmailAttachments(orgId, providerProfileId, workflow, {

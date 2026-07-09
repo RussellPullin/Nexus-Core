@@ -202,7 +202,7 @@ ROUTER.post('/:participantId/service-agreements/generate', async (req, res) => {
       }
     }
 
-    // Bridge into the legacy participant_form_instances lifecycle so Dropbox Sign +
+    // Bridge into the legacy participant_form_instances lifecycle so DocuSeal +
     // onboarding completion treat the Nexus SA uniformly with privacy_consent / support_plan.
     let bridgedFormInstanceId = null;
     let bridgedOnboardingId = null;
