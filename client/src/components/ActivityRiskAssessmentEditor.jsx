@@ -1,37 +1,126 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { activityRiskAssessments } from '../lib/api';
 
-const GROUP_ORDER = [
-  'Document details',
-  'Activity details',
-  'Hazards',
-  'Control measures',
-  'Review questions',
-  'Pre-activity sign-off',
-  'Consent',
-  'Post-activity sign-off',
-  'Other'
-];
+GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-function fieldGroup(name) {
-  if (name.startsWith('hazard_')) return 'Hazards';
-  if (name.startsWith('control_')) return 'Control measures';
-  if (name.startsWith('review_q')) return 'Review questions';
-  if (name.includes('pre_activity') || ['prepared_by', 'prepared_role', 'date_prepared', 'others_involved', 'reviewed_by', 'approval_date'].includes(name)) {
-    return 'Pre-activity sign-off';
-  }
-  if (name.includes('post_activity') || ['completed_by', 'designation', 'signature', 'date'].includes(name)) {
-    return 'Post-activity sign-off';
-  }
-  if (name.startsWith('consent')) return 'Consent';
-  if (['approved_by', 'version', 'review_date', 'additional_notes', 'review_details'].includes(name)) {
-    return 'Document details';
-  }
-  return 'Activity details';
+const PAGE_WIDTH_PT = 595.28;
+const PAGE_HEIGHT_PT = 841.89;
+const DISPLAY_WIDTH = 820;
+
+function scaledFieldStyle(field, scale) {
+  return {
+    position: 'absolute',
+    left: `${field.x * scale}px`,
+    top: `${field.y * scale}px`,
+    width: `${field.width * scale}px`,
+    height: `${field.height * scale}px`,
+    boxSizing: 'border-box'
+  };
 }
 
-function fieldLabel(name) {
-  return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+function PdfFieldInput({ field, scale, value, onChange }) {
+  const baseStyle = scaledFieldStyle(field, scale);
+  const fontSize = Math.max(8, Math.min(12, 7.5 * scale * 0.92));
+
+  if (field.type === 'checkbox') {
+    const size = Math.max(10, Math.min(field.height * scale, 16));
+    return (
+      <input
+        type="checkbox"
+        checked={Boolean(value)}
+        onChange={(e) => onChange(field.name, e.target.checked)}
+        title={field.name}
+        style={{
+          ...baseStyle,
+          margin: 0,
+          width: `${size}px`,
+          height: `${size}px`,
+          cursor: 'pointer',
+          accentColor: '#1A7A6E'
+        }}
+      />
+    );
+  }
+
+  const shared = {
+    ...baseStyle,
+    margin: 0,
+    padding: '1px 2px',
+    border: '1px solid rgba(26, 122, 110, 0.55)',
+    borderRadius: '1px',
+    background: 'rgba(255, 255, 255, 0.88)',
+    fontSize: `${fontSize}px`,
+    lineHeight: 1.2,
+    fontFamily: 'Helvetica, Arial, sans-serif',
+    color: '#1C1C1C',
+    outline: 'none'
+  };
+
+  if (field.type === 'textarea') {
+    return (
+      <textarea
+        value={value ?? ''}
+        onChange={(e) => onChange(field.name, e.target.value)}
+        title={field.name}
+        style={{
+          ...shared,
+          resize: 'none',
+          overflow: 'auto'
+        }}
+      />
+    );
+  }
+
+  return (
+    <input
+      type="text"
+      value={value ?? ''}
+      onChange={(e) => onChange(field.name, e.target.value)}
+      title={field.name}
+      style={shared}
+    />
+  );
+}
+
+function PdfFormPage({ pageIndex, scale, fields, values, onFieldChange, canvasRef }) {
+  const pageFields = fields.filter((f) => f.pageIndex === pageIndex);
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: `${PAGE_WIDTH_PT * scale}px`,
+        height: `${PAGE_HEIGHT_PT * scale}px`,
+        margin: '0 auto 1.25rem',
+        boxShadow: '0 4px 18px rgba(15, 23, 42, 0.12)',
+        background: '#fff'
+      }}
+    >
+      <canvas
+        ref={canvasRef}
+        style={{
+          display: 'block',
+          width: `${PAGE_WIDTH_PT * scale}px`,
+          height: `${PAGE_HEIGHT_PT * scale}px`
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          pointerEvents: 'none'
+        }}
+      >
+        {pageFields.map((field) => (
+          <div key={field.name} style={{ pointerEvents: 'auto' }}>
+            <PdfFieldInput field={field} scale={scale} value={values[field.name]} onChange={onFieldChange} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSaved }) {
@@ -39,9 +128,19 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
   const [values, setValues] = useState({});
   const [schema, setSchema] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pdfLoading, setPdfLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedAt, setSavedAt] = useState('');
+  const [pageCount, setPageCount] = useState(0);
+  const [scale, setScale] = useState(DISPLAY_WIDTH / PAGE_WIDTH_PT);
+
+  const pdfDocRef = useRef(null);
+  const canvasRefs = useRef([]);
+
+  const setFieldValue = useCallback((name, value) => {
+    setValues((prev) => ({ ...prev, [name]: value }));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,19 +164,59 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
     };
   }, [recordId]);
 
-  const groupedFields = useMemo(() => {
-    const groups = new Map(GROUP_ORDER.map((g) => [g, []]));
-    for (const field of schema) {
-      const group = fieldGroup(field.name);
-      if (!groups.has(group)) groups.set(group, []);
-      groups.get(group).push(field);
-    }
-    return GROUP_ORDER.map((name) => ({ name, fields: groups.get(name) || [] })).filter((g) => g.fields.length > 0);
-  }, [schema]);
+  useEffect(() => {
+    let cancelled = false;
+    setPdfLoading(true);
+    const loadingTask = getDocument({
+      url: activityRiskAssessments.masterFileUrl(),
+      withCredentials: true
+    });
+    loadingTask.promise
+      .then((pdf) => {
+        if (cancelled) return;
+        pdfDocRef.current = pdf;
+        setPageCount(pdf.numPages);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message || 'Could not load PDF layout.');
+      })
+      .finally(() => {
+        if (!cancelled) setPdfLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      loadingTask.destroy?.();
+    };
+  }, []);
 
-  const setFieldValue = (name, value) => {
-    setValues((prev) => ({ ...prev, [name]: value }));
-  };
+  const pageIndexes = useMemo(() => Array.from({ length: pageCount }, (_, i) => i), [pageCount]);
+
+  useEffect(() => {
+    const pdf = pdfDocRef.current;
+    if (!pdf || pdfLoading || !pageCount) return;
+
+    let cancelled = false;
+    (async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      for (let i = 0; i < pageCount; i += 1) {
+        if (cancelled) return;
+        const canvas = canvasRefs.current[i];
+        if (!canvas) continue;
+        const page = await pdf.getPage(i + 1);
+        const viewport = page.getViewport({ scale });
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      }
+    })().catch((e) => {
+      if (!cancelled) setError(e.message || 'Could not render PDF pages.');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfLoading, pageCount, scale, schema.length]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -92,6 +231,8 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
       setSaving(false);
     }
   };
+
+  const busy = loading || pdfLoading;
 
   return (
     <div
@@ -113,19 +254,27 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
       <div
         className="card"
         style={{
-          width: 'min(920px, 100%)',
-          maxHeight: '92vh',
+          width: 'min(980px, 100%)',
+          maxHeight: '94vh',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
           margin: 0
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            alignItems: 'flex-start',
+            marginBottom: '0.75rem'
+          }}
+        >
           <div>
-            <h3 style={{ margin: 0 }}>Edit risk assessment</h3>
+            <h3 style={{ margin: 0 }}>Complete risk assessment</h3>
             <p className="forms-muted" style={{ margin: '0.35rem 0 0', fontSize: '0.9rem' }}>
-              Fill in the form below and click Save. Use Preview PDF to see the completed document.
+              Fill in the form on the PDF layout below. Tick boxes and type directly where shown, then click Save.
             </p>
           </div>
           <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>
@@ -133,87 +282,56 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
           </button>
         </div>
 
-        {loading ? (
-          <p className="forms-muted">Loading…</p>
-        ) : (
-          <>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '0.75rem' }}>
-              <div className="form-group" style={{ flex: 1, minWidth: 220, marginBottom: 0 }}>
-                <label>Title</label>
-                <input className="form-input" value={title} onChange={(e) => setTitle(e.target.value)} />
-              </div>
-              <a
-                href={activityRiskAssessments.recordFileUrl(recordId)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-secondary btn-sm"
-              >
-                Preview PDF
-              </a>
-              <button type="button" className="btn btn-primary btn-sm" disabled={saving || !title.trim()} onClick={handleSave}>
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '0.75rem' }}>
+          <div className="form-group" style={{ flex: 1, minWidth: 220, marginBottom: 0 }}>
+            <label>Title</label>
+            <input className="form-input" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <a
+            href={activityRiskAssessments.recordFileUrl(recordId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-secondary btn-sm"
+          >
+            Preview PDF
+          </a>
+          <button type="button" className="btn btn-primary btn-sm" disabled={saving || !title.trim()} onClick={handleSave}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
 
-            {error ? <p style={{ color: '#991b1b', marginTop: 0 }}>{error}</p> : null}
-            {savedAt ? <p style={{ color: '#166534', marginTop: 0, fontSize: '0.9rem' }}>Saved at {savedAt}.</p> : null}
+        {error ? <p style={{ color: '#991b1b', marginTop: 0 }}>{error}</p> : null}
+        {savedAt ? <p style={{ color: '#166534', marginTop: 0, fontSize: '0.9rem' }}>Saved at {savedAt}.</p> : null}
 
-            <div style={{ overflow: 'auto', flex: 1, paddingRight: '0.25rem' }}>
-              {groupedFields.map((group) => (
-                <section key={group.name} style={{ marginBottom: '1.25rem' }}>
-                  <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.95rem', color: '#334155' }}>{group.name}</h4>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-                      gap: '0.65rem 0.85rem'
-                    }}
-                  >
-                    {group.fields.map((field) => {
-                      const value = values[field.name];
-                      if (field.type === 'checkbox') {
-                        return (
-                          <label
-                            key={field.name}
-                            style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem', fontSize: '0.88rem' }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={Boolean(value)}
-                              onChange={(e) => setFieldValue(field.name, e.target.checked)}
-                              style={{ marginTop: '0.15rem' }}
-                            />
-                            <span>{fieldLabel(field.name)}</span>
-                          </label>
-                        );
-                      }
-                      const isTextarea = field.type === 'textarea';
-                      return (
-                        <div key={field.name} className="form-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontSize: '0.82rem' }}>{fieldLabel(field.name)}</label>
-                          {isTextarea ? (
-                            <textarea
-                              className="form-input"
-                              rows={3}
-                              value={value ?? ''}
-                              onChange={(e) => setFieldValue(field.name, e.target.value)}
-                            />
-                          ) : (
-                            <input
-                              className="form-input"
-                              value={value ?? ''}
-                              onChange={(e) => setFieldValue(field.name, e.target.value)}
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </>
-        )}
+        <div
+          style={{
+            overflow: 'auto',
+            flex: 1,
+            padding: '0.5rem',
+            background: '#e2e8f0',
+            borderRadius: 8
+          }}
+        >
+          {busy ? (
+            <p className="forms-muted" style={{ textAlign: 'center', padding: '2rem 0' }}>
+              Loading PDF form…
+            </p>
+          ) : (
+            pageIndexes.map((pageIndex) => (
+              <PdfFormPage
+                key={pageIndex}
+                pageIndex={pageIndex}
+                scale={scale}
+                fields={schema}
+                values={values}
+                onFieldChange={setFieldValue}
+                canvasRef={(el) => {
+                  canvasRefs.current[pageIndex] = el;
+                }}
+              />
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

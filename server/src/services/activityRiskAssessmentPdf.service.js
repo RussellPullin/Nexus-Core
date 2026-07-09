@@ -694,13 +694,32 @@ export function bundledMasterPath() {
 export async function listActivityRiskPdfFieldSchema(pdfBytes) {
   const pdfDoc = await PdfLibDocument.load(pdfBytes);
   const form = pdfDoc.getForm();
+  const pages = pdfDoc.getPages();
+  const pageRefs = pages.map((page) => page.ref.toString());
+
   return form.getFields().map((field) => {
     const name = field.getName();
     const ctor = field.constructor.name;
     let type = 'text';
     if (ctor === 'PDFCheckBox') type = 'checkbox';
     else if (ctor === 'PDFTextField') type = field.isMultiline() ? 'textarea' : 'text';
-    return { name, type };
+
+    const widget = field.acroField.getWidgets()[0];
+    const rect = widget.getRectangle();
+    const pageIndex = Math.max(0, pageRefs.indexOf(widget.P()?.toString() ?? ''));
+    const pageHeight = pages[pageIndex]?.getHeight() ?? PH;
+
+    return {
+      name,
+      type,
+      pageIndex,
+      x: rect.x,
+      y: pageHeight - rect.y - rect.height,
+      width: rect.width,
+      height: rect.height,
+      pageWidth: PW,
+      pageHeight
+    };
   });
 }
 

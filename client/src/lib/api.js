@@ -114,6 +114,7 @@ export const microsoftDrive = {
 export const activityRiskAssessments = {
   list: () => fetchApi('/activity-risk-assessments'),
   fieldSchema: () => fetchApi('/activity-risk-assessments/field-schema'),
+  masterFileUrl: () => `${API}/activity-risk-assessments/master/file`,
   create: (activity_name) =>
     fetchApi('/activity-risk-assessments', { method: 'POST', body: JSON.stringify({ activity_name }) }),
   delete: (id) => fetchApi(`/activity-risk-assessments/${encodeURIComponent(id)}`, { method: 'DELETE' }),

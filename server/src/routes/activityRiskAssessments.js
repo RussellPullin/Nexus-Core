@@ -11,6 +11,7 @@ import {
   ensureOrgActivityRiskTemplates,
   generateActivityRiskRecordPdfBuffer,
   getActivityRiskFieldSchema,
+  getActivityRiskMasterPdfBuffer,
   getActivityRiskRecord,
   getActivityRiskTemplateFilePath,
   listActivityRiskRecords,
@@ -43,7 +44,20 @@ router.get('/field-schema', async (req, res) => {
   try {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
     const fields = await getActivityRiskFieldSchema();
-    res.json({ fields });
+    res.json({ fields, pageWidth: 595.28, pageHeight: 841.89 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/activity-risk-assessments/master/file — blank layout PDF for in-app editor */
+router.get('/master/file', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const buffer = await getActivityRiskMasterPdfBuffer();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="health-safety-risk-assessment-blank.pdf"');
+    res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

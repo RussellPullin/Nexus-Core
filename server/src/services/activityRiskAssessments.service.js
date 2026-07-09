@@ -289,6 +289,10 @@ export async function getActivityRiskFieldSchema() {
   return cachedFieldSchema;
 }
 
+export async function getActivityRiskMasterPdfBuffer() {
+  return masterPdfBuffer();
+}
+
 function recordHasFilledContent(fieldValues) {
   if (!fieldValues || typeof fieldValues !== 'object') return false;
   return Object.values(fieldValues).some((value) => {
