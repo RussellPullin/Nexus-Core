@@ -309,12 +309,19 @@ export default function StaffProfile() {
     setOnboardPackFeedback(null);
     try {
       const result = await staff.startOnboarding(id, payload);
-      const count = result?.attachment_count ?? 0;
-      const attachmentNote =
-        count === 0
-          ? 'Onboarding email sent (form link only, no attachments).'
-          : `Onboarding email sent with ${count} attachment${count === 1 ? '' : 's'}.`;
-      setOnboardPackFeedback({ type: 'success', message: attachmentNote });
+      const policyCount = result?.attachment_count ?? 0;
+      const sigCount = result?.signature_request_count ?? result?.signature_requests?.length ?? 0;
+      let message;
+      if (policyCount > 0 && sigCount > 0) {
+        message = `Email sent with ${policyCount} policy PDF${policyCount === 1 ? '' : 's'}. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Dropbox Sign.`;
+      } else if (policyCount > 0) {
+        message = `Onboarding email sent with ${policyCount} policy PDF attachment${policyCount === 1 ? '' : 's'}.`;
+      } else if (sigCount > 0) {
+        message = `Onboarding email sent. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Dropbox Sign.`;
+      } else {
+        message = 'Onboarding email sent (form link only, no attachments).';
+      }
+      setOnboardPackFeedback({ type: 'success', message });
       load();
     } catch (err) {
       const message = err.message || 'Could not send onboarding email';

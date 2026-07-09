@@ -531,9 +531,21 @@ export default function OnboardingPage() {
   const handleConfirmSendParticipantPack = async (payload) => {
     setWorking(true);
     try {
-      await onboarding.sendOnboardingPack(id, payload);
+      const result = await onboarding.sendOnboardingPack(id, payload);
       await refresh();
-      alert('Onboarding documents emailed to the participant.');
+      const policyCount = result?.attachment_count ?? 0;
+      const sigCount = result?.signature_request_count ?? result?.signature_requests?.length ?? 0;
+      let message;
+      if (policyCount > 0 && sigCount > 0) {
+        message = `Email sent with ${policyCount} policy PDF${policyCount === 1 ? '' : 's'}. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Dropbox Sign.`;
+      } else if (policyCount > 0) {
+        message = `Onboarding documents emailed with ${policyCount} PDF attachment${policyCount === 1 ? '' : 's'}.`;
+      } else if (sigCount > 0) {
+        message = `${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Dropbox Sign. A notification email was also sent.`;
+      } else {
+        message = 'Onboarding documents emailed to the participant.';
+      }
+      alert(message);
     } finally {
       setWorking(false);
     }

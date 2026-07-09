@@ -8,7 +8,7 @@ const DROPBOX_SIGN_API_BASE = 'https://api.hellosign.com/v3';
 // Keys expire after 5 minutes to prevent memory leaks.
 const pendingBuffers = new Map();
 
-function hasConfiguredDropboxForOrg(orgId) {
+export function hasConfiguredDropboxForOrg(orgId) {
   if (orgId) {
     const r = db
       .prepare(`SELECT dropbox_sign_access_token FROM business_settings WHERE org_id = ?`)
@@ -203,6 +203,37 @@ async function sendSignatureRequest(orgId, {
     throw new Error(msg);
   }
   return body.signature_request?.signature_request_id || body.signature_request_id;
+}
+
+/**
+ * Send one or more PDFs in a single Dropbox Sign signature request.
+ * @param {Array<{ buffer: Buffer, filename: string, formFields?: object[] }>} documents
+ */
+export async function sendMultiDocumentSignatureRequest(orgId, {
+  signers,
+  signerName,
+  signerEmail,
+  title,
+  subject,
+  message,
+  documents
+}) {
+  if (!hasConfiguredDropboxForOrg(orgId)) {
+    throw new Error('Dropbox Sign is not configured for this organisation.');
+  }
+  const files = (documents || []).map((d) => ({ buffer: d.buffer, filename: d.filename }));
+  const formFieldsPerDocument = (documents || []).map((d) => d.formFields || []);
+  const hasFields = formFieldsPerDocument.some((pageFields) => pageFields?.length);
+  return sendSignatureRequest(orgId, {
+    signers,
+    signerName,
+    signerEmail,
+    title,
+    subject,
+    message,
+    files,
+    formFieldsPerDocument: hasFields ? formFieldsPerDocument : null
+  });
 }
 
 export async function createAgreementWithDocument({

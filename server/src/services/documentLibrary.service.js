@@ -52,6 +52,64 @@ export const VALID_LIBRARY_PACKS = new Set([
   'compliance_register'
 ]);
 
+const ONBOARDING_PACKS = new Set(['participant_onboarding', 'staff_onboarding']);
+const EXCLUSIVE_PACKS = new Set(['policy_library', 'compliance_register']);
+
+/**
+ * Resolve manifest `packs` from either a `packs` array or legacy single `pack` string.
+ * @param {object} manifest
+ * @returns {string[]}
+ */
+export function normalizeManifestPacks(manifest) {
+  if (!manifest || typeof manifest !== 'object') return [];
+  if (Array.isArray(manifest.packs) && manifest.packs.length) {
+    return manifest.packs.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim());
+  }
+  if (typeof manifest.pack === 'string' && manifest.pack.trim()) {
+    return [manifest.pack.trim()];
+  }
+  return [];
+}
+
+/**
+ * @param {string[]} packs
+ * @returns {string[]}
+ */
+export function validateLibraryPacks(packs) {
+  if (!Array.isArray(packs)) {
+    throw new Error('packs must be an array');
+  }
+  if (packs.length === 0) return [];
+  const unique = [...new Set(packs.map((p) => String(p).trim()).filter(Boolean))];
+  if (unique.length !== packs.length) {
+    throw new Error('packs must not contain duplicates');
+  }
+  for (const p of unique) {
+    if (!VALID_LIBRARY_PACKS.has(p)) {
+      throw new Error(`pack must be one of: ${[...VALID_LIBRARY_PACKS].join(', ')}`);
+    }
+  }
+  if (unique.includes('policy_library') && unique.length > 1) {
+    throw new Error('policy_library cannot be combined with other packs');
+  }
+  if (unique.includes('compliance_register') && unique.length > 1) {
+    throw new Error('compliance_register cannot be combined with other packs');
+  }
+  return unique;
+}
+
+/** Write normalized `packs` onto manifest; keep legacy `pack` as first entry for backward compat. */
+function applyPacksToManifest(manifest, packs) {
+  if (!packs.length) {
+    delete manifest.packs;
+    delete manifest.pack;
+  } else {
+    manifest.packs = packs;
+    manifest.pack = packs[0];
+  }
+  return manifest;
+}
+
 /**
  * @param {string} [rootDir]
  * @returns {{ scanned: number, registered: number, skipped: {slug:string, reason:string}[], warnings: string[] }}
@@ -113,6 +171,15 @@ export function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) {
     if (validation.error) {
       result.skipped.push({ slug: manifest.slug || dirName, reason: validation.error });
       continue;
+    }
+    const packs = normalizeManifestPacks(manifest);
+    if (packs.length) {
+      try {
+        applyPacksToManifest(manifest, validateLibraryPacks(packs));
+      } catch (err) {
+        result.skipped.push({ slug: manifest.slug, reason: err.message });
+        continue;
+      }
     }
     const templateFilePath = join(dirPath, manifest.template_file);
     if (!existsSync(templateFilePath)) {
@@ -239,9 +306,11 @@ function enrichLibraryMasterRow(row) {
   } catch {
     /* ignore malformed manifest */
   }
+  const packs = normalizeManifestPacks(manifest);
   return {
     ...row,
-    pack: manifest.pack || null,
+    packs,
+    pack: packs[0] || manifest.pack || null,
     signature_count: Number(manifest.signature_count) || 0,
     category: row.category || manifest.category || null,
     required_signer_role: row.required_signer_role ?? manifest.required_signer_role ?? null,
@@ -269,17 +338,31 @@ export function listLibraryMasters(orgId = null) {
   return rows.map(enrichLibraryMasterRow);
 }
 
+function updateCataloguePacks(slug, packs) {
+  const cataloguePath = join(defaultLibraryRoot, '_catalogue.json');
+  if (!existsSync(cataloguePath)) return;
+  let catalogue;
+  try {
+    catalogue = JSON.parse(readFileSync(cataloguePath, 'utf8'));
+  } catch (err) {
+    throw new Error(`_catalogue.json invalid JSON: ${err.message}`);
+  }
+  if (!Array.isArray(catalogue)) return;
+  const idx = catalogue.findIndex((entry) => entry?.slug === slug);
+  if (idx < 0) return;
+  applyPacksToManifest(catalogue[idx], packs);
+  writeFileSync(cataloguePath, `${JSON.stringify(catalogue, null, 2)}\n`);
+}
+
 /**
- * Change a master's automation pack. Updates manifest.json on disk, the catalogue index,
+ * Change a master's automation packs. Updates manifest.json on disk, the catalogue index,
  * and the DB manifest_json row. Affects all organisations (global master change).
  *
  * @param {string} masterId
- * @param {string} pack
+ * @param {string[]} packs
  */
-export function updateLibraryMasterPack(masterId, pack) {
-  if (!VALID_LIBRARY_PACKS.has(pack)) {
-    throw new Error(`pack must be one of: ${[...VALID_LIBRARY_PACKS].join(', ')}`);
-  }
+export function updateLibraryMasterPacks(masterId, packs) {
+  const validated = validateLibraryPacks(packs);
   const master = db.prepare('SELECT * FROM document_library_masters WHERE id = ? AND is_active = 1').get(masterId);
   if (!master) throw new Error('Master not found');
 
@@ -295,25 +378,9 @@ export function updateLibraryMasterPack(masterId, pack) {
   } catch (err) {
     throw new Error(`manifest.json invalid JSON: ${err.message}`);
   }
-  manifest.pack = pack;
+  applyPacksToManifest(manifest, validated);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-
-  const cataloguePath = join(defaultLibraryRoot, '_catalogue.json');
-  if (existsSync(cataloguePath)) {
-    let catalogue;
-    try {
-      catalogue = JSON.parse(readFileSync(cataloguePath, 'utf8'));
-    } catch (err) {
-      throw new Error(`_catalogue.json invalid JSON: ${err.message}`);
-    }
-    if (Array.isArray(catalogue)) {
-      const idx = catalogue.findIndex((entry) => entry?.slug === slug);
-      if (idx >= 0) {
-        catalogue[idx].pack = pack;
-        writeFileSync(cataloguePath, `${JSON.stringify(catalogue, null, 2)}\n`);
-      }
-    }
-  }
+  updateCataloguePacks(slug, validated);
 
   db.prepare(`
     UPDATE document_library_masters
@@ -324,6 +391,17 @@ export function updateLibraryMasterPack(masterId, pack) {
   const updated = db.prepare('SELECT * FROM document_library_masters WHERE id = ?').get(masterId);
   return enrichLibraryMasterRow(updated);
 }
+
+/**
+ * @deprecated Use updateLibraryMasterPacks — kept for backward-compatible single-pack updates.
+ * @param {string} masterId
+ * @param {string} pack
+ */
+export function updateLibraryMasterPack(masterId, pack) {
+  return updateLibraryMasterPacks(masterId, [pack]);
+}
+
+export { ONBOARDING_PACKS, EXCLUSIVE_PACKS };
 
 function writeManifestToDisk(slug, manifest) {
   const manifestPath = join(defaultLibraryRoot, slug, 'manifest.json');

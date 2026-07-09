@@ -637,6 +637,10 @@ export const documentLibrary = {
     method: 'PATCH',
     body: JSON.stringify({ pack })
   }),
+  updateMasterPacks: (masterId, packs) => fetchApi(`/document-library/masters/${masterId}/packs`, {
+    method: 'PATCH',
+    body: JSON.stringify({ packs })
+  }),
   updateMasterContextTags: (masterId, tags) => fetchApi(`/document-library/masters/${masterId}/context-tags`, {
     method: 'PATCH',
     body: JSON.stringify(tags)

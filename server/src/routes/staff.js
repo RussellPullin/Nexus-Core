@@ -14,7 +14,7 @@ import { computeHoursFromShifts } from '../services/shiftHours.service.js';
 import { ensureProviderProfile, assertStaffOnboardingReady } from '../services/onboarding.service.js';
 import { orchestrateStaffOnboarding } from '../services/staffOnboardingOrchestrator.service.js';
 import { generateStaffContractBuffers } from '../services/staffContractFill.service.js';
-import { buildOnboardingAttachments, validateOnboardingMasterIds } from '../services/onboardingDocumentPacks.service.js';
+import { prepareSplitOnboardingSend } from '../services/onboardingDocumentSend.service.js';
 import { VALID_STAFF_ONBOARDING_ROLES } from '../../../shared/onboardingDocumentContext.js';
 import { getStaffIntakeFieldMap, mergeStaffIntakeForProfile } from '../services/staffOnboardingSync.service.js';
 import { STAFF_ONBOARDING_FIELD_DEFS } from '../../../shared/onboardingFieldRegistry.js';
@@ -1093,36 +1093,64 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
       subject = `${orgName}: complete your onboarding`;
       text = `Hi ${s.name},\n\n${orgName} has invited you to complete your staff onboarding. Please fill out the form at the link below.\n\n`;
       text += `Onboarding form: ${formLink}\n\n`;
-      text += `The form will collect your personal and employment details, compliance documents, and policy acknowledgements. Please sign to confirm you have read and acknowledged the company policies (attached).\n\n`;
+      text += `The form will collect your personal and employment details, compliance documents, and policy acknowledgements.\n\n`;
       text += `If you have any questions, contact your manager.`;
     }
 
     const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
     const masterIds = req.body?.master_ids;
-    const hasSelection = Array.isArray(masterIds);
     const staffRole = req.body?.staff_role || null;
     if (staffRole && !VALID_STAFF_ONBOARDING_ROLES.has(staffRole)) {
       return res.status(400).json({ error: 'invalid staff_role' });
     }
     const includeExtraPdfs = req.body?.include_extra_pdfs !== false;
-    if (hasSelection) {
-      validateOnboardingMasterIds(profile?.organisation_id, 'staff_onboarding', masterIds);
-    }
+
     let allAttachments = [];
+    let signatureRequests = [];
     try {
-      const { attachments } = await buildOnboardingAttachments(
-        profile?.organisation_id,
+      const splitSend = await prepareSplitOnboardingSend({
+        orgId: profile?.organisation_id,
         providerProfileId,
-        'staff_onboarding',
-        {
-          staff: staffFull,
-          masterIds: hasSelection ? masterIds : null,
-          includeExtraPdfs
+        workflow: 'staff_onboarding',
+        masterIds: Array.isArray(masterIds) ? masterIds : undefined,
+        staff: staffFull,
+        includeExtraPdfs,
+        orgName
+      });
+      allAttachments = splitSend.policyAttachments;
+      signatureRequests = splitSend.signatureRequests;
+
+      if (
+        !allAttachments.length &&
+        !signatureRequests.length &&
+        !(includeExtraPdfs && splitSend.hasSelection === false)
+      ) {
+        const hasExplicitEmptySelection = Array.isArray(masterIds) && masterIds.length === 0 && !includeExtraPdfs;
+        if (hasExplicitEmptySelection) {
+          // Allow form-link-only email (UI confirms with user).
+        } else if (Array.isArray(masterIds) && masterIds.length > 0) {
+          return res.status(400).json({
+            error: 'No documents to send. Select policy documents and/or signature forms.',
+            code: 'EMPTY_SELECTION'
+          });
         }
-      );
-      allAttachments = attachments;
+      }
     } catch (err) {
-      console.warn('[start-onboarding] onboarding attachments build failed:', err?.message);
+      if (err.code === 'DROPBOX_SIGN_NOT_CONNECTED' || err.code === 'DROPBOX_SIGN_NOT_ENABLED') {
+        return res.status(400).json({ error: err.message, code: err.code });
+      }
+      if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING') {
+        return res.status(400).json({ error: err.message, code: err.code });
+      }
+      console.warn('[start-onboarding] onboarding send failed:', err?.message);
+      return res.status(400).json({ error: err.message || 'Could not prepare onboarding documents.' });
+    }
+
+    if (signatureRequests.length) {
+      text += `\n\n${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately via Dropbox Sign for e-signature. Check your inbox for signing requests from Dropbox Sign.\n`;
+    }
+    if (allAttachments.length) {
+      text += `\nPolicy and information documents are attached to this email.\n`;
     }
 
     const attachmentsForEmail = allAttachments.map((a) => ({
@@ -1136,6 +1164,8 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
       message: `Onboarding email sent to ${s.email}`,
       formLink,
       attachment_count: allAttachments.length,
+      signature_requests: signatureRequests,
+      signature_request_count: signatureRequests.length,
       resent: alreadyComplete
     });
   } catch (err) {

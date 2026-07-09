@@ -5,7 +5,8 @@
  *  POST   /document-library/sync                       – re-walk data/forms/templates/library/
  *  POST   /document-library/masters/:id/clone-to-org   – ensure a clone for the requester's org
  *  POST   /document-library/clone-all-to-org           – clone every active master into the requester's org
- *  PATCH  /document-library/masters/:id/pack          – change automation pack (admin/delegate)
+ *  PATCH  /document-library/masters/:id/pack          – change automation pack (admin/delegate, legacy)
+ *  PATCH  /document-library/masters/:id/packs         – change automation packs (admin/delegate)
  *  POST   /document-library/masters/:id/render         – render the document for a participant/staff record
  */
 import { Router } from 'express';
@@ -18,6 +19,7 @@ import {
   cloneAllLibraryMastersForOrg,
   listLibraryMasters,
   updateLibraryMasterPack,
+  updateLibraryMasterPacks,
   updateLibraryMasterContextTags
 } from '../services/documentLibrary.service.js';
 import {
@@ -50,6 +52,20 @@ router.patch('/masters/:id/pack', requireAdminOrDelegate, (req, res) => {
       return res.status(400).json({ error: 'pack is required' });
     }
     const updated = updateLibraryMasterPack(req.params.id, pack.trim());
+    res.json(updated);
+  } catch (err) {
+    const status = /not found/i.test(err.message) ? 404 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+router.patch('/masters/:id/packs', requireAdminOrDelegate, (req, res) => {
+  try {
+    const packs = req.body?.packs;
+    if (!Array.isArray(packs)) {
+      return res.status(400).json({ error: 'packs must be an array' });
+    }
+    const updated = updateLibraryMasterPacks(req.params.id, packs);
     res.json(updated);
   } catch (err) {
     const status = /not found/i.test(err.message) ? 404 : 400;

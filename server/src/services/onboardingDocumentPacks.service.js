@@ -44,7 +44,7 @@ function parseManifest(row) {
 }
 
 /**
- * Active cloned library masters for an org whose manifest `pack` tag matches the
+ * Active cloned library masters for an org whose manifest `packs` (or legacy `pack`) includes the
  * given onboarding workflow. These are the branded documents attached to /
  * acknowledged during onboarding.
  * @param {string|null} orgId
@@ -61,11 +61,17 @@ export function listOnboardingLibraryMasters(orgId, workflow) {
     JOIN document_library_org_clones c ON c.master_id = m.id AND c.org_id = ?
     WHERE c.is_active = 1
       AND m.is_active = 1
-      AND JSON_EXTRACT(m.manifest_json, '$.pack') = ?
+      AND (
+        JSON_EXTRACT(m.manifest_json, '$.pack') = ?
+        OR EXISTS (
+          SELECT 1 FROM json_each(JSON_EXTRACT(m.manifest_json, '$.packs'))
+          WHERE value = ?
+        )
+      )
     ORDER BY m.display_name COLLATE NOCASE
   `
     )
-    .all(orgId, workflow)
+    .all(orgId, workflow, workflow)
     .map((row) => ({
       id: row.id,
       slug: row.slug,
@@ -146,6 +152,26 @@ function resolveMastersForAttachments(orgId, workflow, masterIds) {
   return all.filter((m) => selected.has(m.id));
 }
 
+export function masterRequiresSignature(master) {
+  return (Number(master?.manifest?.signature_count) || 0) > 0;
+}
+
+/**
+ * Split selected (or all) onboarding masters into policy PDFs vs Dropbox Sign forms.
+ * @returns {{ policyMasters: object[], formMasters: object[], policyMasterIds: string[], formMasterIds: string[] }}
+ */
+export function splitOnboardingMasters(orgId, workflow, masterIds) {
+  const masters = resolveMastersForAttachments(orgId, workflow, masterIds);
+  const policyMasters = masters.filter((m) => !masterRequiresSignature(m));
+  const formMasters = masters.filter((m) => masterRequiresSignature(m));
+  return {
+    policyMasters,
+    formMasters,
+    policyMasterIds: policyMasters.map((m) => m.id),
+    formMasterIds: formMasters.map((m) => m.id)
+  };
+}
+
 /**
  * Single source of onboarding email attachments:
  *   1. every branded, active, cloned library document tagged for `workflow`
@@ -159,7 +185,8 @@ function resolveMastersForAttachments(orgId, workflow, masterIds) {
  *   participant?: object|null,
  *   staff?: object|null,
  *   masterIds?: string[]|null,
- *   includeExtraPdfs?: boolean
+ *   includeExtraPdfs?: boolean,
+ *   signatureFilter?: 'all'|'policy_only'|'form_only'
  * }} [context]
  * @returns {Promise<{ attachments: Array<{ filename: string, content: Buffer, contentType: string }> }>}
  */
@@ -167,10 +194,15 @@ export async function buildOnboardingAttachments(
   orgId,
   providerProfileId,
   workflow,
-  { participant = null, staff = null, masterIds = null, includeExtraPdfs = true } = {}
+  { participant = null, staff = null, masterIds = null, includeExtraPdfs = true, signatureFilter = 'all' } = {}
 ) {
   const attachments = [];
-  const masters = resolveMastersForAttachments(orgId, workflow, masterIds);
+  let masters = resolveMastersForAttachments(orgId, workflow, masterIds);
+  if (signatureFilter === 'policy_only') {
+    masters = masters.filter((m) => !masterRequiresSignature(m));
+  } else if (signatureFilter === 'form_only') {
+    masters = masters.filter((m) => masterRequiresSignature(m));
+  }
 
   for (const master of masters) {
     try {

@@ -199,9 +199,10 @@ export default function OnboardingDocumentSelectPanel({
   return (
     <div>
       <p className="forms-muted" style={{ marginTop: 0 }}>
-        Choose {isParticipant ? 'service type' : 'role'} and which documents to attach for{' '}
+        Choose {isParticipant ? 'service type' : 'role'} and which documents to send for{' '}
         <strong>{recipientName || recipientEmail}</strong>
-        {recipientEmail ? ` (${recipientEmail})` : ''}.
+        {recipientEmail ? ` (${recipientEmail})` : ''}. Forms requiring signature are sent via Dropbox Sign;
+        policies and information documents are attached as PDFs in the email.
       </p>
 
       <div style={{ marginBottom: '1rem' }}>
@@ -273,7 +274,10 @@ export default function OnboardingDocumentSelectPanel({
                     Requires signature ({signatureDocs.length})
                   </div>
                   <p className="forms-muted" style={{ fontSize: '0.82rem', margin: '0 0 0.35rem' }}>
-                    Worker declarations, letter of engagement, and other forms the staff member must sign.
+                    Forms are sent via Dropbox Sign for e-signature — not as PDF attachments.
+                    {isParticipant
+                      ? ' Participant or guardian receives a separate signing request.'
+                      : ' The staff member receives a separate signing request.'}
                   </p>
                   <DocumentChecklist
                     docs={signatureDocs}
@@ -291,7 +295,7 @@ export default function OnboardingDocumentSelectPanel({
                     Policies &amp; information ({policyDocs.length})
                   </div>
                   <p className="forms-muted" style={{ fontSize: '0.82rem', margin: '0 0 0.35rem' }}>
-                    Policies and reference documents for acknowledgement or information only.
+                    Attached as branded PDFs in the onboarding email (information and acknowledgement only).
                   </p>
                   <DocumentChecklist
                     docs={policyDocs}

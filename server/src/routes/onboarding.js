@@ -39,7 +39,7 @@ import { fileURLToPath } from 'url';
 import { fillConsentForm, getConsentFormPath, convertDocxToPdf } from '../services/consentForm.service.js';
 import { tryPushParticipantDocument } from '../services/orgOnedriveSync.service.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from '../services/notification.service.js';
-import { buildOnboardingAttachments, validateOnboardingMasterIds } from '../services/onboardingDocumentPacks.service.js';
+import { prepareSplitOnboardingSend } from '../services/onboardingDocumentSend.service.js';
 import { VALID_PARTICIPANT_SERVICE_TYPES } from '../../../shared/onboardingDocumentContext.js';
 import { orchestrateParticipantOnboarding } from '../services/participantOnboardingOrchestrator.service.js';
 import {
@@ -280,25 +280,40 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
 
     const pp = db.prepare(`SELECT organisation_id FROM provider_profiles WHERE id = ?`).get(onboarding.provider_profile_id);
     const orgId = pp?.organisation_id || null;
+    const org = orgId ? db.prepare(`SELECT name FROM organisations WHERE id = ?`).get(orgId) : null;
+    const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
     const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(req.params.id);
     const includeExtraPdfs = req.body?.include_extra_pdfs !== false;
-    if (hasSelection) {
-      validateOnboardingMasterIds(orgId, 'participant_onboarding', masterIds);
-    }
-    const { attachments } = await buildOnboardingAttachments(
-      orgId,
-      onboarding.provider_profile_id,
-      'participant_onboarding',
-      {
+
+    let attachments = [];
+    let signatureRequests = [];
+    try {
+      const splitSend = await prepareSplitOnboardingSend({
+        orgId,
+        providerProfileId: onboarding.provider_profile_id,
+        workflow: 'participant_onboarding',
+        masterIds: hasSelection ? masterIds : undefined,
         participant: fullParticipant,
-        masterIds: hasSelection ? masterIds : null,
-        includeExtraPdfs
+        includeExtraPdfs,
+        orgName
+      });
+      attachments = splitSend.policyAttachments;
+      signatureRequests = splitSend.signatureRequests;
+    } catch (err) {
+      if (err.code === 'DROPBOX_SIGN_NOT_CONNECTED' || err.code === 'DROPBOX_SIGN_NOT_ENABLED') {
+        return res.status(400).json({ error: err.message, code: err.code });
       }
-    );
-    if (!attachments.length) {
+      if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING') {
+        return res.status(400).json({ error: err.message, code: err.code });
+      }
+      throw err;
+    }
+
+    if (!attachments.length && !signatureRequests.length) {
       return res.status(400).json({
         error:
-          'No documents to attach. Add participant onboarding documents to the NDIS library (Forms → Document library) or upload extra organisation PDFs under Forms.'
+          'No documents to send. Add participant onboarding documents to the NDIS library (Forms → Document library) or upload extra organisation PDFs under Forms.',
+        code: 'EMPTY_SELECTION'
       });
     }
 
@@ -306,12 +321,16 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
       `UPDATE participant_onboarding SET last_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
     ).run(onboarding.id);
 
-    const org = orgId ? db.prepare(`SELECT name FROM organisations WHERE id = ?`).get(orgId) : null;
-    const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
-
     const subject = `${orgName}: onboarding documents`;
     let text = `Hi ${participant.name || 'there'},\n\n`;
-    text += `Please find attached documents from ${orgName}. Keep them for your records.\n\n`;
+    if (attachments.length) {
+      text += `Please find attached documents from ${orgName}. Keep them for your records.\n\n`;
+    } else {
+      text += `${orgName} has sent you onboarding forms to complete.\n\n`;
+    }
+    if (signatureRequests.length) {
+      text += `${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately via Dropbox Sign for e-signature. Check your inbox for signing requests from Dropbox Sign.\n\n`;
+    }
     text += `Your coordinator will guide you through the rest of onboarding in Nexus Core.\n\n`;
     text += `If you have questions, reply to this email.\n`;
 
@@ -331,13 +350,19 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
       entityId: onboarding.id,
       newValue: {
         attachment_count: attachments.length,
+        signature_request_count: signatureRequests.length,
         ...(hasSelection ? { master_ids: masterIds, participant_service_type: participantServiceType } : {})
       },
       sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
       userAgent: req.headers['user-agent'] || null
     });
 
-    res.json({ ok: true, attachment_count: attachments.length });
+    res.json({
+      ok: true,
+      attachment_count: attachments.length,
+      signature_requests: signatureRequests,
+      signature_request_count: signatureRequests.length
+    });
   } catch (err) {
     console.error('[send-onboarding-pack]', err);
     res.status(400).json({ error: formatSmtpAuthError(err) });

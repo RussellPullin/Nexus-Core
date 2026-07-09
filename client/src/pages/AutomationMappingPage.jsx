@@ -37,11 +37,21 @@ const PACK_OPTIONS = [
   'compliance_register'
 ];
 
+  { value: 'participant_onboarding', label: 'Participant onboarding emails' },
+  { value: 'staff_onboarding', label: 'Staff onboarding emails' }
+];
+
+const EXCLUSIVE_PACK_OPTIONS = [
+  { value: 'policy_library', label: 'Library only' },
+  { value: 'compliance_register', label: 'Register template' }
+];
+
 const PACK_IMPACT = {
-  participant_onboarding: 'This document will be automatically attached to participant onboarding emails.',
-  staff_onboarding: 'This document will be attached to staff onboarding emails and staff policy acknowledgement workflows.',
-  policy_library: 'This document will be library only — not auto-emailed in onboarding packs.',
-  compliance_register: 'This document will be used as a register template on the Registers page.'
+  participant_onboarding: 'Included in participant onboarding email attachments.',
+  staff_onboarding: 'Included in staff onboarding emails and policy acknowledgement workflows.',
+  policy_library: 'Library only — not auto-emailed in onboarding packs.',
+  compliance_register: 'Used as a register template on the Registers page.',
+  both_onboarding: 'Included in BOTH participant and staff onboarding emails.'
 };
 
 const LIBRARY_PACK_GROUPS = [
@@ -77,6 +87,16 @@ const PARTICIPANT_SIGNING_FORMS = [
   { name: 'Privacy Consent', note: 'Generated from participant intake data' }
 ];
 
+function docPacks(doc) {
+  if (Array.isArray(doc.packs) && doc.packs.length) return doc.packs;
+  if (doc.pack) return [doc.pack];
+  return [];
+}
+
+function hasBothOnboardingPacks(packs) {
+  return packs.includes('participant_onboarding') && packs.includes('staff_onboarding');
+}
+
 function PackBadge({ pack }) {
   const label = PACK_LABELS[pack] || pack || 'Unassigned';
   return (
@@ -98,6 +118,100 @@ function PackBadge({ pack }) {
   );
 }
 
+function PackBadges({ packs }) {
+  const list = Array.isArray(packs) ? packs : (packs ? [packs] : []);
+  if (!list.length) return <span className="forms-muted">Unassigned</span>;
+  if (hasBothOnboardingPacks(list)) {
+    return (
+      <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center' }}>
+        <PackBadge pack="participant_onboarding" />
+        <PackBadge pack="staff_onboarding" />
+        <span
+          style={{
+            fontSize: '0.7rem',
+            fontWeight: 600,
+            color: '#1d4ed8',
+            background: '#dbeafe',
+            borderRadius: 4,
+            padding: '0.1rem 0.35rem',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          Both workflows
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+      {list.map((pack) => (
+        <PackBadge key={pack} pack={pack} />
+      ))}
+    </span>
+  );
+}
+
+function PackCheckboxes({ doc, canEdit, onPacksChange, isSaving, checkboxRevision }) {
+  const docId = doc.id || doc.slug;
+  const currentPacks = docPacks(doc);
+  const exclusiveSelected = currentPacks.find((p) => p === 'policy_library' || p === 'compliance_register') || null;
+  const onboardingDisabled = Boolean(exclusiveSelected) || isSaving;
+
+  const toggleOnboarding = (packValue, checked) => {
+    const base = currentPacks.filter((p) => p !== 'policy_library' && p !== 'compliance_register');
+    const next = checked ? [...new Set([...base, packValue])] : base.filter((p) => p !== packValue);
+    onPacksChange(doc, next);
+  };
+
+  const toggleExclusive = (packValue, checked) => {
+    onPacksChange(doc, checked ? [packValue] : []);
+  };
+
+  if (!canEdit) {
+    return <PackBadges packs={currentPacks} />;
+  }
+
+  return (
+    <fieldset
+      key={`${docId}-${currentPacks.join(',')}-${checkboxRevision?.[docId] || 0}`}
+      style={{ border: 'none', margin: 0, padding: 0, minWidth: '14rem' }}
+      disabled={isSaving}
+      aria-label={`Workflow packs for ${doc.display_name || doc.name}`}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+        {ONBOARDING_PACK_OPTIONS.map((opt) => (
+          <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', cursor: onboardingDisabled ? 'not-allowed' : 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={currentPacks.includes(opt.value)}
+              disabled={onboardingDisabled}
+              onChange={(e) => toggleOnboarding(opt.value, e.target.checked)}
+            />
+            <span>{opt.label}</span>
+          </label>
+        ))}
+        <div style={{ borderTop: '1px solid #e2e8f0', margin: '0.15rem 0' }} />
+        {EXCLUSIVE_PACK_OPTIONS.map((opt) => (
+          <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', cursor: isSaving ? 'not-allowed' : 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={exclusiveSelected === opt.value}
+              disabled={isSaving}
+              onChange={(e) => toggleExclusive(opt.value, e.target.checked)}
+            />
+            <span>{opt.label}</span>
+          </label>
+        ))}
+      </div>
+      {hasBothOnboardingPacks(currentPacks) ? (
+        <span style={{ display: 'inline-block', marginTop: '0.25rem', fontSize: '0.7rem', fontWeight: 600, color: '#1d4ed8' }}>
+          Both workflows
+        </span>
+      ) : null}
+    </fieldset>
+  );
+}
+
 function CategoryBadge({ category }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85rem', color: '#475569' }}>
@@ -108,25 +222,27 @@ function CategoryBadge({ category }) {
 }
 
 function ContextTagsCell({ doc }) {
-  const pack = doc.pack || '';
-  if (pack === 'participant_onboarding') {
-    return (
-      <span style={{ fontSize: '0.8rem', color: '#475569' }}>
+  const packs = docPacks(doc);
+  const parts = [];
+  if (packs.includes('participant_onboarding')) {
+    parts.push(
+      <span key="participant" style={{ fontSize: '0.8rem', color: '#475569', display: 'block' }}>
         {formatContextTagsForDisplay(doc.participant_service_types, 'participant')}
       </span>
     );
   }
-  if (pack === 'staff_onboarding') {
-    return (
-      <span style={{ fontSize: '0.8rem', color: '#475569' }}>
+  if (packs.includes('staff_onboarding')) {
+    parts.push(
+      <span key="staff" style={{ fontSize: '0.8rem', color: '#475569', display: 'block' }}>
         {formatContextTagsForDisplay(doc.staff_roles, 'staff')}
       </span>
     );
   }
-  return <span className="forms-muted">—</span>;
+  if (!parts.length) return <span className="forms-muted">—</span>;
+  return <>{parts}</>;
 }
 
-function LibraryDocTable({ docs, canEdit, onPackChange, savingByDocId, errorByDocId, packSelectRevision }) {
+function LibraryDocTable({ docs, canEdit, onPacksChange, savingByDocId, errorByDocId, checkboxRevision }) {
   if (!docs.length) {
     return <p className="forms-muted" style={{ margin: 0 }}>No documents in this group.</p>;
   }
@@ -151,7 +267,6 @@ function LibraryDocTable({ docs, canEdit, onPackChange, savingByDocId, errorByDo
             const sigCount = Number(doc.signature_count) || 0;
             const isSaving = savingByDocId?.[docId];
             const rowError = errorByDocId?.[docId];
-            const currentPack = doc.pack || '';
             return (
               <tr key={docId}>
                 <td>
@@ -164,28 +279,13 @@ function LibraryDocTable({ docs, canEdit, onPackChange, savingByDocId, errorByDo
                   <CategoryBadge category={doc.category} />
                 </td>
                 <td>
-                  {canEdit ? (
-                    <select
-                      key={`${docId}-${currentPack}-${packSelectRevision?.[docId] || 0}`}
-                      className="form-input"
-                      style={{ minWidth: '12rem', fontSize: '0.85rem', padding: '0.25rem 0.4rem' }}
-                      value={currentPack}
-                      disabled={isSaving}
-                      onChange={(e) => onPackChange(doc, e.target.value)}
-                      aria-label={`Workflow for ${doc.display_name || doc.name}`}
-                    >
-                      {!PACK_OPTIONS.includes(currentPack) ? (
-                        <option value="">Unassigned</option>
-                      ) : null}
-                      {PACK_OPTIONS.map((pack) => (
-                        <option key={pack} value={pack}>
-                          {PACK_LABELS[pack]}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <PackBadge pack={doc.pack} />
-                  )}
+                  <PackCheckboxes
+                    doc={doc}
+                    canEdit={canEdit}
+                    onPacksChange={onPacksChange}
+                    isSaving={isSaving}
+                    checkboxRevision={checkboxRevision}
+                  />
                   {isSaving ? (
                     <span className="forms-muted" style={{ display: 'block', fontSize: '0.75rem', marginTop: '0.15rem' }}>
                       Saving…
@@ -275,7 +375,7 @@ export default function AutomationMappingPage() {
   const [error, setError] = useState('');
   const [savingByDocId, setSavingByDocId] = useState({});
   const [errorByDocId, setErrorByDocId] = useState({});
-  const [packSelectRevision, setPackSelectRevision] = useState({});
+  const [checkboxRevision, setCheckboxRevision] = useState({});
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -301,19 +401,33 @@ export default function AutomationMappingPage() {
     reload();
   }, [reload]);
 
-  const handlePackChange = useCallback(async (doc, newPack) => {
+  const packsEqual = (a, b) => {
+    const left = [...(a || [])].sort().join(',');
+    const right = [...(b || [])].sort().join(',');
+    return left === right;
+  };
+
+  const describePacksChange = (currentPacks, newPacks) => {
+    if (hasBothOnboardingPacks(newPacks)) return PACK_IMPACT.both_onboarding;
+    if (newPacks.length === 0) return 'This document will not be assigned to any automation pack.';
+    return newPacks.map((p) => PACK_IMPACT[p] || PACK_LABELS[p] || p).join('\n');
+  };
+
+  const handlePacksChange = useCallback(async (doc, newPacks) => {
     const docId = doc.id || doc.slug;
-    const currentPack = doc.pack || '';
-    if (!newPack || newPack === currentPack) return;
+    const currentPacks = docPacks(doc);
+    if (packsEqual(currentPacks, newPacks)) return;
 
     const docName = doc.display_name || doc.name || 'this document';
-    const impact = PACK_IMPACT[newPack] || 'This changes which automation uses this document.';
-    const targetLabel = PACK_LABELS[newPack] || newPack;
+    const impact = describePacksChange(currentPacks, newPacks);
+    const targetLabel = newPacks.length
+      ? newPacks.map((p) => PACK_LABELS[p] || p).join(' + ')
+      : 'Unassigned';
     const confirmed = window.confirm(
-      `Move "${docName}" to ${targetLabel}?\n\n${impact}\n\nThis updates the shared library template for all organisations.`
+      `Update workflow packs for "${docName}" to ${targetLabel}?\n\n${impact}\n\nThis updates the shared library template for all organisations.`
     );
     if (!confirmed) {
-      setPackSelectRevision((prev) => ({ ...prev, [docId]: (prev[docId] || 0) + 1 }));
+      setCheckboxRevision((prev) => ({ ...prev, [docId]: (prev[docId] || 0) + 1 }));
       return;
     }
 
@@ -325,13 +439,13 @@ export default function AutomationMappingPage() {
     });
 
     try {
-      const updated = await documentLibrary.updateMasterPack(docId, newPack);
+      const updated = await documentLibrary.updateMasterPacks(docId, newPacks);
       setMasters((prev) => prev.map((m) => {
         const id = m.id || m.slug;
-        return id === docId ? { ...m, ...updated, pack: updated.pack ?? newPack } : m;
+        return id === docId ? { ...m, ...updated, packs: updated.packs ?? newPacks } : m;
       }));
     } catch (e) {
-      setErrorByDocId((prev) => ({ ...prev, [docId]: e.message || 'Could not update workflow' }));
+      setErrorByDocId((prev) => ({ ...prev, [docId]: e.message || 'Could not update workflow packs' }));
     } finally {
       setSavingByDocId((prev) => {
         const next = { ...prev };
@@ -343,19 +457,29 @@ export default function AutomationMappingPage() {
 
   const tableProps = {
     canEdit: canManageUsers,
-    onPackChange: handlePackChange,
+    onPacksChange: handlePacksChange,
     savingByDocId,
     errorByDocId,
-    packSelectRevision
+    checkboxRevision
   };
 
   const byPack = useMemo(() => {
     const grouped = Object.fromEntries(LIBRARY_PACK_GROUPS.map((g) => [g.pack, []]));
     grouped._other = [];
     for (const doc of masters) {
-      const pack = doc.pack || null;
-      if (pack && grouped[pack]) grouped[pack].push(doc);
-      else grouped._other.push(doc);
+      const packs = docPacks(doc);
+      if (!packs.length) {
+        grouped._other.push(doc);
+        continue;
+      }
+      let placed = false;
+      for (const pack of packs) {
+        if (grouped[pack]) {
+          grouped[pack].push(doc);
+          placed = true;
+        }
+      }
+      if (!placed) grouped._other.push(doc);
     }
     for (const key of Object.keys(grouped)) {
       grouped[key].sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
@@ -376,10 +500,10 @@ export default function AutomationMappingPage() {
           </p>
           <h2 style={{ margin: 0 }}>Automation mapping</h2>
           <p className="forms-lede" style={{ marginTop: '0.5rem', marginBottom: 0, maxWidth: 720 }}>
-            See which documents are linked to each onboarding automation. Library templates are tagged with a{' '}
-            <strong>pack</strong> — that pack controls email attachments and related workflows.
+            See which documents are linked to each onboarding automation. Library templates are tagged with one or more{' '}
+            <strong>packs</strong> — those packs control email attachments and related workflows.
             {canManageUsers
-              ? ' Use the workflow dropdown on each row to assign documents to a pack. Changes apply to the shared library for all organisations.'
+              ? ' Use the checkboxes on each row to assign documents to participant onboarding, staff onboarding, or both. Changes apply to the shared library for all organisations.'
               : ' Pack assignments can only be changed by an admin or delegate.'}
           </p>
         </div>
@@ -397,8 +521,9 @@ export default function AutomationMappingPage() {
       <section className="card forms-section" style={{ marginBottom: '1.25rem', background: '#f8fafc' }}>
         <h2 className="forms-section-heading" style={{ marginBottom: '0.5rem' }}>How automations work</h2>
         <ul className="forms-lede" style={{ margin: 0, paddingLeft: '1.25rem' }}>
-          <li><strong>Participant onboarding emails</strong> — attach library documents tagged <em>participant_onboarding</em>. At send time you can filter by service type (SIL, SDA, etc.); docs tagged <em>All</em> are always suggested.</li>
-          <li><strong>Staff onboarding emails</strong> — attach documents tagged <em>staff_onboarding</em>. At send time you can filter by role; docs tagged <em>All roles</em> are always suggested.</li>
+          <li><strong>Participant onboarding emails</strong> — attach library documents tagged <em>participant_onboarding</em> (including docs shared with staff onboarding). At send time you can filter by service type (SIL, SDA, etc.); docs tagged <em>All</em> are always suggested.</li>
+          <li><strong>Staff onboarding emails</strong> — attach documents tagged <em>staff_onboarding</em> (including docs shared with participant onboarding). At send time you can filter by role; docs tagged <em>All roles</em> are always suggested.</li>
+          <li><strong>Both workflows</strong> — check both participant and staff onboarding on a document to attach it to both email automations (e.g. shared policies like Privacy Policy).</li>
           <li><strong>Library only</strong> — branded templates for reference and manual use; not auto-emailed.</li>
           <li><strong>Register templates</strong> — seed the Registers page; not part of onboarding email packs.</li>
           <li><strong>Extra organisation documents</strong> — optional PDFs uploaded on the Forms page; attached to both participant and staff onboarding emails (not pack-controlled).</li>
