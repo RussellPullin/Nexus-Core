@@ -75,12 +75,6 @@ const LIBRARY_PACK_GROUPS = [
   }
 ];
 
-const PARTICIPANT_SIGNING_FORMS = [
-  { name: 'Service Agreement', note: 'Organisation template on Forms page' },
-  { name: 'Support Plan', note: 'Generated from participant intake data' },
-  { name: 'Privacy Consent', note: 'Generated from participant intake data' }
-];
-
 function docPacks(doc) {
   if (Array.isArray(doc.packs) && doc.packs.length) return doc.packs;
   if (doc.pack) return [doc.pack];
@@ -529,7 +523,6 @@ export default function AutomationMappingPage() {
           <li><strong>Library only</strong> — branded templates for reference and manual use; not auto-emailed.</li>
           <li><strong>Register templates</strong> — seed the Registers page; not part of onboarding email packs.</li>
           <li><strong>Extra organisation documents</strong> — optional PDFs uploaded on the Forms page; attached to both participant and staff onboarding emails (not pack-controlled).</li>
-          <li><strong>Participant signing forms</strong> — Service Agreement, Support Plan, and Privacy Consent are configured separately on the Forms page (not pack-driven).</li>
         </ul>
       </section>
 
@@ -591,35 +584,6 @@ export default function AutomationMappingPage() {
                 </table>
               </div>
             )}
-          </MappingSection>
-
-          <MappingSection
-            title="Participant signing forms"
-            lede="These are not controlled by library packs. Configure templates and behaviour on the Forms page."
-            defaultExpanded
-          >
-            <div className="table-wrap">
-              <table className="table-condensed forms-data-table">
-                <thead>
-                  <tr>
-                    <th>Form</th>
-                    <th>Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {PARTICIPANT_SIGNING_FORMS.map((form) => (
-                    <tr key={form.name}>
-                      <td><strong>{form.name}</strong></td>
-                      <td className="forms-muted">{form.note}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="forms-muted" style={{ marginTop: '0.75rem', marginBottom: 0, fontSize: '0.85rem' }}>
-              Manage these in the{' '}
-              <Link to={`${prefix}/forms`} style={{ color: '#3b82f6' }}>Service Agreement section on Forms</Link>.
-            </p>
           </MappingSection>
         </>
       )}
