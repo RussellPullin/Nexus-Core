@@ -14,4 +14,11 @@ createRoot(rootEl).render(
   </StrictMode>,
 )
 
-document.getElementById('nexus-boot-shell')?.remove()
+function markAppReady() {
+  if (typeof window !== 'undefined') {
+    window.__NEXUS_APP_READY = true;
+  }
+  document.getElementById('nexus-boot-shell')?.remove();
+}
+
+markAppReady()

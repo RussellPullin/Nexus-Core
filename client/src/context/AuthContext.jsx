@@ -121,9 +121,7 @@ export function AuthProvider({ children }) {
     if (!token) throw new Error('No session returned. Please try signing in again.');
     const body = await authApi.supabaseSession(token);
     if (body.needs_org_setup) return { needs_org_setup: true };
-    const meData = await authApi.me();
-    setAuthNotice('');
-    setUser(meData?.user ?? null);
+    await applySessionUser(body?.user);
     return {};
   };
 
@@ -147,9 +145,7 @@ export function AuthProvider({ children }) {
     if (data.session?.access_token) {
       const body = await authApi.supabaseSession(data.session.access_token);
       if (body.needs_org_setup) return { needs_org_setup: true };
-      const meData = await authApi.me();
-      setAuthNotice('');
-      setUser(meData?.user ?? null);
+      await applySessionUser(body?.user);
       return {};
     }
     return {
@@ -179,6 +175,15 @@ export function AuthProvider({ children }) {
     return data?.user;
   }, []);
 
+  const applySessionUser = useCallback(async (sessionUser) => {
+    if (sessionUser && typeof sessionUser === 'object') {
+      setAuthNotice('');
+      setUser(sessionUser);
+      return sessionUser;
+    }
+    return refreshUser();
+  }, [refreshUser]);
+
   const changePassword = async (currentPassword, newPassword) => {
     await authApi.changePassword(currentPassword, newPassword);
   };
@@ -203,6 +208,7 @@ export function AuthProvider({ children }) {
         logout,
         updateSettings,
         refreshUser,
+        applySessionUser,
         changePassword,
         isAdmin,
         isDelegate,

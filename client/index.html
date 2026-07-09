@@ -51,7 +51,10 @@
           showBootRecovery();
         });
 
-        window.setTimeout(showBootRecovery, 12000);
+        window.setTimeout(function () {
+          if (window.__NEXUS_APP_READY) return;
+          showBootRecovery();
+        }, 12000);
       })();
     </script>
     <script type="module" src="/src/main.jsx"></script>

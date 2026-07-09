@@ -16,11 +16,13 @@ export default function LoginPage() {
     login,
     register,
     loginWithSupabase,
-    registerWithSupabase
+    registerWithSupabase,
+    applySessionUser
   } = useAuth();
   const navigate = useNavigate();
   const [useCloudAuth, setUseCloudAuth] = useState(false);
   const syncingSupabaseSessionRef = useRef(false);
+  const suppressAutoSessionRef = useRef(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -124,6 +126,7 @@ export default function LoginPage() {
           navigate('/setup-org', { replace: true });
           return;
         }
+        await applySessionUser(body?.user);
         navigate('/', { replace: true });
       } catch (err) {
         const msg = String(err?.message || '');
@@ -145,7 +148,7 @@ export default function LoginPage() {
         syncingSupabaseSessionRef.current = false;
       }
     },
-    [navigate],
+    [navigate, applySessionUser],
   );
 
   useEffect(() => {
@@ -246,6 +249,7 @@ export default function LoginPage() {
 
     const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
       if (!active) return;
+      if (suppressAutoSessionRef.current) return;
       if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true);
         setIsRegister(false);
@@ -352,6 +356,9 @@ export default function LoginPage() {
     setError('');
     setInfo('');
     setSubmitting(true);
+    if (useCloudAuth && !isRecoveryMode) {
+      suppressAutoSessionRef.current = true;
+    }
     try {
       if (useCloudAuth) {
         if (isRegister) {
@@ -430,6 +437,7 @@ export default function LoginPage() {
       }
       setError(msg);
     } finally {
+      suppressAutoSessionRef.current = false;
       setSubmitting(false);
     }
   };

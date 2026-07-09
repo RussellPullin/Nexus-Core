@@ -31,6 +31,7 @@ import FormsPage from './pages/FormsPage';
 import AutomationMappingPage from './pages/AutomationMappingPage';
 import StaffOnboardingFormPage from './pages/StaffOnboardingFormPage';
 import StaffRenewalPage from './pages/StaffRenewalPage';
+import AppErrorBoundary from './components/AppErrorBoundary.jsx';
 import './App.css';
 
 const EMAIL_BANNER_KEY = 'nexus_email_banner_dismissed';
@@ -286,7 +287,7 @@ function ProductAccessGate() {
   if (!isValidActiveProduct(productSurface)) {
     return <Navigate to="/" replace />;
   }
-  if (!user) return null;
+  if (!user) return <Navigate to="/login" replace />;
   if (productSurface === PRODUCT_COORDINATION && !user.can_use_coordination) {
     return <Navigate to={user.can_use_agency ? `/${PRODUCT_AGENCY}/participants` : '/login'} replace />;
   }
@@ -301,6 +302,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <FeatureFlagProvider>
+        <AppErrorBoundary>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/setup-org" element={<SetupOrgPage />} />
@@ -352,6 +354,7 @@ export default function App() {
             </Route>
           </Route>
         </Routes>
+        </AppErrorBoundary>
         </FeatureFlagProvider>
       </AuthProvider>
     </BrowserRouter>
