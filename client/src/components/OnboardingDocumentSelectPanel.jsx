@@ -77,6 +77,7 @@ export default function OnboardingDocumentSelectPanel({
   defaultContextValue = 'all',
   extraPdfCount = null,
   active = true,
+  automationMappingHref = null,
   onCancel,
   onSend,
   sending: externalSending = false
@@ -254,7 +255,15 @@ export default function OnboardingDocumentSelectPanel({
           {sortedDocs.length === 0 ? (
             <p className="forms-muted" style={{ marginBottom: '0.75rem' }}>
               No branded documents in the {isParticipant ? 'participant' : 'staff'} onboarding pack for your organisation.
-              Clone documents from the library under Automation mapping, or include extra organisation PDFs below.
+              {automationMappingHref ? (
+                <>
+                  {' '}
+                  Clone documents from the library under{' '}
+                  <a href={automationMappingHref}>Automation mapping</a>, or include extra organisation PDFs below.
+                </>
+              ) : (
+                ' Clone documents from the library under Automation mapping, or include extra organisation PDFs below.'
+              )}
             </p>
           ) : (
             <>

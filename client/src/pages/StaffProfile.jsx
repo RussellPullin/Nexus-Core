@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { backToStaffListPath } from '../lib/listViewUrl.js';
@@ -59,7 +59,9 @@ export default function StaffProfile() {
   const [showEdit, setShowEdit] = useState(false);
   const [onboardingSending, setOnboardingSending] = useState(false);
   const [showOnboardPanel, setShowOnboardPanel] = useState(false);
+  const [onboardPackFeedback, setOnboardPackFeedback] = useState(null);
   const [extraPdfCount, setExtraPdfCount] = useState(null);
+  const onboardPanelRef = useRef(null);
   // Phase 3: one-click orchestrator UI state.
   const [orchBusy, setOrchBusy] = useState(false);
   const [orchResult, setOrchResult] = useState(null);
@@ -128,6 +130,12 @@ export default function StaffProfile() {
     if (id) load();
     else setLoading(false);
   }, [id]);
+
+  useEffect(() => {
+    if (showOnboardPanel && onboardPanelRef.current) {
+      onboardPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showOnboardPanel]);
 
   const loadHoursSummary = async () => {
     if (!id) return;
@@ -268,29 +276,50 @@ export default function StaffProfile() {
     }
   };
 
-  const handleToggleOnboardPanel = async () => {
+  const onboardEmailButtonLabel = () => {
+    if (showOnboardPanel) return 'Hide onboarding pack';
+    if (onboardingSending) return 'Sending…';
+    if (data?.onboarding_status === 'complete') return 'Resend with selected docs';
+    if (data?.onboarding_status === 'in_progress') return 'Resend onboarding email';
+    return 'Onboard';
+  };
+
+  const handleOpenOnboardPanel = async () => {
     if (!data?.email) {
       alert('Add an email address for this staff member first.');
       return;
     }
-    if (!showOnboardPanel) {
-      try {
-        const extraDocs = await forms.policyFilesList().catch(() => []);
-        setExtraPdfCount(Array.isArray(extraDocs) ? extraDocs.length : 0);
-      } catch {
-        setExtraPdfCount(null);
-      }
+    if (showOnboardPanel) {
+      setShowOnboardPanel(false);
+      setOnboardPackFeedback(null);
+      return;
     }
-    setShowOnboardPanel((open) => !open);
+    setOnboardPackFeedback(null);
+    try {
+      const extraDocs = await forms.policyFilesList().catch(() => []);
+      setExtraPdfCount(Array.isArray(extraDocs) ? extraDocs.length : 0);
+    } catch {
+      setExtraPdfCount(null);
+    }
+    setShowOnboardPanel(true);
   };
 
   const handleConfirmSendStaffOnboarding = async (payload) => {
     setOnboardingSending(true);
+    setOnboardPackFeedback(null);
     try {
-      await staff.startOnboarding(id, payload);
-      alert('Onboarding email sent. The staff member can complete the form using the link in the email.');
-      setShowOnboardPanel(false);
+      const result = await staff.startOnboarding(id, payload);
+      const count = result?.attachment_count ?? 0;
+      const attachmentNote =
+        count === 0
+          ? 'Onboarding email sent (form link only, no attachments).'
+          : `Onboarding email sent with ${count} attachment${count === 1 ? '' : 's'}.`;
+      setOnboardPackFeedback({ type: 'success', message: attachmentNote });
       load();
+    } catch (err) {
+      const message = err.message || 'Could not send onboarding email';
+      setOnboardPackFeedback({ type: 'error', message });
+      throw err;
     } finally {
       setOnboardingSending(false);
     }
@@ -582,35 +611,26 @@ export default function StaffProfile() {
             )}
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-secondary"
               onClick={handleRunStaffOnboarding}
               disabled={orchBusy || staffReadiness?.ready === false}
               title={
                 staffReadiness?.ready === false
                   ? staffReadiness?.reason
-                  : 'Initialise staff onboarding, ensure the staff document pack is ready, and clone master library templates'
+                  : 'Prepare onboarding setup (clone library documents, create record). Does not send email — use the button beside this to choose documents and send.'
               }
             >
               {orchBusy ? 'Running…' : 'Run staff onboarding'}
             </button>
-            {(!data.onboarding_status || data.onboarding_status === 'not_started') && data.email && (
+            {data.email && (
               <button
                 type="button"
                 className={showOnboardPanel ? 'btn btn-secondary' : 'btn btn-primary'}
-                onClick={handleToggleOnboardPanel}
+                onClick={handleOpenOnboardPanel}
                 disabled={onboardingSending}
+                title="Choose role and documents, then send the onboarding email"
               >
-                {showOnboardPanel ? 'Hide onboarding pack' : onboardingSending ? 'Sending…' : 'Onboard'}
-              </button>
-            )}
-            {data.onboarding_status === 'in_progress' && data.email && (
-              <button
-                type="button"
-                className={showOnboardPanel ? 'btn btn-secondary' : 'btn btn-secondary'}
-                onClick={handleToggleOnboardPanel}
-                disabled={onboardingSending}
-              >
-                {showOnboardPanel ? 'Hide onboarding pack' : onboardingSending ? 'Sending…' : 'Resend onboarding email'}
+                {onboardEmailButtonLabel()}
               </button>
             )}
             <button
@@ -828,10 +848,35 @@ export default function StaffProfile() {
       </div>
 
       {showOnboardPanel && data?.email && (
-        <div className="card forms-section" style={{ marginBottom: '1.5rem' }}>
+        <div
+          ref={onboardPanelRef}
+          className="card forms-section"
+          style={{ marginBottom: '1.5rem' }}
+        >
           <h3 className="forms-section-heading" style={{ marginTop: 0 }}>
             Staff onboarding pack
           </h3>
+          {data.onboarding_status === 'complete' ? (
+            <p className="forms-muted" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
+              This staff member has already completed onboarding. You can still choose documents and resend the email to
+              test automation or share updated policies.
+            </p>
+          ) : null}
+          {onboardPackFeedback ? (
+            <div
+              style={{
+                padding: '0.5rem 0.75rem',
+                marginBottom: '0.75rem',
+                borderRadius: 6,
+                fontSize: '0.9rem',
+                border: `1px solid ${onboardPackFeedback.type === 'success' ? '#86efac' : '#fecaca'}`,
+                background: onboardPackFeedback.type === 'success' ? '#f0fdf4' : '#fee2e2',
+                color: onboardPackFeedback.type === 'success' ? '#166534' : '#991b1b'
+              }}
+            >
+              {onboardPackFeedback.message}
+            </div>
+          ) : null}
           <OnboardingDocumentSelectPanel
             mode="staff"
             recipientEmail={data.email.trim()}
@@ -839,7 +884,11 @@ export default function StaffProfile() {
             defaultContextValue={inferStaffOnboardingRole(data || {})}
             extraPdfCount={extraPdfCount}
             active={showOnboardPanel}
-            onCancel={() => setShowOnboardPanel(false)}
+            automationMappingHref={`${pathPrefix}/forms/automation-mapping`}
+            onCancel={() => {
+              setShowOnboardPanel(false);
+              setOnboardPackFeedback(null);
+            }}
             onSend={handleConfirmSendStaffOnboarding}
             sending={onboardingSending}
           />

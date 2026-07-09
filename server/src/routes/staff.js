@@ -1030,8 +1030,8 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     const s = visibleStaffById(staffId, orgId);
     if (!s) return res.status(404).json({ error: 'Staff not found' });
     if (!s.email?.trim()) return res.status(400).json({ error: 'Staff member has no email address' });
-    if (s.onboarding_status === 'complete') return res.status(400).json({ error: 'Onboarding already complete' });
 
+    const alreadyComplete = s.onboarding_status === 'complete';
     const userId = req.session?.user?.id;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
     if (!isEmailConfiguredForUser(userId)) {
@@ -1053,6 +1053,10 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
         VALUES (?, ?, ?, 'in_progress', 1, datetime('now'), datetime('now'))
       `).run(onboardingId, staffId, providerProfileId);
       onboarding = db.prepare('SELECT * FROM staff_onboarding WHERE id = ?').get(onboardingId);
+    } else if (alreadyComplete) {
+      db.prepare(`
+        UPDATE staff_onboarding SET last_activity_at = datetime('now'), updated_at = datetime('now') WHERE staff_id = ?
+      `).run(staffId);
     } else {
       db.prepare(`
         UPDATE staff_onboarding SET status = 'in_progress', current_step = 1, started_at = COALESCE(started_at, datetime('now')), last_activity_at = datetime('now'), updated_at = datetime('now') WHERE staff_id = ?
@@ -1061,9 +1065,15 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
 
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
-    db.prepare(`
-      UPDATE staff SET onboarding_token = ?, onboarding_token_expires_at = ?, onboarding_status = 'in_progress', updated_at = datetime('now') WHERE id = ?
-    `).run(token, expiresAt, staffId);
+    if (alreadyComplete) {
+      db.prepare(`
+        UPDATE staff SET onboarding_token = ?, onboarding_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?
+      `).run(token, expiresAt, staffId);
+    } else {
+      db.prepare(`
+        UPDATE staff SET onboarding_token = ?, onboarding_token_expires_at = ?, onboarding_status = 'in_progress', updated_at = datetime('now') WHERE id = ?
+      `).run(token, expiresAt, staffId);
+    }
 
     const baseUrl = (process.env.FRONTEND_BASE_URL || process.env.BASE_URL || 'http://localhost:5174').replace(/\/$/, '');
     const formLink = `${baseUrl}/staff-onboarding/${token}`;
@@ -1071,11 +1081,21 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     const org = profile ? db.prepare('SELECT name FROM organisations WHERE id = ?').get(profile.organisation_id) : null;
     const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
 
-    const subject = `${orgName}: complete your onboarding`;
-    let text = `Hi ${s.name},\n\n${orgName} has invited you to complete your staff onboarding. Please fill out the form at the link below.\n\n`;
-    text += `Onboarding form: ${formLink}\n\n`;
-    text += `The form will collect your personal and employment details, compliance documents, and policy acknowledgements. Please sign to confirm you have read and acknowledged the company policies (attached).\n\n`;
-    text += `If you have any questions, contact your manager.`;
+    let subject;
+    let text;
+    if (alreadyComplete) {
+      subject = `${orgName}: onboarding documents`;
+      text = `Hi ${s.name},\n\n${orgName} has sent you staff onboarding documents.\n\n`;
+      text += `Your onboarding form was previously completed. If you need to review or update anything, use the link below.\n\n`;
+      text += `Onboarding form: ${formLink}\n\n`;
+      text += `If you have any questions, contact your manager.`;
+    } else {
+      subject = `${orgName}: complete your onboarding`;
+      text = `Hi ${s.name},\n\n${orgName} has invited you to complete your staff onboarding. Please fill out the form at the link below.\n\n`;
+      text += `Onboarding form: ${formLink}\n\n`;
+      text += `The form will collect your personal and employment details, compliance documents, and policy acknowledgements. Please sign to confirm you have read and acknowledged the company policies (attached).\n\n`;
+      text += `If you have any questions, contact your manager.`;
+    }
 
     const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
     const masterIds = req.body?.master_ids;
@@ -1111,7 +1131,13 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     }));
     await sendEmailViaRelay(userId, s.email, subject, text, null, attachmentsForEmail, orgName);
 
-    res.json({ ok: true, message: `Onboarding email sent to ${s.email}`, formLink });
+    res.json({
+      ok: true,
+      message: `Onboarding email sent to ${s.email}`,
+      formLink,
+      attachment_count: allAttachments.length,
+      resent: alreadyComplete
+    });
   } catch (err) {
     console.error('[start-onboarding]', err);
     const msg = formatSmtpAuthError(err);
