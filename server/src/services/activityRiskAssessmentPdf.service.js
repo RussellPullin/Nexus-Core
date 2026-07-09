@@ -7,6 +7,7 @@ import { PDFDocument as PdfLibDocument, StandardFonts } from 'pdf-lib';
 import { writeFileSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { ACTIVITY_RISK_HAZARD_BLOCKS } from '../../../shared/activityRiskHazards.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '../../..');
@@ -366,22 +367,23 @@ function drawHierarchy(doc, y) {
 function drawControlTable(doc, y) {
   const widths = [CW*0.04, CW*0.22, CW*0.10, CW*0.38, CW*0.12, CW*0.14];
   const headers = ['#', 'Hazard / Risk Description', 'Risk Level\n(pre)', 'Control Measures (hierarchy level applied)', 'Residual Risk\n(post)', 'Responsible\nPerson'];
-  const rH = 24;
+  const headerH = 24;
+  const rowH = 28;
 
-  // header row
-  doc.rect(M, y, CW, rH).fill(HEADER_ROW);
+  y = ensureSpace(doc, y, headerH + rowH);
+  doc.rect(M, y, CW, headerH).fill(HEADER_ROW);
   let x = M;
   headers.forEach((h, i) => {
-    textBox(doc, h, x + 2, y + 2, widths[i] - 4, rH - 4, {
+    textBox(doc, h, x + 2, y + 2, widths[i] - 4, headerH - 4, {
       size: 6.5, color: WHITE, bold: true, align: i === 0 ? 'center' : 'left'
     });
     x += widths[i];
   });
-  y += rH;
+  y += headerH;
 
   for (let i = 1; i <= 10; i++) {
+    y = ensureSpace(doc, y, rowH);
     const bg = i % 2 === 0 ? LIGHT_GREY : WHITE;
-    const rowH = 28;
     x = M;
     widths.forEach((w, ci) => {
       doc.rect(x, y, w, rowH).fill(ci === 0 ? TEAL_LIGHT : bg).stroke('#CCCCCC');
@@ -516,74 +518,22 @@ function renderActivityRiskAssessmentLayout() {
     registerTextField(doc, 'review_date', M + CW * 0.7 + 52, y + 1, CW * 0.28 - 52, 12);
     y += 18;
 
-    // Section: Activity & Participant Details
-    y = sectionBar(doc, 'ACTIVITY & PARTICIPANT DETAILS', y);
-    y = fieldRow2(doc, 'Activity Name / Description:', 'Activity Date:', y, 22, ['activity_name', 'activity_date']);
-    y = fieldRow2(doc, 'Activity Location:', 'Duration:', y, 22, ['activity_location', 'duration']);
-    y = fieldRow2(doc, 'Participant Name:', 'NDIS Number:', y, 22, ['participant_name', 'ndis_number']);
-    y = fieldRow2(doc, 'Support Worker / Therapist:', 'Supervisor:', y, 22, ['support_worker', 'supervisor']);
-    y = fieldRow2(doc, "Participant's Key Support Needs\n(relevant to this activity):", 'Emergency Contact & Number:', y, 28, ['support_needs', 'emergency_contact']);
+    // Section: Activity details (activity-level — not session or participant specific)
+    y = sectionBar(doc, 'ACTIVITY DETAILS', y);
+    y = fieldRowFull(doc, 'Activity Name / Description:', y, 28, 'activity_name');
+    y = fieldRow2(doc, 'Activity Location:', 'Typical Duration:', y, 22, ['activity_location', 'duration']);
     y += 4;
 
     // Section: Step 1 Hazards
     y = sectionBar(doc, 'STEP 1 — IDENTIFY THE HAZARDS   (tick all that apply; add detail in Other/Details)', y);
     y += 2;
 
-    y = hazardBlock(doc, 'Biological (hygiene, disease, infection)', [
-      'Blood / bodily fluids', 'Virus / disease', 'Food handling',
-      'Insect / tick-borne illness', 'Skin infection risk (cuts near natural water)',
-    ], y, 3, 'hazard_bio');
-
-    y = hazardBlock(doc, 'Chemicals  (refer to label and SDS for classification and management)', [
-      'Non-hazardous chemical(s)', 'Hazardous chemical (refer to completed chemical risk assessment)',
-      'Sunscreen / insect repellent', 'Cleaning agents / sanitisers',
-    ], y, 2, 'hazard_chem');
-
-    y = hazardBlock(doc, 'Critical Incident — may result in:', [
-      'Serious injury / death', 'Evacuation required', 'Minor injury',
-      'Participant elopement / missing person', 'Medical emergency (seizure, anaphylaxis, cardiac)',
-    ], y, 3, 'hazard_critical');
-
-    y = hazardBlock(doc, 'Environment — Outdoor / Natural Setting', [
-      'Sun exposure / UV', 'Water (creek, river, beach, dam, pool)',
-      'Animals / insects / wildlife', 'Storms / lightning / severe weather',
-      'Extreme temperature (heat / cold)', 'Uneven terrain / remote location',
-      'Flooding / fast-moving water', 'Sound / noise',
-    ], y, 3, 'hazard_env');
-
-    y = hazardBlock(doc, 'Facilities / Built Environment', [
-      'Workshops / work rooms', 'Buildings and fixtures', 'Driveways / paths',
-      'Playground equipment', 'Furniture', 'Swimming pool / water feature',
-    ], y, 3, 'hazard_facility');
-
-    y = hazardBlock(doc, 'Machinery, Plant & Equipment', [
-      'Power tools', 'Hand tools', 'Vehicles / transport',
-      'Ropes / climbing equipment', 'Craft / art equipment',
-    ], y, 3, 'hazard_machinery');
-
-    y = hazardBlock(doc, 'Manual Tasks / Physical Demands', [
-      'Repetitive or heavy manual tasks', 'Working at heights', 'Restricted / confined space',
-      'Physical overexertion', 'Lifting / carrying loads',
-    ], y, 3, 'hazard_manual');
-
-    y = hazardBlock(doc, 'Participant-Specific Considerations (NDIS)', [
-      'Behavioural support needs (aggression, elopement)',
-      'Sensory sensitivities (noise, texture, heat, light)',
-      'Communication support needs',
-      'Medical conditions (seizure, allergy, diabetes)',
-      'Psychological / emotional wellbeing',
-      'Physical disability / reduced mobility',
-      'Fatigue or medication side-effects',
-      'Participant / carer consent requirements',
-    ], y, 2, 'hazard_participant');
-
-    y = hazardBlock(doc, 'People', [
-      'Participant', 'Support worker / therapist', 'Other participants',
-      'Volunteers / community members', 'Members of public',
-    ], y, 3, 'hazard_people');
+    for (const block of ACTIVITY_RISK_HAZARD_BLOCKS) {
+      y = hazardBlock(doc, block.category, block.items, y, block.cols, block.prefix);
+    }
 
     // ── Risk matrix + control planning ─────────────────────────────────────
-    y = beginSectionPage(doc);
+    y = ensureSpace(doc, y, 220);
     y = sectionBar(doc, 'STEP 2 — ASSESS THE LEVEL OF RISK', y);
     y = sectionIntro(doc, 'Use the matrix and descriptors below to assign a risk level (Likelihood × Consequence) to each hazard from Step 1.', y);
 
@@ -598,7 +548,7 @@ function renderActivityRiskAssessmentLayout() {
     y = drawHierarchy(doc, y);
 
     // ── Control measures table + sign-off ───────────────────────────────────
-    y = beginSectionPage(doc);
+    y = ensureSpace(doc, y, 90);
     y = sectionBar(doc, 'STEP 3 (continued) — HAZARDS / RISKS AND CONTROL MEASURES', y);
     y = sectionIntro(doc, 'List each hazard, rate its risk level before and after controls, describe control measures applied, and name the responsible person.', y, 12);
     y = drawControlTable(doc, y);
@@ -634,7 +584,7 @@ function renderActivityRiskAssessmentLayout() {
     registerCheckbox(doc, 'consent_na', consentX + 40, consentY + 3, 8);
 
     // ── Monitor & review ────────────────────────────────────────────────────
-    y = beginSectionPage(doc);
+    y = ensureSpace(doc, y, 280);
     y = sectionBar(doc, 'STEP 4 — MONITOR & REVIEW CONTROLS', y);
     y = sectionIntro(doc, 'Complete this section during and/or after the activity.', y);
 

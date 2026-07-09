@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { activityRiskAssessments } from '../lib/api';
+import {
+  inferAutoSyncedControlDesc,
+  isActivityRiskHazardField,
+  syncCheckedHazardsToControlRows
+} from '@nexus-shared/activityRiskHazards.js';
 
 GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -146,10 +151,24 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
 
   const pdfDocRef = useRef(null);
   const canvasRefs = useRef([]);
+  const autoControlDescRef = useRef({});
 
-  const setFieldValue = useCallback((name, value) => {
-    setValues((prev) => ({ ...prev, [name]: value }));
+  const applyHazardSync = useCallback((nextValues, previousAutoDesc = autoControlDescRef.current) => {
+    const synced = syncCheckedHazardsToControlRows(nextValues, { previousAutoDesc });
+    autoControlDescRef.current = synced.autoDesc;
+    return synced.values;
   }, []);
+
+  const setFieldValue = useCallback(
+    (name, value) => {
+      setValues((prev) => {
+        const next = { ...prev, [name]: value };
+        if (isActivityRiskHazardField(name)) return applyHazardSync(next);
+        return next;
+      });
+    },
+    [applyHazardSync]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -159,7 +178,11 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
       .then(([record, schemaRes]) => {
         if (cancelled) return;
         setTitle(record?.title || '');
-        setValues(record?.field_values && typeof record.field_values === 'object' ? record.field_values : {});
+        const loadedValues =
+          record?.field_values && typeof record.field_values === 'object' ? record.field_values : {};
+        autoControlDescRef.current = inferAutoSyncedControlDesc(loadedValues);
+        const syncedValues = applyHazardSync(loadedValues, autoControlDescRef.current);
+        setValues(syncedValues);
         setSchema(
           (Array.isArray(schemaRes?.fields) ? schemaRes.fields : []).filter(
             (f) => !isSignOffField(f.name)
@@ -287,7 +310,8 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
           <div>
             <h3 style={{ margin: 0 }}>Complete risk assessment</h3>
             <p className="forms-muted" style={{ margin: '0.35rem 0 0', fontSize: '0.9rem' }}>
-              Fill in the form on the PDF layout below. Pre-activity sign-off is completed by an admin via{' '}
+              Fill in the form on the PDF layout below. Hazards ticked in Step 1 are copied into Step 3
+              automatically so you can add control measures. Pre-activity sign-off is completed by an admin via{' '}
               <strong>Sign with Nexus Core</strong> after saving — not on this form.
             </p>
           </div>

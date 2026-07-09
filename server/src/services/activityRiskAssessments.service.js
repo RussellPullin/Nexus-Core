@@ -282,6 +282,10 @@ async function masterPdfBuffer() {
 
 let cachedFieldSchema = null;
 
+export function clearActivityRiskFieldSchemaCache() {
+  cachedFieldSchema = null;
+}
+
 export async function getActivityRiskFieldSchema() {
   if (cachedFieldSchema) return cachedFieldSchema;
   const buf = await masterPdfBuffer();
