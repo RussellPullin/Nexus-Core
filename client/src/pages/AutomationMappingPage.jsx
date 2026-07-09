@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { documentLibrary, forms } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 
 const CATEGORY_LABELS = {
@@ -26,6 +27,20 @@ const PACK_LABELS = {
   staff_onboarding: 'Staff onboarding',
   policy_library: 'Library only',
   compliance_register: 'Register template'
+};
+
+const PACK_OPTIONS = [
+  'participant_onboarding',
+  'staff_onboarding',
+  'policy_library',
+  'compliance_register'
+];
+
+const PACK_IMPACT = {
+  participant_onboarding: 'This document will be automatically attached to participant onboarding emails.',
+  staff_onboarding: 'This document will be attached to staff onboarding emails and staff policy acknowledgement workflows.',
+  policy_library: 'This document will be library only — not auto-emailed in onboarding packs.',
+  compliance_register: 'This document will be used as a register template on the Registers page.'
 };
 
 const LIBRARY_PACK_GROUPS = [
@@ -91,7 +106,7 @@ function CategoryBadge({ category }) {
   );
 }
 
-function LibraryDocTable({ docs }) {
+function LibraryDocTable({ docs, canEdit, onPackChange, savingByDocId, errorByDocId, packSelectRevision }) {
   if (!docs.length) {
     return <p className="forms-muted" style={{ margin: 0 }}>No documents in this group.</p>;
   }
@@ -103,7 +118,7 @@ function LibraryDocTable({ docs }) {
           <tr>
             <th>Document</th>
             <th>Category</th>
-            <th>Pack</th>
+            <th>{canEdit ? 'Workflow' : 'Pack'}</th>
             <th>Signature</th>
             <th></th>
           </tr>
@@ -113,16 +128,48 @@ function LibraryDocTable({ docs }) {
             const docId = doc.id || doc.slug;
             const previewUrl = documentLibrary.previewMasterUrl(docId);
             const sigCount = Number(doc.signature_count) || 0;
+            const isSaving = savingByDocId?.[docId];
+            const rowError = errorByDocId?.[docId];
+            const currentPack = doc.pack || '';
             return (
               <tr key={docId}>
                 <td>
                   <strong style={{ fontWeight: 600, color: '#1e293b' }}>{doc.display_name || doc.name}</strong>
+                  {rowError ? (
+                    <div style={{ fontSize: '0.8rem', color: '#b91c1c', marginTop: '0.2rem' }}>{rowError}</div>
+                  ) : null}
                 </td>
                 <td>
                   <CategoryBadge category={doc.category} />
                 </td>
                 <td>
-                  <PackBadge pack={doc.pack} />
+                  {canEdit ? (
+                    <select
+                      key={`${docId}-${currentPack}-${packSelectRevision?.[docId] || 0}`}
+                      className="form-input"
+                      style={{ minWidth: '12rem', fontSize: '0.85rem', padding: '0.25rem 0.4rem' }}
+                      value={currentPack}
+                      disabled={isSaving}
+                      onChange={(e) => onPackChange(doc, e.target.value)}
+                      aria-label={`Workflow for ${doc.display_name || doc.name}`}
+                    >
+                      {!PACK_OPTIONS.includes(currentPack) ? (
+                        <option value="">Unassigned</option>
+                      ) : null}
+                      {PACK_OPTIONS.map((pack) => (
+                        <option key={pack} value={pack}>
+                          {PACK_LABELS[pack]}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <PackBadge pack={doc.pack} />
+                  )}
+                  {isSaving ? (
+                    <span className="forms-muted" style={{ display: 'block', fontSize: '0.75rem', marginTop: '0.15rem' }}>
+                      Saving…
+                    </span>
+                  ) : null}
                 </td>
                 <td>
                   {sigCount > 0 ? (
@@ -197,10 +244,14 @@ function MappingSection({ title, countLabel, lede, defaultExpanded = true, child
 
 export default function AutomationMappingPage() {
   const prefix = useProductPathPrefix();
+  const { canManageUsers } = useAuth();
   const [masters, setMasters] = useState([]);
   const [policyFiles, setPolicyFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [savingByDocId, setSavingByDocId] = useState({});
+  const [errorByDocId, setErrorByDocId] = useState({});
+  const [packSelectRevision, setPackSelectRevision] = useState({});
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -225,6 +276,54 @@ export default function AutomationMappingPage() {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  const handlePackChange = useCallback(async (doc, newPack) => {
+    const docId = doc.id || doc.slug;
+    const currentPack = doc.pack || '';
+    if (!newPack || newPack === currentPack) return;
+
+    const docName = doc.display_name || doc.name || 'this document';
+    const impact = PACK_IMPACT[newPack] || 'This changes which automation uses this document.';
+    const targetLabel = PACK_LABELS[newPack] || newPack;
+    const confirmed = window.confirm(
+      `Move "${docName}" to ${targetLabel}?\n\n${impact}\n\nThis updates the shared library template for all organisations.`
+    );
+    if (!confirmed) {
+      setPackSelectRevision((prev) => ({ ...prev, [docId]: (prev[docId] || 0) + 1 }));
+      return;
+    }
+
+    setSavingByDocId((prev) => ({ ...prev, [docId]: true }));
+    setErrorByDocId((prev) => {
+      const next = { ...prev };
+      delete next[docId];
+      return next;
+    });
+
+    try {
+      const updated = await documentLibrary.updateMasterPack(docId, newPack);
+      setMasters((prev) => prev.map((m) => {
+        const id = m.id || m.slug;
+        return id === docId ? { ...m, ...updated, pack: updated.pack ?? newPack } : m;
+      }));
+    } catch (e) {
+      setErrorByDocId((prev) => ({ ...prev, [docId]: e.message || 'Could not update workflow' }));
+    } finally {
+      setSavingByDocId((prev) => {
+        const next = { ...prev };
+        delete next[docId];
+        return next;
+      });
+    }
+  }, []);
+
+  const tableProps = {
+    canEdit: canManageUsers,
+    onPackChange: handlePackChange,
+    savingByDocId,
+    errorByDocId,
+    packSelectRevision
+  };
 
   const byPack = useMemo(() => {
     const grouped = Object.fromEntries(LIBRARY_PACK_GROUPS.map((g) => [g.pack, []]));
@@ -254,8 +353,10 @@ export default function AutomationMappingPage() {
           <h2 style={{ margin: 0 }}>Automation mapping</h2>
           <p className="forms-lede" style={{ marginTop: '0.5rem', marginBottom: 0, maxWidth: 720 }}>
             See which documents are linked to each onboarding automation. Library templates are tagged with a{' '}
-            <strong>pack</strong> in their manifest — that pack controls email attachments and related workflows.
-            This view is read-only; pack assignments are managed in the template library on disk.
+            <strong>pack</strong> — that pack controls email attachments and related workflows.
+            {canManageUsers
+              ? ' Use the workflow dropdown on each row to assign documents to a pack. Changes apply to the shared library for all organisations.'
+              : ' Pack assignments can only be changed by an admin or delegate.'}
           </p>
         </div>
         <button type="button" className="btn btn-secondary btn-sm" onClick={reload} disabled={loading}>
@@ -276,6 +377,7 @@ export default function AutomationMappingPage() {
           <li><strong>Staff onboarding emails</strong> — attach every document tagged <em>staff_onboarding</em>, plus the same extra organisation PDFs.</li>
           <li><strong>Library only</strong> — branded templates for reference and manual use; not auto-emailed.</li>
           <li><strong>Register templates</strong> — seed the Registers page; not part of onboarding email packs.</li>
+          <li><strong>Extra organisation documents</strong> — optional PDFs uploaded on the Forms page; attached to both participant and staff onboarding emails (not pack-controlled).</li>
           <li><strong>Participant signing forms</strong> — Service Agreement, Support Plan, and Privacy Consent are configured separately on the Forms page (not pack-driven).</li>
         </ul>
       </section>
@@ -292,7 +394,7 @@ export default function AutomationMappingPage() {
               lede={group.lede}
               defaultExpanded={group.defaultExpanded}
             >
-              <LibraryDocTable docs={byPack[group.pack] || []} />
+              <LibraryDocTable docs={byPack[group.pack] || []} {...tableProps} />
             </MappingSection>
           ))}
 
@@ -303,7 +405,7 @@ export default function AutomationMappingPage() {
               lede="These active library templates have no recognised pack tag."
               defaultExpanded={false}
             >
-              <LibraryDocTable docs={byPack._other} />
+              <LibraryDocTable docs={byPack._other} {...tableProps} />
             </MappingSection>
           ) : null}
 

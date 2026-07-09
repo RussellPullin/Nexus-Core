@@ -5,7 +5,7 @@ import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 
 export default function ActivityRiskAssessmentAssign({ participantId, onAssigned }) {
   const pathPrefix = useProductPathPrefix();
-  const [templates, setTemplates] = useState([]);
+  const [records, setRecords] = useState([]);
   const [selectedId, setSelectedId] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -14,15 +14,13 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
   const reload = useCallback(() => {
     setLoading(true);
     activityRiskAssessments
-      .list()
+      .listRecords()
       .then((res) => {
-        const list = (res?.templates || []).filter((t) => !t.is_default_blank);
-        const withDefault = (res?.templates || []).filter((t) => t.is_default_blank);
-        const combined = [...withDefault, ...list];
-        setTemplates(combined);
-        if (!selectedId && combined.length) setSelectedId(combined[0].id);
+        const list = res?.records || [];
+        setRecords(list);
+        setSelectedId((prev) => (prev && list.some((r) => r.id === prev) ? prev : list[0]?.id || ''));
       })
-      .catch(() => setTemplates([]))
+      .catch(() => setRecords([]))
       .finally(() => setLoading(false));
   }, []);
 
@@ -32,13 +30,13 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
 
   const handleAssign = async () => {
     if (!selectedId) {
-      setMessage('Choose an activity template.');
+      setMessage('Choose a saved risk assessment.');
       return;
     }
     setBusy(true);
     setMessage('');
     try {
-      const result = await activityRiskAssessments.assignToParticipant(selectedId, participantId);
+      const result = await activityRiskAssessments.assignRecordToParticipant(selectedId, participantId);
       setMessage(`Added “${result.filename}” to this participant’s documents.`);
       if (onAssigned) onAssigned();
     } catch (err) {
@@ -48,12 +46,13 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
     }
   };
 
-  if (loading) return <p className="forms-muted" style={{ fontSize: '0.9rem' }}>Loading activity templates…</p>;
-  if (!templates.length) {
+  if (loading) return <p className="forms-muted" style={{ fontSize: '0.9rem' }}>Loading saved risk assessments…</p>;
+  if (!records.length) {
     return (
       <p className="forms-muted" style={{ fontSize: '0.9rem' }}>
-        No activity risk assessment templates yet. Add them under{' '}
-        <Link to={`${pathPrefix}/forms`}>Forms → Activity risk assessments</Link>.
+        No saved risk assessments yet. Create and fill one under{' '}
+        <Link to={`${pathPrefix}/forms`}>Forms → Activity risk assessments</Link>, then return here to add it to this
+        participant.
       </p>
     );
   }
@@ -72,8 +71,9 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
     >
       <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Activity risk assessment</h4>
       <p style={{ margin: '0 0 0.75rem', fontSize: '0.88rem', color: '#64748b' }}>
-        Add a blank health &amp; safety risk assessment PDF to this participant&apos;s file (category: Risk assessment).
-        The assignment is listed under Registers → Risk register — activity assessments and in OneDrive when connected.
+        Add a <strong>saved</strong> risk assessment from Forms to this participant&apos;s file (category: Risk
+        assessment). Create and edit saved assessments under{' '}
+        <Link to={`${pathPrefix}/forms`}>Forms → Activity risk assessments</Link>.
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
         <select
@@ -81,11 +81,11 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
           value={selectedId}
           onChange={(e) => setSelectedId(e.target.value)}
           disabled={busy}
-          style={{ maxWidth: 320, minWidth: 180 }}
+          style={{ maxWidth: 360, minWidth: 180 }}
         >
-          {templates.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.activity_name}
+          {records.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.title} ({r.template_activity_name})
             </option>
           ))}
         </select>

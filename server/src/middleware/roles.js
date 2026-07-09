@@ -159,6 +159,29 @@ export function requireAdminOrDelegate(req, res, next) {
   return res.status(403).json({ error: 'Admin or delegate access required' });
 }
 
+/** True when session user is admin or delegate with an active full_control grant. */
+export function sessionIsAdminOrDelegate(session) {
+  const user = session?.user;
+  if (!user?.id) return false;
+
+  let role = normalizeAppRole(user.role);
+  if (!role) {
+    const row = db.prepare('SELECT role FROM users WHERE id = ?').get(user.id);
+    role = normalizeAppRole(row?.role || 'support_coordinator');
+  }
+  if (role === 'admin') return true;
+  if (role === 'delegate') {
+    const now = new Date().toISOString().slice(0, 10);
+    const grant = db.prepare(`
+      SELECT 1 FROM delegate_grants
+      WHERE user_id = ? AND full_control = 1
+        AND (expires_at IS NULL OR expires_at >= ?)
+    `).get(user.id, now);
+    return Boolean(grant);
+  }
+  return false;
+}
+
 /**
  * Check if user can access a participant.
  * Returns true for admin, delegate with active grant, or user with user_participants assignment.

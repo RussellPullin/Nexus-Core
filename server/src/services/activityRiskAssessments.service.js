@@ -11,7 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { getDataRoot } from './formTemplatePath.service.js';
 import { tryPushParticipantDocument } from './orgOnedriveSync.service.js';
-import { bundledMasterPath, GENERIC_MASTER_FILENAME } from './activityRiskAssessmentPdf.service.js';
+import { bundledMasterPath, GENERIC_MASTER_FILENAME, fillActivityRiskPdfFields, listActivityRiskPdfFieldSchema } from './activityRiskAssessmentPdf.service.js';
 
 const DEFAULT_ACTIVITY_NAME = 'Health & Safety Risk Assessment (blank)';
 
@@ -257,5 +257,203 @@ export async function assignActivityRiskAssessmentToParticipant(participantId, t
     category: RISK_ASSESSMENT_DOC_CATEGORY,
     template_id: templateId,
     activity_name: template.activity_name
+  };
+}
+
+function parseFieldValuesJson(raw) {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function serializeFieldValues(fieldValues) {
+  return JSON.stringify(fieldValues && typeof fieldValues === 'object' ? fieldValues : {});
+}
+
+async function masterPdfBuffer() {
+  const master = masterPdfPath();
+  if (!master) throw new Error('Activity risk assessment master PDF is missing on the server.');
+  return readFileSync(master);
+}
+
+let cachedFieldSchema = null;
+
+export async function getActivityRiskFieldSchema() {
+  if (cachedFieldSchema) return cachedFieldSchema;
+  const buf = await masterPdfBuffer();
+  cachedFieldSchema = await listActivityRiskPdfFieldSchema(buf);
+  return cachedFieldSchema;
+}
+
+export function listActivityRiskRecords(orgId) {
+  ensureOrgActivityRiskTemplates(orgId);
+  const rows = db
+    .prepare(
+      `SELECT r.id, r.organisation_id, r.template_id, r.title, r.field_values_json,
+              r.created_by_user_id, r.updated_by_user_id, r.created_at, r.updated_at,
+              t.activity_name AS template_activity_name
+       FROM activity_risk_assessment_records r
+       JOIN activity_risk_assessment_templates t ON t.id = r.template_id
+       WHERE r.organisation_id = ?
+       ORDER BY r.updated_at DESC, r.title COLLATE NOCASE ASC`
+    )
+    .all(orgId);
+  return rows.map((row) => ({
+    ...row,
+    field_values: parseFieldValuesJson(row.field_values_json)
+  }));
+}
+
+export function getActivityRiskRecord(orgId, recordId) {
+  const row = db
+    .prepare(
+      `SELECT r.*, t.activity_name AS template_activity_name
+       FROM activity_risk_assessment_records r
+       JOIN activity_risk_assessment_templates t ON t.id = r.template_id
+       WHERE r.id = ? AND r.organisation_id = ?`
+    )
+    .get(recordId, orgId);
+  if (!row) return null;
+  return {
+    ...row,
+    field_values: parseFieldValuesJson(row.field_values_json)
+  };
+}
+
+export function createActivityRiskRecord(orgId, templateId, { title = null, userId = null } = {}) {
+  const template = db
+    .prepare(
+      `SELECT * FROM activity_risk_assessment_templates WHERE id = ? AND organisation_id = ?`
+    )
+    .get(templateId, orgId);
+  if (!template) throw new Error('Activity risk assessment template not found.');
+
+  const recordTitle = String(title || template.activity_name || 'Risk assessment').trim();
+  if (!recordTitle) throw new Error('Title is required.');
+
+  const id = uuidv4();
+  db.prepare(
+    `INSERT INTO activity_risk_assessment_records (
+       id, organisation_id, template_id, title, field_values_json,
+       created_by_user_id, updated_by_user_id, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, '{}', ?, ?, datetime('now'), datetime('now'))`
+  ).run(id, orgId, templateId, recordTitle, userId || null, userId || null);
+
+  return getActivityRiskRecord(orgId, id);
+}
+
+export function updateActivityRiskRecord(orgId, recordId, { title, field_values, userId = null } = {}) {
+  const existing = getActivityRiskRecord(orgId, recordId);
+  if (!existing) throw new Error('Risk assessment not found.');
+
+  const nextTitle = title != null ? String(title).trim() : existing.title;
+  if (!nextTitle) throw new Error('Title is required.');
+
+  const nextValues =
+    field_values != null ? field_values : parseFieldValuesJson(existing.field_values_json);
+
+  db.prepare(
+    `UPDATE activity_risk_assessment_records
+     SET title = ?, field_values_json = ?, updated_by_user_id = ?, updated_at = datetime('now')
+     WHERE id = ? AND organisation_id = ?`
+  ).run(nextTitle, serializeFieldValues(nextValues), userId || null, recordId, orgId);
+
+  return getActivityRiskRecord(orgId, recordId);
+}
+
+export function deleteActivityRiskRecord(orgId, recordId) {
+  const res = db
+    .prepare('DELETE FROM activity_risk_assessment_records WHERE id = ? AND organisation_id = ?')
+    .run(recordId, orgId);
+  return res.changes > 0;
+}
+
+export async function generateActivityRiskRecordPdfBuffer(orgId, recordId) {
+  const record = getActivityRiskRecord(orgId, recordId);
+  if (!record) throw new Error('Risk assessment not found.');
+  const blank = await masterPdfBuffer();
+  return fillActivityRiskPdfFields(blank, record.field_values);
+}
+
+/**
+ * Copy a saved (filled) risk assessment into the participant's documents.
+ */
+export async function assignActivityRiskRecordToParticipant(participantId, recordId, { userId = null } = {}) {
+  const participant = db
+    .prepare(`SELECT id, name, provider_org_id FROM participants WHERE id = ?`)
+    .get(participantId);
+  if (!participant) throw new Error('Participant not found.');
+
+  const orgId = participant.provider_org_id;
+  if (!orgId) throw new Error('Participant has no organisation.');
+
+  const record = getActivityRiskRecord(orgId, recordId);
+  if (!record) throw new Error('Risk assessment not found.');
+
+  const buffer = await generateActivityRiskRecordPdfBuffer(orgId, recordId);
+  const datePart = new Date().toISOString().slice(0, 10);
+  const activitySlug = slugifyActivity(record.template_activity_name || record.title);
+  const participantSlug = slugifyActivity(participant.name || 'participant');
+  const downloadName = `health-safety-risk-assessment-${activitySlug}-${participantSlug}-${datePart}.pdf`;
+
+  const uploadsDir = join(getDataRoot(), 'uploads');
+  mkdirSync(uploadsDir, { recursive: true });
+  const storedFilename = `${uuidv4()}-${downloadName}`;
+  const filePath = join(uploadsDir, storedFilename);
+  writeFileSync(filePath, buffer);
+
+  const docId = uuidv4();
+  db.prepare(
+    `INSERT INTO participant_documents (id, participant_id, filename, category, file_path, metadata_json)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    docId,
+    participantId,
+    downloadName,
+    RISK_ASSESSMENT_DOC_CATEGORY,
+    filePath,
+    JSON.stringify({
+      activity_risk_record_id: recordId,
+      activity_risk_template_id: record.template_id,
+      activity_name: record.template_activity_name || record.title,
+      assigned_by_user_id: userId || null,
+      assigned_at: new Date().toISOString()
+    })
+  );
+
+  try {
+    const uploaded = await tryPushParticipantDocument({
+      participantId,
+      category: RISK_ASSESSMENT_DOC_CATEGORY,
+      buffer,
+      originalFilename: downloadName,
+      mimeType: 'application/pdf',
+      notes: `activity_risk_record:${recordId}:${docId}`
+    });
+    if (uploaded?.webUrl || uploaded?.itemId) {
+      db.prepare(
+        `UPDATE participant_documents
+         SET onedrive_web_url = COALESCE(?, onedrive_web_url),
+             onedrive_item_id = COALESCE(?, onedrive_item_id)
+         WHERE id = ?`
+      ).run(uploaded.webUrl || null, uploaded.itemId || null, docId);
+    }
+  } catch (e) {
+    console.warn('[activityRiskAssessments] OneDrive push skipped:', e?.message);
+  }
+
+  return {
+    document_id: docId,
+    participant_id: participantId,
+    filename: downloadName,
+    category: RISK_ASSESSMENT_DOC_CATEGORY,
+    record_id: recordId,
+    template_id: record.template_id,
+    activity_name: record.template_activity_name || record.title,
+    title: record.title
   };
 }

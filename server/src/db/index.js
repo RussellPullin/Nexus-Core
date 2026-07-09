@@ -2277,6 +2277,30 @@ try {
     if (!e.message?.includes('already exists')) console.warn('activity_risk_assessment_templates migration:', e.message);
   }
 
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS activity_risk_assessment_records (
+        id TEXT PRIMARY KEY,
+        organisation_id TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        field_values_json TEXT NOT NULL DEFAULT '{}',
+        created_by_user_id TEXT,
+        updated_by_user_id TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (organisation_id) REFERENCES organisations(id) ON DELETE CASCADE,
+        FOREIGN KEY (template_id) REFERENCES activity_risk_assessment_templates(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_activity_risk_records_org
+        ON activity_risk_assessment_records(organisation_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_risk_records_template
+        ON activity_risk_assessment_records(template_id);
+    `);
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('activity_risk_assessment_records migration:', e.message);
+  }
+
   // One-time data correction: a shift whose date is still in the future can never have been
   // delivered, so it must not sit as 'completed' (and must not carry charges). Earlier imports
   // marked future roster shifts completed when Shifter sent a completed-like status. Reset those

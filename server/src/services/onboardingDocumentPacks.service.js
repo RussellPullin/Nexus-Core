@@ -12,6 +12,11 @@ import { join } from 'path';
 import { db } from '../db/index.js';
 import { renderLibraryDocument } from './documentLibraryRender.service.js';
 import { fillAcroFormWithTokens } from './formFill.service.js';
+import {
+  manifestMatchesOnboardingContext,
+  VALID_PARTICIPANT_SERVICE_TYPES,
+  VALID_STAFF_ONBOARDING_ROLES
+} from '../../../shared/onboardingDocumentContext.js';
 
 function safeAttachmentFilename(name, ext) {
   const base = (name || 'attachment').replace(/[/\\?%*:|"<>]/g, '_').trim() || 'attachment';
@@ -30,20 +35,28 @@ function resolvePolicyFilePath(filePath) {
   return join(dataDir, filePath.replace(/^data\//, ''));
 }
 
+function parseManifest(row) {
+  try {
+    return row?.manifest_json ? JSON.parse(row.manifest_json) : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Active cloned library masters for an org whose manifest `pack` tag matches the
  * given onboarding workflow. These are the branded documents attached to /
  * acknowledged during onboarding.
  * @param {string|null} orgId
  * @param {'staff_onboarding'|'participant_onboarding'} workflow
- * @returns {Array<{ id: string, slug: string, display_name: string }>}
+ * @returns {Array<{ id: string, slug: string, display_name: string, manifest: object }>}
  */
 export function listOnboardingLibraryMasters(orgId, workflow) {
   if (!orgId || !workflow) return [];
   return db
     .prepare(
       `
-    SELECT m.id, m.slug, m.display_name
+    SELECT m.id, m.slug, m.display_name, m.manifest_json
     FROM document_library_masters m
     JOIN document_library_org_clones c ON c.master_id = m.id AND c.org_id = ?
     WHERE c.is_active = 1
@@ -52,7 +65,54 @@ export function listOnboardingLibraryMasters(orgId, workflow) {
     ORDER BY m.display_name COLLATE NOCASE
   `
     )
-    .all(orgId, workflow);
+    .all(orgId, workflow)
+    .map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      display_name: row.display_name,
+      manifest: parseManifest(row)
+    }));
+}
+
+/**
+ * Documents available for runtime selection in the send modal.
+ * @param {string|null} orgId
+ * @param {'staff_onboarding'|'participant_onboarding'} workflow
+ * @param {{ participantServiceType?: string|null, staffRole?: string|null }} [context]
+ */
+export function listOnboardingPackDocumentsForSelection(orgId, workflow, { participantServiceType = null, staffRole = null } = {}) {
+  const ctx =
+    workflow === 'participant_onboarding'
+      ? { participantServiceType: participantServiceType || 'all' }
+      : { staffRole: staffRole || 'all' };
+
+  return listOnboardingLibraryMasters(orgId, workflow).map((master) => ({
+    id: master.id,
+    slug: master.slug,
+    display_name: master.display_name,
+    participant_service_types: master.manifest.participant_service_types || ['all'],
+    staff_roles: master.manifest.staff_roles || ['all'],
+    suggested: manifestMatchesOnboardingContext(master.manifest, ctx)
+  }));
+}
+
+/**
+ * Ensure every master id belongs to the workflow pack and is cloned for the org.
+ * @param {string|null} orgId
+ * @param {'staff_onboarding'|'participant_onboarding'} workflow
+ * @param {string[]} masterIds
+ */
+export function validateOnboardingMasterIds(orgId, workflow, masterIds) {
+  if (!orgId || !workflow) throw new Error('Organisation and workflow required');
+  if (!Array.isArray(masterIds)) throw new Error('master_ids must be an array');
+  if (masterIds.length === 0) return [];
+
+  const allowed = new Set(listOnboardingLibraryMasters(orgId, workflow).map((m) => m.id));
+  const invalid = masterIds.filter((id) => !allowed.has(id));
+  if (invalid.length) {
+    throw new Error('One or more selected documents are not in this onboarding pack for your organisation.');
+  }
+  return masterIds;
 }
 
 /**
@@ -74,22 +134,40 @@ export async function renderLibraryMasterAttachment(master, orgId, { participant
   };
 }
 
+function resolveMastersForAttachments(orgId, workflow, masterIds) {
+  const all = listOnboardingLibraryMasters(orgId, workflow);
+  if (masterIds == null) return all;
+  const selected = new Set(validateOnboardingMasterIds(orgId, workflow, masterIds));
+  return all.filter((m) => selected.has(m.id));
+}
+
 /**
  * Single source of onboarding email attachments:
- *   1. every branded, active, cloned library document tagged for `workflow`;
+ *   1. every branded, active, cloned library document tagged for `workflow`
+ *      (or subset when master_ids provided);
  *   2. the org's uploaded extra PDFs (`company_policy_files`) as an escape hatch.
  *
  * @param {string|null} orgId - organisation id (for library clones + branding)
  * @param {string|null} providerProfileId - provider profile id (for extra uploads)
  * @param {'staff_onboarding'|'participant_onboarding'} workflow
- * @param {{ participant?: object|null, staff?: object|null }} [context]
+ * @param {{
+ *   participant?: object|null,
+ *   staff?: object|null,
+ *   masterIds?: string[]|null,
+ *   includeExtraPdfs?: boolean
+ * }} [context]
  * @returns {Promise<{ attachments: Array<{ filename: string, content: Buffer, contentType: string }> }>}
  */
-export async function buildOnboardingAttachments(orgId, providerProfileId, workflow, { participant = null, staff = null } = {}) {
+export async function buildOnboardingAttachments(
+  orgId,
+  providerProfileId,
+  workflow,
+  { participant = null, staff = null, masterIds = null, includeExtraPdfs = true } = {}
+) {
   const attachments = [];
+  const masters = resolveMastersForAttachments(orgId, workflow, masterIds);
 
-  // 1. Branded library documents tagged for this workflow.
-  for (const master of listOnboardingLibraryMasters(orgId, workflow)) {
+  for (const master of masters) {
     try {
       const att = await renderLibraryMasterAttachment(master, orgId, { participant, staff });
       if (att) attachments.push(att);
@@ -98,8 +176,7 @@ export async function buildOnboardingAttachments(orgId, providerProfileId, workf
     }
   }
 
-  // 2. Escape hatch: the org's uploaded extra PDFs.
-  if (providerProfileId) {
+  if (includeExtraPdfs !== false && providerProfileId) {
     const policies = db
       .prepare(
         `SELECT id, display_name, file_path FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`
@@ -149,3 +226,5 @@ export function listPoliciesForStaffOnboarding(providerProfileId) {
 
   return [...libraryDocs, ...extraDocs];
 }
+
+export { VALID_PARTICIPANT_SERVICE_TYPES, VALID_STAFF_ONBOARDING_ROLES };

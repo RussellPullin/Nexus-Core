@@ -689,3 +689,63 @@ export async function writeGenericActivityRiskMaster(targetPath) {
 export function bundledMasterPath() {
   return join(projectRoot, 'server', 'data', 'forms', 'templates', 'activity-risk-assessment', 'master', GENERIC_MASTER_FILENAME);
 }
+
+/** @param {Buffer|Uint8Array} pdfBytes */
+export async function listActivityRiskPdfFieldSchema(pdfBytes) {
+  const pdfDoc = await PdfLibDocument.load(pdfBytes);
+  const form = pdfDoc.getForm();
+  return form.getFields().map((field) => {
+    const name = field.getName();
+    const ctor = field.constructor.name;
+    let type = 'text';
+    if (ctor === 'PDFCheckBox') type = 'checkbox';
+    else if (ctor === 'PDFTextField') type = field.isMultiline() ? 'textarea' : 'text';
+    return { name, type };
+  });
+}
+
+/** @param {Buffer|Uint8Array} pdfBytes @param {Record<string, unknown>} fieldValues */
+export async function fillActivityRiskPdfFields(pdfBytes, fieldValues) {
+  const pdfDoc = await PdfLibDocument.load(pdfBytes);
+  const form = pdfDoc.getForm();
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  for (const [name, raw] of Object.entries(fieldValues || {})) {
+    if (raw == null) continue;
+    let field;
+    try {
+      field = form.getField(name);
+    } catch {
+      continue;
+    }
+    const ctor = field.constructor.name;
+    if (ctor === 'PDFTextField') {
+      field.setText(String(raw));
+      try {
+        field.updateAppearances(font);
+      } catch {
+        /* appearance optional */
+      }
+    } else if (ctor === 'PDFCheckBox') {
+      if (raw === true || raw === 'true' || raw === '1' || raw === 1 || raw === 'yes') {
+        field.check();
+      } else {
+        field.uncheck();
+      }
+    }
+  }
+  return Buffer.from(await pdfDoc.save({ updateFieldAppearances: true }));
+}
+
+/** @param {Buffer|Uint8Array} pdfBytes */
+export async function extractActivityRiskPdfFieldValues(pdfBytes) {
+  const pdfDoc = await PdfLibDocument.load(pdfBytes);
+  const form = pdfDoc.getForm();
+  const out = {};
+  for (const field of form.getFields()) {
+    const name = field.getName();
+    const ctor = field.constructor.name;
+    if (ctor === 'PDFTextField') out[name] = field.getText() || '';
+    else if (ctor === 'PDFCheckBox') out[name] = field.isChecked();
+  }
+  return out;
+}

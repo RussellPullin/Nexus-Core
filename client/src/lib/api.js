@@ -113,12 +113,33 @@ export const microsoftDrive = {
 /** Org catalogue of activity (health & safety) risk assessment blank PDFs. */
 export const activityRiskAssessments = {
   list: () => fetchApi('/activity-risk-assessments'),
+  fieldSchema: () => fetchApi('/activity-risk-assessments/field-schema'),
   create: (activity_name) =>
     fetchApi('/activity-risk-assessments', { method: 'POST', body: JSON.stringify({ activity_name }) }),
   delete: (id) => fetchApi(`/activity-risk-assessments/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   fileUrl: (id) => `${API}/activity-risk-assessments/${encodeURIComponent(id)}/file`,
   assignToParticipant: (templateId, participantId) =>
     fetchApi(`/activity-risk-assessments/${encodeURIComponent(templateId)}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ participant_id: participantId })
+    }),
+  listRecords: () => fetchApi('/activity-risk-assessments/records'),
+  getRecord: (recordId) => fetchApi(`/activity-risk-assessments/records/${encodeURIComponent(recordId)}`),
+  createRecord: (template_id, title) =>
+    fetchApi('/activity-risk-assessments/records', {
+      method: 'POST',
+      body: JSON.stringify({ template_id, ...(title ? { title } : {}) })
+    }),
+  updateRecord: (recordId, payload) =>
+    fetchApi(`/activity-risk-assessments/records/${encodeURIComponent(recordId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+  deleteRecord: (recordId) =>
+    fetchApi(`/activity-risk-assessments/records/${encodeURIComponent(recordId)}`, { method: 'DELETE' }),
+  recordFileUrl: (recordId) => `${API}/activity-risk-assessments/records/${encodeURIComponent(recordId)}/file`,
+  assignRecordToParticipant: (recordId, participantId) =>
+    fetchApi(`/activity-risk-assessments/records/${encodeURIComponent(recordId)}/assign`, {
       method: 'POST',
       body: JSON.stringify({ participant_id: participantId })
     })
@@ -610,6 +631,10 @@ export const documentLibrary = {
   renderMaster: (masterId, body = {}) => fetchApi(`/document-library/masters/${masterId}/render`, {
     method: 'POST',
     body: JSON.stringify(body)
+  }),
+  updateMasterPack: (masterId, pack) => fetchApi(`/document-library/masters/${masterId}/pack`, {
+    method: 'PATCH',
+    body: JSON.stringify({ pack })
   })
 };
 

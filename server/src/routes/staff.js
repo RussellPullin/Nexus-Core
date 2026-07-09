@@ -14,7 +14,8 @@ import { computeHoursFromShifts } from '../services/shiftHours.service.js';
 import { ensureProviderProfile, assertStaffOnboardingReady } from '../services/onboarding.service.js';
 import { orchestrateStaffOnboarding } from '../services/staffOnboardingOrchestrator.service.js';
 import { generateStaffContractBuffers } from '../services/staffContractFill.service.js';
-import { buildOnboardingAttachments } from '../services/onboardingDocumentPacks.service.js';
+import { buildOnboardingAttachments, validateOnboardingMasterIds } from '../services/onboardingDocumentPacks.service.js';
+import { VALID_STAFF_ONBOARDING_ROLES } from '../../../shared/onboardingDocumentContext.js';
 import { getStaffIntakeFieldMap, mergeStaffIntakeForProfile } from '../services/staffOnboardingSync.service.js';
 import { STAFF_ONBOARDING_FIELD_DEFS } from '../../../shared/onboardingFieldRegistry.js';
 import {
@@ -1071,13 +1072,27 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     text += `If you have any questions, contact your manager.`;
 
     const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
+    const masterIds = req.body?.master_ids;
+    const hasSelection = Array.isArray(masterIds);
+    const staffRole = req.body?.staff_role || null;
+    if (staffRole && !VALID_STAFF_ONBOARDING_ROLES.has(staffRole)) {
+      return res.status(400).json({ error: 'invalid staff_role' });
+    }
+    const includeExtraPdfs = req.body?.include_extra_pdfs !== false;
+    if (hasSelection) {
+      validateOnboardingMasterIds(profile?.organisation_id, 'staff_onboarding', masterIds);
+    }
     let allAttachments = [];
     try {
       const { attachments } = await buildOnboardingAttachments(
         profile?.organisation_id,
         providerProfileId,
         'staff_onboarding',
-        { staff: staffFull }
+        {
+          staff: staffFull,
+          masterIds: hasSelection ? masterIds : null,
+          includeExtraPdfs
+        }
       );
       allAttachments = attachments;
     } catch (err) {

@@ -39,7 +39,9 @@ import { fileURLToPath } from 'url';
 import { fillConsentForm, getConsentFormPath, convertDocxToPdf } from '../services/consentForm.service.js';
 import { tryPushParticipantDocument } from '../services/orgOnedriveSync.service.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from '../services/notification.service.js';
-import { buildOnboardingAttachments } from '../services/onboardingDocumentPacks.service.js';
+import { buildOnboardingAttachments, validateOnboardingMasterIds } from '../services/onboardingDocumentPacks.service.js';
+import { VALID_PARTICIPANT_SERVICE_TYPES } from '../../../shared/onboardingDocumentContext.js';
+import { sessionIsAdminOrDelegate } from '../middleware/roles.js';
 import { orchestrateParticipantOnboarding } from '../services/participantOnboardingOrchestrator.service.js';
 import {
   issueIntakeToken,
@@ -246,6 +248,18 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
   try {
     const userId = req.session?.user?.id;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const masterIds = req.body?.master_ids;
+    const hasSelection = Array.isArray(masterIds);
+    if (hasSelection && !sessionIsAdminOrDelegate(req.session)) {
+      return res.status(403).json({ error: 'Document selection requires admin or delegate access' });
+    }
+
+    const participantServiceType = req.body?.participant_service_type || null;
+    if (participantServiceType && !VALID_PARTICIPANT_SERVICE_TYPES.has(participantServiceType)) {
+      return res.status(400).json({ error: 'invalid participant_service_type' });
+    }
+
     if (!isEmailConfiguredForUser(userId)) {
       return res.status(400).json({
         error: 'Connect your email in Settings to send messages.',
@@ -262,11 +276,19 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
     const pp = db.prepare(`SELECT organisation_id FROM provider_profiles WHERE id = ?`).get(onboarding.provider_profile_id);
     const orgId = pp?.organisation_id || null;
     const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(req.params.id);
+    const includeExtraPdfs = req.body?.include_extra_pdfs !== false;
+    if (hasSelection) {
+      validateOnboardingMasterIds(orgId, 'participant_onboarding', masterIds);
+    }
     const { attachments } = await buildOnboardingAttachments(
       orgId,
       onboarding.provider_profile_id,
       'participant_onboarding',
-      { participant: fullParticipant }
+      {
+        participant: fullParticipant,
+        masterIds: hasSelection ? masterIds : null,
+        includeExtraPdfs
+      }
     );
     if (!attachments.length) {
       return res.status(400).json({
@@ -302,7 +324,10 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
       eventType: 'onboarding_document_pack_sent',
       entityType: 'onboarding',
       entityId: onboarding.id,
-      newValue: { attachment_count: attachments.length },
+      newValue: {
+        attachment_count: attachments.length,
+        ...(hasSelection ? { master_ids: masterIds, participant_service_type: participantServiceType } : {})
+      },
       sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
       userAgent: req.headers['user-agent'] || null
     });

@@ -18,19 +18,25 @@
  *   "template_file": "template.docx",
  *   "placeholders": ["org.legal_name", "org.abn", "org.signatory.name", "today_long"],
  *   "required_signer_role": "participant",       // optional
- *   "renewal_days": 365                          // optional
+ *   "renewal_days": 365,                         // optional
+ *   "participant_service_types": ["all"],        // optional — sil | sda | support_coordination | core_supports | all
+ *   "staff_roles": ["all"]                       // optional — disability_support_worker | support_coordinator | admin | all
  * }
  *
  * On boot (or on demand) we walk the library, validate each manifest, and upsert into
  * `document_library_masters`. From there each org can clone into its own row via
  * `cloneLibraryMasterToOrg(masterId, orgId)`.
  */
-import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { unknownPlaceholders } from '../lib/templateTokens.js';
+import {
+  VALID_PARTICIPANT_SERVICE_TYPES,
+  VALID_STAFF_ONBOARDING_ROLES
+} from '../../../shared/onboardingDocumentContext.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
@@ -39,6 +45,12 @@ const defaultLibraryRoot = process.env.DOCUMENT_LIBRARY_DIR
 
 const VALID_ENGINES = new Set(['docxtemplater', 'pdf-acroform', 'html']);
 const VALID_CATEGORIES = new Set(['policy', 'procedure', 'register', 'contract', 'form', 'guide']);
+export const VALID_LIBRARY_PACKS = new Set([
+  'participant_onboarding',
+  'staff_onboarding',
+  'policy_library',
+  'compliance_register'
+]);
 
 /**
  * @param {string} [rootDir]
@@ -168,6 +180,18 @@ function validateManifest(manifest, dirName) {
   }
   if (!manifest.version) return { error: 'version missing' };
   if (!manifest.template_file) return { error: 'template_file missing' };
+  const serviceTypes = manifest.participant_service_types;
+  if (serviceTypes != null) {
+    if (!Array.isArray(serviceTypes)) return { error: 'participant_service_types must be an array' };
+    const bad = serviceTypes.filter((t) => !VALID_PARTICIPANT_SERVICE_TYPES.has(t));
+    if (bad.length) return { error: `invalid participant_service_types: ${bad.join(', ')}` };
+  }
+  const staffRoles = manifest.staff_roles;
+  if (staffRoles != null) {
+    if (!Array.isArray(staffRoles)) return { error: 'staff_roles must be an array' };
+    const bad = staffRoles.filter((t) => !VALID_STAFF_ONBOARDING_ROLES.has(t));
+    if (bad.length) return { error: `invalid staff_roles: ${bad.join(', ')}` };
+  }
   return { error: null };
 }
 
@@ -220,7 +244,9 @@ function enrichLibraryMasterRow(row) {
     pack: manifest.pack || null,
     signature_count: Number(manifest.signature_count) || 0,
     category: row.category || manifest.category || null,
-    required_signer_role: row.required_signer_role ?? manifest.required_signer_role ?? null
+    required_signer_role: row.required_signer_role ?? manifest.required_signer_role ?? null,
+    participant_service_types: manifest.participant_service_types || ['all'],
+    staff_roles: manifest.staff_roles || ['all']
   };
 }
 
@@ -241,4 +267,116 @@ export function listLibraryMasters(orgId = null) {
     ORDER BY m.category, m.display_name
   `).all(orgId);
   return rows.map(enrichLibraryMasterRow);
+}
+
+/**
+ * Change a master's automation pack. Updates manifest.json on disk, the catalogue index,
+ * and the DB manifest_json row. Affects all organisations (global master change).
+ *
+ * @param {string} masterId
+ * @param {string} pack
+ */
+export function updateLibraryMasterPack(masterId, pack) {
+  if (!VALID_LIBRARY_PACKS.has(pack)) {
+    throw new Error(`pack must be one of: ${[...VALID_LIBRARY_PACKS].join(', ')}`);
+  }
+  const master = db.prepare('SELECT * FROM document_library_masters WHERE id = ? AND is_active = 1').get(masterId);
+  if (!master) throw new Error('Master not found');
+
+  const slug = master.slug;
+  const manifestPath = join(defaultLibraryRoot, slug, 'manifest.json');
+  if (!existsSync(manifestPath)) {
+    throw new Error(`manifest.json not found on disk for ${slug}`);
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch (err) {
+    throw new Error(`manifest.json invalid JSON: ${err.message}`);
+  }
+  manifest.pack = pack;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const cataloguePath = join(defaultLibraryRoot, '_catalogue.json');
+  if (existsSync(cataloguePath)) {
+    let catalogue;
+    try {
+      catalogue = JSON.parse(readFileSync(cataloguePath, 'utf8'));
+    } catch (err) {
+      throw new Error(`_catalogue.json invalid JSON: ${err.message}`);
+    }
+    if (Array.isArray(catalogue)) {
+      const idx = catalogue.findIndex((entry) => entry?.slug === slug);
+      if (idx >= 0) {
+        catalogue[idx].pack = pack;
+        writeFileSync(cataloguePath, `${JSON.stringify(catalogue, null, 2)}\n`);
+      }
+    }
+  }
+
+  db.prepare(`
+    UPDATE document_library_masters
+    SET manifest_json = ?, updated_at = datetime('now'), last_synced_at = datetime('now')
+    WHERE id = ?
+  `).run(JSON.stringify(manifest), masterId);
+
+  const updated = db.prepare('SELECT * FROM document_library_masters WHERE id = ?').get(masterId);
+  return enrichLibraryMasterRow(updated);
+}
+
+function writeManifestToDisk(slug, manifest) {
+  const manifestPath = join(defaultLibraryRoot, slug, 'manifest.json');
+  if (!existsSync(manifestPath)) {
+    throw new Error(`manifest.json not found on disk for ${slug}`);
+  }
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+/**
+ * Update contextual tags on a master (service types / staff roles).
+ * @param {string} masterId
+ * @param {{ participant_service_types?: string[], staff_roles?: string[] }} tags
+ */
+export function updateLibraryMasterContextTags(masterId, tags = {}) {
+  const master = db.prepare('SELECT * FROM document_library_masters WHERE id = ? AND is_active = 1').get(masterId);
+  if (!master) throw new Error('Master not found');
+
+  const slug = master.slug;
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(defaultLibraryRoot, slug, 'manifest.json'), 'utf8'));
+  } catch (err) {
+    throw new Error(`manifest.json invalid JSON: ${err.message}`);
+  }
+
+  if (tags.participant_service_types != null) {
+    if (!Array.isArray(tags.participant_service_types)) {
+      throw new Error('participant_service_types must be an array');
+    }
+    const bad = tags.participant_service_types.filter((t) => !VALID_PARTICIPANT_SERVICE_TYPES.has(t));
+    if (bad.length) throw new Error(`invalid participant_service_types: ${bad.join(', ')}`);
+    manifest.participant_service_types = tags.participant_service_types;
+  }
+  if (tags.staff_roles != null) {
+    if (!Array.isArray(tags.staff_roles)) {
+      throw new Error('staff_roles must be an array');
+    }
+    const bad = tags.staff_roles.filter((t) => !VALID_STAFF_ONBOARDING_ROLES.has(t));
+    if (bad.length) throw new Error(`invalid staff_roles: ${bad.join(', ')}`);
+    manifest.staff_roles = tags.staff_roles;
+  }
+
+  const validation = validateManifest(manifest, slug);
+  if (validation.error) throw new Error(validation.error);
+
+  writeManifestToDisk(slug, manifest);
+  db.prepare(`
+    UPDATE document_library_masters
+    SET manifest_json = ?, updated_at = datetime('now'), last_synced_at = datetime('now')
+    WHERE id = ?
+  `).run(JSON.stringify(manifest), masterId);
+
+  const updated = db.prepare('SELECT * FROM document_library_masters WHERE id = ?').get(masterId);
+  return enrichLibraryMasterRow(updated);
 }
