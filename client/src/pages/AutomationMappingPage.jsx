@@ -64,7 +64,7 @@ const LIBRARY_PACK_GROUPS = [
   {
     pack: 'policy_library',
     title: 'Library only (not auto-emailed)',
-    lede: 'Available in your branded document library for manual use. Not attached to onboarding emails.',
+    lede: 'Available in your branded document library for manual use. To include one in onboarding emails, check Participant or Staff onboarding on that row (this replaces Library only).',
     defaultExpanded: false
   },
   {
@@ -149,10 +149,13 @@ function PackCheckboxes({ doc, canEdit, onPacksChange, isSaving, checkboxRevisio
   const docId = doc.id || doc.slug;
   const currentPacks = docPacks(doc);
   const exclusiveSelected = currentPacks.find((p) => p === 'policy_library' || p === 'compliance_register') || null;
-  const onboardingDisabled = Boolean(exclusiveSelected) || isSaving;
 
   const toggleOnboarding = (packValue, checked) => {
-    const base = currentPacks.filter((p) => p !== 'policy_library' && p !== 'compliance_register');
+    // Transitioning from Library only / Register template: replace the exclusive pack
+    // in one step instead of forcing an intermediate "Unassigned" save first.
+    const base = exclusiveSelected
+      ? []
+      : currentPacks.filter((p) => p !== 'policy_library' && p !== 'compliance_register');
     const next = checked ? [...new Set([...base, packValue])] : base.filter((p) => p !== packValue);
     onPacksChange(doc, next);
   };
@@ -174,11 +177,11 @@ function PackCheckboxes({ doc, canEdit, onPacksChange, isSaving, checkboxRevisio
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
         {ONBOARDING_PACK_OPTIONS.map((opt) => (
-          <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', cursor: onboardingDisabled ? 'not-allowed' : 'pointer' }}>
+          <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', cursor: isSaving ? 'not-allowed' : 'pointer' }}>
             <input
               type="checkbox"
               checked={currentPacks.includes(opt.value)}
-              disabled={onboardingDisabled}
+              disabled={isSaving}
               onChange={(e) => toggleOnboarding(opt.value, e.target.checked)}
             />
             <span>{opt.label}</span>
@@ -197,6 +200,11 @@ function PackCheckboxes({ doc, canEdit, onPacksChange, isSaving, checkboxRevisio
           </label>
         ))}
       </div>
+      {exclusiveSelected ? (
+        <span style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.7rem', color: '#64748b', maxWidth: '14rem' }}>
+          Check an onboarding option above to move this document out of Library only.
+        </span>
+      ) : null}
       {hasBothOnboardingPacks(currentPacks) ? (
         <span style={{ display: 'inline-block', marginTop: '0.25rem', fontSize: '0.7rem', fontWeight: 600, color: '#1d4ed8' }}>
           Both workflows
