@@ -333,6 +333,7 @@ export function listLibraryMasters(orgId = null) {
            c.variable_overrides_json
     FROM document_library_masters m
     LEFT JOIN document_library_org_clones c ON c.master_id = m.id AND c.org_id = ?
+    WHERE m.is_active = 1
     ORDER BY m.category, m.display_name
   `).all(orgId);
   return rows.map(enrichLibraryMasterRow);
