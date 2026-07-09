@@ -181,20 +181,17 @@ export default function WeekPlanner({
   };
 
   const handleCreateOpenShiftFromPending = async (e) => {
-    e?.preventDefault?.();
-    e?.stopPropagation?.();
+    e.preventDefault();
+    e.stopPropagation();
     if (!pendingDrop?.participant_id || pendingDrop.staff_id) return;
-    try {
-      await onCreateOpenShift?.({
-        participant_id: pendingDrop.participant_id,
-        start_time: pendingDrop.start_time,
-        end_time: pendingDrop.end_time,
-        notes: ''
-      });
-      setPendingDrop(null);
-    } catch (err) {
-      console.error(err);
-    }
+    if (!onCreateOpenShift) return;
+    await onCreateOpenShift({
+      participant_id: pendingDrop.participant_id,
+      start_time: pendingDrop.start_time,
+      end_time: pendingDrop.end_time,
+      notes: ''
+    });
+    setPendingDrop(null);
   };
 
   const handleDrop = async (e, dateStr, slotIndex) => {
@@ -590,6 +587,7 @@ export default function WeekPlanner({
                           <button
                             type="button"
                             className="week-planner-post-open-btn"
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={handleCreateOpenShiftFromPending}
                           >
                             Post as available shift

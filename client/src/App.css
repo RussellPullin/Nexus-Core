@@ -1343,6 +1343,9 @@ input[type="radio"] {
   background: #fff;
   color: #c2410c;
   cursor: pointer;
+  pointer-events: auto;
+  position: relative;
+  z-index: 5;
 }
 
 .week-planner-post-open-btn:hover {
