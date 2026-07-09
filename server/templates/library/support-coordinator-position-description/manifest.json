@@ -18,5 +18,8 @@
   "is_active": true,
   "staff_roles": [
     "support_coordinator"
+  ],
+  "packs": [
+    "staff_onboarding"
   ]
 }

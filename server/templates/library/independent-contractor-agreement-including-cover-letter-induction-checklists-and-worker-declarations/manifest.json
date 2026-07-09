@@ -21,5 +21,8 @@
   "is_active": true,
   "staff_roles": [
     "disability_support_worker"
+  ],
+  "packs": [
+    "staff_onboarding"
   ]
 }

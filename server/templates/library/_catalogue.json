@@ -16,7 +16,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "all"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "administering-medication-checklist-medication-chart",
@@ -37,7 +43,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "administration-business-development-position-description",
@@ -56,7 +65,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "admin"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "advocacy-of-support-person-request-form",
@@ -76,7 +91,10 @@
     "required_signer_role": "participant",
     "signature_count": 1,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "business-continuity-and-disaster-management-plan",
@@ -100,7 +118,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "change-of-supports",
@@ -119,7 +140,10 @@
     "required_signer_role": "participant",
     "signature_count": 1,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "choice-advocacy-and-control-policy",
@@ -141,7 +165,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "client-cash-reconciliation",
@@ -161,7 +188,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "client-emergency-plan",
@@ -181,7 +211,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "client-induction-checklist",
@@ -200,7 +233,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "all"
+    ],
+    "packs": [
+      "participant_onboarding"
+    ]
   },
   {
     "slug": "client-information-booklet",
@@ -222,7 +261,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "all"
+    ],
+    "packs": [
+      "participant_onboarding"
+    ]
   },
   {
     "slug": "client-information-booklet-easy-read",
@@ -244,7 +289,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "all"
+    ],
+    "packs": [
+      "participant_onboarding"
+    ]
   },
   {
     "slug": "client-intake-form",
@@ -264,7 +315,13 @@
     "required_signer_role": "participant",
     "signature_count": 1,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "all"
+    ],
+    "packs": [
+      "participant_onboarding"
+    ]
   },
   {
     "slug": "client-money-and-property-policy",
@@ -286,7 +343,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "client-support-plan",
@@ -306,7 +366,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "client-survey",
@@ -326,7 +389,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "collection-storage-of-medicine-register",
@@ -346,7 +412,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "complaints-register",
@@ -366,7 +435,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "conflict-of-interest-declaration",
@@ -386,7 +458,13 @@
     "required_signer_role": "worker",
     "signature_count": 1,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "all"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "conflict-of-interest-policy",
@@ -408,7 +486,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "conflict-of-interest-register",
@@ -427,7 +508,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "continuous-improvement-register",
@@ -447,7 +531,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "covid-19-pandemic-management-policy",
@@ -469,7 +556,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "delegation-of-authority",
@@ -490,7 +580,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "disability-support-worker-employment-consultant-position-description",
@@ -509,7 +602,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "disability_support_worker"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "disability-support-worker-position-description",
@@ -528,7 +627,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "disability_support_worker"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "disability-support-worker-position-description-travel-and-transport",
@@ -547,7 +652,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "disability_support_worker"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "diversity-policy",
@@ -569,7 +680,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "document-register",
@@ -589,7 +703,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "emergency-and-disaster-preparedness-policy",
@@ -612,7 +729,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "emergency-test-register",
@@ -632,7 +752,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "emergency-waste-management-plan",
@@ -652,7 +775,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "exit-and-transition-form",
@@ -672,7 +798,10 @@
     "required_signer_role": "participant",
     "signature_count": 1,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "exit-interview-form",
@@ -691,7 +820,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "feedback-and-complaints-assessment-investigation-and-resolution-considerations",
@@ -711,7 +843,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "feedback-and-complaints-criteria-for-complaint-manager-or-incident-manager",
@@ -731,7 +866,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "feedback-and-complaints-form",
@@ -753,7 +891,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "feedback-and-complaints-policy",
@@ -777,7 +918,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "feedback-and-complaints-procedural-fairness-considerations",
@@ -797,7 +941,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "feedback-and-complaints-summary",
@@ -819,7 +966,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "feedback-and-compliments-register",
@@ -839,7 +989,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "governance-policy",
@@ -861,7 +1014,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "hr-performance-appraisal",
@@ -881,7 +1037,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "human-resources-management-policy",
@@ -903,7 +1062,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "incident-management-and-reporting-policy",
@@ -925,7 +1087,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "incident-management-register",
@@ -945,7 +1110,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "incident-report-form",
@@ -965,7 +1133,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "independent-contractor-agreement-including-cover-letter-induction-checklists-and-worker-declarations",
@@ -987,7 +1158,13 @@
     "required_signer_role": "worker",
     "signature_count": 1,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "disability_support_worker"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "infection-control-policy",
@@ -1009,7 +1186,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "information-management-policy",
@@ -1031,7 +1211,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "interview-report-pro-forma",
@@ -1050,7 +1233,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "legislation-register",
@@ -1070,7 +1256,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "letter-of-engagement-casual-employee",
@@ -1093,7 +1282,13 @@
     "required_signer_role": "worker",
     "signature_count": 2,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "all"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "management-meeting-agenda",
@@ -1114,7 +1309,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "management-of-medication-policy",
@@ -1136,7 +1334,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "managing-and-reducing-known-risks-matrix",
@@ -1155,7 +1356,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "mealtime-management-plan",
@@ -1175,7 +1379,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "mealtime-management-policy",
@@ -1197,7 +1404,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "money-and-property-declaration",
@@ -1221,7 +1431,10 @@
     "required_signer_role": "worker",
     "signature_count": 1,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "my-ndis-support-record",
@@ -1241,7 +1454,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "policy-register",
@@ -1261,7 +1477,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "position-description-template",
@@ -1280,7 +1499,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "position-description-template-director",
@@ -1299,7 +1521,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "potential-staff-reference-check-form",
@@ -1318,7 +1543,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "pre-employment-collection-form",
@@ -1337,7 +1565,13 @@
     "required_signer_role": "worker",
     "signature_count": 1,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "all"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "preventing-and-responding-to-violence-abuse-neglect-exploitation-and-discrimination-policy",
@@ -1359,7 +1593,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "privacy-consent-form",
@@ -1379,7 +1616,13 @@
     "required_signer_role": "participant",
     "signature_count": 1,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "all"
+    ],
+    "packs": [
+      "participant_onboarding"
+    ]
   },
   {
     "slug": "privacy-policy",
@@ -1401,7 +1644,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "progress-notes-template",
@@ -1420,7 +1666,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "promoting-and-protecting-rights",
@@ -1442,7 +1691,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "provision-of-supports-policy",
@@ -1464,7 +1716,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "quality-management-and-continuous-improvement-policy",
@@ -1486,7 +1741,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "risk-assessed-role-register",
@@ -1510,7 +1768,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "risk-assessment-form",
@@ -1532,7 +1793,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "risk-management-policy",
@@ -1554,7 +1818,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "risk-register",
@@ -1576,7 +1843,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "risk-taking-form",
@@ -1597,7 +1867,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "sda-and-sil-collaboration-agreement",
@@ -1620,7 +1893,13 @@
     "required_signer_role": "participant",
     "signature_count": 2,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "sil"
+    ],
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "service-schedule",
@@ -1640,7 +1919,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "all"
+    ],
+    "packs": [
+      "participant_onboarding"
+    ]
   },
   {
     "slug": "services-agreement",
@@ -1664,7 +1949,13 @@
     "required_signer_role": "participant",
     "signature_count": 2,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "all"
+    ],
+    "packs": [
+      "participant_onboarding"
+    ]
   },
   {
     "slug": "services-agreement-sil",
@@ -1688,7 +1979,13 @@
     "required_signer_role": "participant",
     "signature_count": 2,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "sil"
+    ],
+    "packs": [
+      "participant_onboarding"
+    ]
   },
   {
     "slug": "services-medication-and-participant-details",
@@ -1709,7 +2006,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "staff-exit-checklist",
@@ -1729,7 +2029,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "staff-file-checklist",
@@ -1748,7 +2051,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "staff-induction-checklist",
@@ -1767,7 +2073,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "all"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "staff-performance-improvement-plan",
@@ -1786,7 +2098,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "subject-to-a-significant-risk-factor-register",
@@ -1806,7 +2121,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "support-coordination-policy",
@@ -1828,7 +2146,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "support_coordination"
+    ],
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "support-coordination-services-agreement",
@@ -1852,7 +2176,13 @@
     "required_signer_role": "participant",
     "signature_count": 2,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "support_coordination"
+    ],
+    "packs": [
+      "participant_onboarding"
+    ]
   },
   {
     "slug": "support-coordinator-position-description",
@@ -1871,7 +2201,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "support_coordinator"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "supported-independent-living-policy",
@@ -1893,7 +2229,13 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "participant_service_types": [
+      "sil"
+    ],
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "training-and-development-register",
@@ -1912,7 +2254,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "training-feedback-form",
@@ -1932,7 +2277,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "waste-management-plan",
@@ -1952,7 +2300,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "waste-management-policy",
@@ -1974,7 +2325,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "waste-management-report",
@@ -1994,7 +2348,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "waste-removal-records-register",
@@ -2014,7 +2371,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "compliance_register"
+    ]
   },
   {
     "slug": "work-health-and-safety-checklist",
@@ -2034,7 +2394,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "work-health-and-safety-policy",
@@ -2056,7 +2419,10 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   },
   {
     "slug": "worker-conflict-of-interest-declaration",
@@ -2076,7 +2442,13 @@
     "required_signer_role": "worker",
     "signature_count": 1,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "all"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "worker-declarations",
@@ -2095,7 +2467,13 @@
     "required_signer_role": "worker",
     "signature_count": 1,
     "renewal_days": 365,
-    "is_active": true
+    "is_active": true,
+    "staff_roles": [
+      "all"
+    ],
+    "packs": [
+      "staff_onboarding"
+    ]
   },
   {
     "slug": "worker-supervision-record",
@@ -2114,6 +2492,9 @@
     "required_signer_role": null,
     "signature_count": 0,
     "renewal_days": null,
-    "is_active": true
+    "is_active": true,
+    "packs": [
+      "policy_library"
+    ]
   }
 ]

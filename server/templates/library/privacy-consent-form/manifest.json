@@ -19,5 +19,8 @@
   "is_active": true,
   "participant_service_types": [
     "all"
+  ],
+  "packs": [
+    "participant_onboarding"
   ]
 }

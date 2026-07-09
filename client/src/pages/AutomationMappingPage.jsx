@@ -30,13 +30,7 @@ const PACK_LABELS = {
   compliance_register: 'Register template'
 };
 
-const PACK_OPTIONS = [
-  'participant_onboarding',
-  'staff_onboarding',
-  'policy_library',
-  'compliance_register'
-];
-
+const ONBOARDING_PACK_OPTIONS = [
   { value: 'participant_onboarding', label: 'Participant onboarding emails' },
   { value: 'staff_onboarding', label: 'Staff onboarding emails' }
 ];

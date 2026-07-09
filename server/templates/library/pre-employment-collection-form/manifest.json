@@ -18,5 +18,8 @@
   "is_active": true,
   "staff_roles": [
     "all"
+  ],
+  "packs": [
+    "staff_onboarding"
   ]
 }

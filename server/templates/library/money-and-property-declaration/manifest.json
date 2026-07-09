@@ -20,5 +20,8 @@
   "required_signer_role": "worker",
   "signature_count": 1,
   "renewal_days": 365,
-  "is_active": true
+  "is_active": true,
+  "packs": [
+    "policy_library"
+  ]
 }

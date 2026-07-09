@@ -21,5 +21,8 @@
   "is_active": true,
   "participant_service_types": [
     "support_coordination"
+  ],
+  "packs": [
+    "policy_library"
   ]
 }

@@ -20,5 +20,8 @@
   "required_signer_role": null,
   "signature_count": 0,
   "renewal_days": null,
-  "is_active": true
+  "is_active": true,
+  "packs": [
+    "policy_library"
+  ]
 }
