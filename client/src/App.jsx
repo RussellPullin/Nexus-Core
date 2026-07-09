@@ -66,6 +66,7 @@ function ProductLayout() {
 
 function Layout({ productSurface, children }) {
   const { user, logout, canManageUsers, canAccessCaseTasks } = useAuth();
+  const location = useLocation();
   const [emailBannerDismissed, setEmailBannerDismissed] = useState(() =>
     typeof sessionStorage !== 'undefined' && sessionStorage.getItem(EMAIL_BANNER_KEY) === '1'
   );
@@ -144,7 +145,7 @@ function Layout({ productSurface, children }) {
           )}
           <NavLink
             to={`${prefix}/forms`}
-            className={({ isActive, location }) =>
+            className={({ isActive }) =>
               isActive || location.pathname.includes('/forms/')
                 ? 'nav-link active'
                 : 'nav-link'
