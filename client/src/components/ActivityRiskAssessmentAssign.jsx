@@ -16,7 +16,7 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
     activityRiskAssessments
       .listRecords()
       .then((res) => {
-        const list = res?.records || [];
+        const list = (res?.records || []).filter((r) => r.is_complete);
         setRecords(list);
         setSelectedId((prev) => (prev && list.some((r) => r.id === prev) ? prev : list[0]?.id || ''));
       })
@@ -28,9 +28,16 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
     reload();
   }, [reload]);
 
+  const selectedRecord = records.find((r) => r.id === selectedId);
+  const alreadyAssigned = (selectedRecord?.assignments || []).some((a) => a.participant_id === participantId);
+
   const handleAssign = async () => {
     if (!selectedId) {
-      setMessage('Choose a saved risk assessment.');
+      setMessage('Choose a completed activity risk assessment.');
+      return;
+    }
+    if (alreadyAssigned) {
+      setMessage('This participant already has that assessment.');
       return;
     }
     setBusy(true);
@@ -38,6 +45,7 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
     try {
       const result = await activityRiskAssessments.assignRecordToParticipant(selectedId, participantId);
       setMessage(`Added “${result.filename}” to this participant’s documents.`);
+      reload();
       if (onAssigned) onAssigned();
     } catch (err) {
       setMessage(err.message || 'Could not add risk assessment.');
@@ -46,18 +54,20 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
     }
   };
 
-  if (loading) return <p className="forms-muted" style={{ fontSize: '0.9rem' }}>Loading saved risk assessments…</p>;
+  if (loading) return <p className="forms-muted" style={{ fontSize: '0.9rem' }}>Loading activity risk assessments…</p>;
   if (!records.length) {
     return (
       <p className="forms-muted" style={{ fontSize: '0.9rem' }}>
-        No saved risk assessments yet. Create and fill one under{' '}
+        No completed activity risk assessments yet. Complete one under{' '}
         <Link to={`${pathPrefix}/forms`}>Forms → Activity risk assessments</Link>, then return here to add it to this
         participant.
       </p>
     );
   }
 
-  const isError = message && (message.includes('Could not') || message.includes('Choose'));
+  const isError =
+    message &&
+    (message.includes('Could not') || message.includes('Choose') || message.includes('already'));
 
   return (
     <div
@@ -71,9 +81,8 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
     >
       <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Activity risk assessment</h4>
       <p style={{ margin: '0 0 0.75rem', fontSize: '0.88rem', color: '#64748b' }}>
-        Add a <strong>saved</strong> risk assessment from Forms to this participant&apos;s file (category: Risk
-        assessment). Create and edit saved assessments under{' '}
-        <Link to={`${pathPrefix}/forms`}>Forms → Activity risk assessments</Link>.
+        Pick a <strong>completed</strong> activity assessment from Forms. The same assessment can be assigned to many
+        participants — each gets their own copy in their file.
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
         <select
@@ -85,12 +94,17 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
         >
           {records.map((r) => (
             <option key={r.id} value={r.id}>
-              {r.title} ({r.template_activity_name})
+              {r.template_activity_name || r.title}
             </option>
           ))}
         </select>
-        <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={handleAssign}>
-          {busy ? 'Adding…' : 'Add to participant file'}
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={busy || alreadyAssigned}
+          onClick={handleAssign}
+        >
+          {busy ? 'Adding…' : alreadyAssigned ? 'Already assigned' : 'Add to participant file'}
         </button>
       </div>
       {message ? (

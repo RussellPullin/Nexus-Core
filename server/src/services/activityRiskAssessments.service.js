@@ -289,6 +289,35 @@ export async function getActivityRiskFieldSchema() {
   return cachedFieldSchema;
 }
 
+function recordHasFilledContent(fieldValues) {
+  if (!fieldValues || typeof fieldValues !== 'object') return false;
+  return Object.values(fieldValues).some((value) => {
+    if (typeof value === 'boolean') return value;
+    return String(value || '').trim().length > 0;
+  });
+}
+
+export function listRecordAssignments(orgId, recordId) {
+  const record = getActivityRiskRecord(orgId, recordId);
+  if (!record) return [];
+
+  return db
+    .prepare(
+      `SELECT pd.id AS document_id,
+              pd.participant_id,
+              pd.filename,
+              pd.created_at AS assigned_at,
+              p.name AS participant_name
+       FROM participant_documents pd
+       JOIN participants p ON p.id = pd.participant_id
+       WHERE p.provider_org_id = ?
+         AND pd.category = ?
+         AND json_extract(pd.metadata_json, '$.activity_risk_record_id') = ?
+       ORDER BY pd.created_at DESC`
+    )
+    .all(orgId, RISK_ASSESSMENT_DOC_CATEGORY, recordId);
+}
+
 export function listActivityRiskRecords(orgId) {
   ensureOrgActivityRiskTemplates(orgId);
   const rows = db
@@ -302,10 +331,17 @@ export function listActivityRiskRecords(orgId) {
        ORDER BY r.updated_at DESC, r.title COLLATE NOCASE ASC`
     )
     .all(orgId);
-  return rows.map((row) => ({
-    ...row,
-    field_values: parseFieldValuesJson(row.field_values_json)
-  }));
+  return rows.map((row) => {
+    const field_values = parseFieldValuesJson(row.field_values_json);
+    const assignments = listRecordAssignments(orgId, row.id);
+    return {
+      ...row,
+      field_values,
+      is_complete: recordHasFilledContent(field_values),
+      assignments,
+      assignment_count: assignments.length
+    };
+  });
 }
 
 export function getActivityRiskRecord(orgId, recordId) {
@@ -324,6 +360,19 @@ export function getActivityRiskRecord(orgId, recordId) {
   };
 }
 
+export function getActivityRiskRecordForTemplate(orgId, templateId) {
+  const row = db
+    .prepare(
+      `SELECT r.id
+       FROM activity_risk_assessment_records r
+       WHERE r.organisation_id = ? AND r.template_id = ?
+       ORDER BY r.updated_at DESC
+       LIMIT 1`
+    )
+    .get(orgId, templateId);
+  return row ? getActivityRiskRecord(orgId, row.id) : null;
+}
+
 export function createActivityRiskRecord(orgId, templateId, { title = null, userId = null } = {}) {
   const template = db
     .prepare(
@@ -331,6 +380,9 @@ export function createActivityRiskRecord(orgId, templateId, { title = null, user
     )
     .get(templateId, orgId);
   if (!template) throw new Error('Activity risk assessment template not found.');
+
+  const existing = getActivityRiskRecordForTemplate(orgId, templateId);
+  if (existing) return existing;
 
   const recordTitle = String(title || template.activity_name || 'Risk assessment').trim();
   if (!recordTitle) throw new Error('Title is required.');
