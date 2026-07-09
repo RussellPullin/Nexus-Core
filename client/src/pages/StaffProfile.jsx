@@ -4,7 +4,7 @@ import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { backToStaffListPath } from '../lib/listViewUrl.js';
 import { staff, participants, shifts, forms } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
-import OnboardingDocumentSelectModal from '../components/OnboardingDocumentSelectModal.jsx';
+import OnboardingDocumentSelectPanel from '../components/OnboardingDocumentSelectPanel.jsx';
 import { inferStaffOnboardingRole } from '@nexus-shared/onboardingDocumentContext.js';
 import { groupShiftsByExcelPeriods, groupShiftsByPayPeriod } from '../lib/payPeriod';
 import { formatDate } from '../lib/dateUtils';
@@ -58,7 +58,7 @@ export default function StaffProfile() {
   const [saving, setSaving] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [onboardingSending, setOnboardingSending] = useState(false);
-  const [showPackModal, setShowPackModal] = useState(false);
+  const [showOnboardPanel, setShowOnboardPanel] = useState(false);
   const [extraPdfCount, setExtraPdfCount] = useState(null);
   // Phase 3: one-click orchestrator UI state.
   const [orchBusy, setOrchBusy] = useState(false);
@@ -268,18 +268,20 @@ export default function StaffProfile() {
     }
   };
 
-  const handleStartOnboarding = async () => {
+  const handleToggleOnboardPanel = async () => {
     if (!data?.email) {
       alert('Add an email address for this staff member first.');
       return;
     }
-    try {
-      const extraDocs = await forms.policyFilesList().catch(() => []);
-      setExtraPdfCount(Array.isArray(extraDocs) ? extraDocs.length : 0);
-    } catch {
-      setExtraPdfCount(null);
+    if (!showOnboardPanel) {
+      try {
+        const extraDocs = await forms.policyFilesList().catch(() => []);
+        setExtraPdfCount(Array.isArray(extraDocs) ? extraDocs.length : 0);
+      } catch {
+        setExtraPdfCount(null);
+      }
     }
-    setShowPackModal(true);
+    setShowOnboardPanel((open) => !open);
   };
 
   const handleConfirmSendStaffOnboarding = async (payload) => {
@@ -287,6 +289,7 @@ export default function StaffProfile() {
     try {
       await staff.startOnboarding(id, payload);
       alert('Onboarding email sent. The staff member can complete the form using the link in the email.');
+      setShowOnboardPanel(false);
       load();
     } finally {
       setOnboardingSending(false);
@@ -517,12 +520,33 @@ export default function StaffProfile() {
                 }}
               >
                 <strong>Not ready:</strong> {staffReadiness.reason}
-                {(staffReadiness.code === 'NO_POLICY_PDFS' || staffReadiness.code === 'NO_STAFF_DOCUMENT_PACK') && (
+                {(staffReadiness.code === 'ONBOARDING_DISABLED' || staffReadiness.code === 'PROVIDER_PROFILE_MISSING') && (
                   <>
                     {' '}
                     <Link to={`${pathPrefix}/forms`}>Open Forms to fix</Link>.
                   </>
                 )}
+              </div>
+            )}
+            {staffReadiness?.ready === true && staffReadiness.warning && (
+              <div
+                style={{
+                  flexBasis: '100%',
+                  padding: '0.5rem 0.75rem',
+                  border: '1px solid #bfdbfe',
+                  background: '#eff6ff',
+                  color: '#1e3a8a',
+                  borderRadius: 6,
+                  fontSize: '0.85rem'
+                }}
+              >
+                {staffReadiness.warning}
+                {staffReadiness.warning_code === 'NO_ONBOARDING_DOCUMENTS' ? (
+                  <>
+                    {' '}
+                    <Link to={`${pathPrefix}/forms/automation-mapping`}>Open Automation mapping</Link>.
+                  </>
+                ) : null}
               </div>
             )}
             {orchError && (
@@ -570,13 +594,23 @@ export default function StaffProfile() {
               {orchBusy ? 'Running…' : 'Run staff onboarding'}
             </button>
             {(!data.onboarding_status || data.onboarding_status === 'not_started') && data.email && (
-              <button type="button" className="btn btn-primary" onClick={() => handleStartOnboarding()} disabled={onboardingSending}>
-                {onboardingSending ? 'Sending…' : 'Onboard'}
+              <button
+                type="button"
+                className={showOnboardPanel ? 'btn btn-secondary' : 'btn btn-primary'}
+                onClick={handleToggleOnboardPanel}
+                disabled={onboardingSending}
+              >
+                {showOnboardPanel ? 'Hide onboarding pack' : onboardingSending ? 'Sending…' : 'Onboard'}
               </button>
             )}
             {data.onboarding_status === 'in_progress' && data.email && (
-              <button type="button" className="btn btn-secondary" onClick={() => handleStartOnboarding()} disabled={onboardingSending}>
-                {onboardingSending ? 'Sending…' : 'Resend onboarding email'}
+              <button
+                type="button"
+                className={showOnboardPanel ? 'btn btn-secondary' : 'btn btn-secondary'}
+                onClick={handleToggleOnboardPanel}
+                disabled={onboardingSending}
+              >
+                {showOnboardPanel ? 'Hide onboarding pack' : onboardingSending ? 'Sending…' : 'Resend onboarding email'}
               </button>
             )}
             <button
@@ -793,6 +827,25 @@ export default function StaffProfile() {
         )}
       </div>
 
+      {showOnboardPanel && data?.email && (
+        <div className="card forms-section" style={{ marginBottom: '1.5rem' }}>
+          <h3 className="forms-section-heading" style={{ marginTop: 0 }}>
+            Staff onboarding pack
+          </h3>
+          <OnboardingDocumentSelectPanel
+            mode="staff"
+            recipientEmail={data.email.trim()}
+            recipientName={data.name || ''}
+            defaultContextValue={inferStaffOnboardingRole(data || {})}
+            extraPdfCount={extraPdfCount}
+            active={showOnboardPanel}
+            onCancel={() => setShowOnboardPanel(false)}
+            onSend={handleConfirmSendStaffOnboarding}
+            sending={onboardingSending}
+          />
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h3>Assigned Participants</h3>
         <p style={{ color: '#64748b', marginBottom: '1rem' }}>Participants this staff member can work with. Assign participants to restrict or pre-select who appears when scheduling shifts.</p>
@@ -925,10 +978,11 @@ export default function StaffProfile() {
       </div>
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h3>Company policy PDFs (for onboarding emails)</h3>
+        <h3>Extra organisation PDFs (optional)</h3>
         <p style={{ color: '#64748b', marginBottom: '1rem' }}>
-          These extra PDFs are attached to staff and participant onboarding emails alongside your branded NDIS
-          library documents. Manage them under <strong>Forms → Extra organisation documents</strong>.
+          Optional escape hatch — attach your own PDFs alongside branded library documents when sending onboarding.
+          Most organisations use the document library only. Manage these under{' '}
+          <strong>Forms → Extra organisation documents</strong>.
         </p>
         <div style={{ marginBottom: '1rem' }}>
           <input type="file" accept=".pdf" onChange={handlePolicyUpload} disabled={policyUploading} />
@@ -1093,16 +1147,6 @@ export default function StaffProfile() {
         </div>
       )}
 
-      <OnboardingDocumentSelectModal
-        open={showPackModal}
-        mode="staff"
-        recipientEmail={data?.email?.trim() || ''}
-        recipientName={data?.name || ''}
-        defaultContextValue={inferStaffOnboardingRole(data || {})}
-        extraPdfCount={extraPdfCount}
-        onClose={() => setShowPackModal(false)}
-        onSend={handleConfirmSendStaffOnboarding}
-      />
     </div>
   );
 }

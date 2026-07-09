@@ -223,8 +223,14 @@ router.get('/participants/:id/onboarding/status', (req, res) => {
     let readiness = { ready: false };
     if (providerOrgId) {
       try {
-        assertProviderOnboardingReady(providerOrgId);
-        readiness = { ready: true };
+        const result = assertProviderOnboardingReady(providerOrgId);
+        readiness = {
+          ready: true,
+          warning: result.warning || undefined,
+          warning_code: result.warning_code || undefined,
+          library_document_count: result.libraryCount,
+          extra_pdf_count: result.policyCount
+        };
       } catch (err) {
         readiness = { ready: false, reason: err.message, code: err.code || 'NOT_READY' };
       }
@@ -772,8 +778,15 @@ router.get('/providers/:organisationId/settings', (req, res) => {
     const coverage = getTemplateCoverage(profile.id);
     let readiness = { ready: false, reason: null };
     try {
-      assertProviderOnboardingReady(oid);
-      readiness = { ready: true, reason: null };
+      const result = assertProviderOnboardingReady(oid);
+      readiness = {
+        ready: true,
+        reason: null,
+        warning: result.warning || undefined,
+        warning_code: result.warning_code || undefined,
+        library_document_count: result.libraryCount,
+        extra_pdf_count: result.policyCount
+      };
     } catch (e) {
       readiness = { ready: false, reason: e.message, code: e.code || 'NOT_READY' };
     }

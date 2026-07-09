@@ -433,6 +433,13 @@ export default function FormsPage() {
             </div>
           )}
 
+          {settingsState?.readiness?.ready && settingsState.readiness.warning && (
+            <div className="forms-banner" style={{ background: '#eff6ff', color: '#1e3a8a', marginBottom: '1rem' }}>
+              {settingsState.readiness.warning}{' '}
+              <Link to={`${prefix}/forms/automation-mapping`}>Open Automation mapping</Link>.
+            </div>
+          )}
+
           <form onSubmit={handleSaveSettings} style={{ display: 'grid', gap: '0.75rem', maxWidth: 560 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <input

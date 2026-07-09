@@ -1737,12 +1737,28 @@ export default function ParticipantProfile() {
                   }}
                 >
                   <strong>Not ready:</strong> {onboardingReadiness.reason}
-                  {onboardingReadiness.code === 'NO_POLICY_PDFS' || onboardingReadiness.code === 'NO_DOCUMENT_PACK' ? (
+                  {(onboardingReadiness.code === 'ONBOARDING_DISABLED' || onboardingReadiness.code === 'PROVIDER_PROFILE_MISSING') ? (
                     <>
                       {' '}
                       <Link to={`${pathPrefix}/forms`}>Open Forms to fix</Link>.
                     </>
                   ) : null}
+                </div>
+              )}
+              {onboardingReadiness?.ready === true && onboardingReadiness.warning && (
+                <div
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    border: '1px solid #bfdbfe',
+                    background: '#eff6ff',
+                    color: '#1e3a8a',
+                    borderRadius: 6,
+                    marginBottom: '0.5rem',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  {onboardingReadiness.warning}{' '}
+                  <Link to={`${pathPrefix}/forms/automation-mapping`}>Open Automation mapping</Link>.
                 </div>
               )}
               {orchestratorError && (

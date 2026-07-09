@@ -992,8 +992,14 @@ router.get('/:id/onboarding/status', requireAdminOrDelegate, (req, res) => {
     let readiness = { ready: false };
     if (providerOrgId) {
       try {
-        assertStaffOnboardingReady(providerOrgId);
-        readiness = { ready: true };
+        const result = assertStaffOnboardingReady(providerOrgId);
+        readiness = {
+          ready: true,
+          warning: result.warning || undefined,
+          warning_code: result.warning_code || undefined,
+          library_document_count: result.libraryCount,
+          extra_pdf_count: result.policyCount
+        };
       } catch (err) {
         readiness = { ready: false, reason: err.message, code: err.code || 'NOT_READY' };
       }

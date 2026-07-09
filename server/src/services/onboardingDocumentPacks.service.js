@@ -86,14 +86,19 @@ export function listOnboardingPackDocumentsForSelection(orgId, workflow, { parti
       ? { participantServiceType: participantServiceType || 'all' }
       : { staffRole: staffRole || 'all' };
 
-  return listOnboardingLibraryMasters(orgId, workflow).map((master) => ({
-    id: master.id,
-    slug: master.slug,
-    display_name: master.display_name,
-    participant_service_types: master.manifest.participant_service_types || ['all'],
-    staff_roles: master.manifest.staff_roles || ['all'],
-    suggested: manifestMatchesOnboardingContext(master.manifest, ctx)
-  }));
+  return listOnboardingLibraryMasters(orgId, workflow).map((master) => {
+    const signatureCount = Number(master.manifest.signature_count) || 0;
+    return {
+      id: master.id,
+      slug: master.slug,
+      display_name: master.display_name,
+      signature_count: signatureCount,
+      requires_signature: signatureCount > 0,
+      participant_service_types: master.manifest.participant_service_types || ['all'],
+      staff_roles: master.manifest.staff_roles || ['all'],
+      suggested: manifestMatchesOnboardingContext(master.manifest, ctx)
+    };
+  });
 }
 
 /**

@@ -15,6 +15,23 @@ import { composeParticipantLegalName, participantPrefillFieldPaths } from '../..
 import { tryPushParticipantDocument } from './orgOnedriveSync.service.js';
 import { buildPrivacyConsentSnapshot } from './privacyConsentSnapshot.service.js';
 import { generatePrivacyConsentPdfBuffer } from './privacyConsentPdf.service.js';
+import { listOnboardingLibraryMasters } from './onboardingDocumentPacks.service.js';
+
+function documentAvailabilityForOnboarding(orgId, profileId, workflow) {
+  const libraryCount = listOnboardingLibraryMasters(orgId, workflow).length;
+  const policyCount =
+    db.prepare('SELECT COUNT(*) as c FROM company_policy_files WHERE provider_profile_id = ?').get(profileId)?.c || 0;
+  return { libraryCount, policyCount, hasDocuments: libraryCount > 0 || policyCount > 0 };
+}
+
+function buildDocumentWarning(workflow, availability) {
+  if (availability.hasDocuments) return {};
+  const label = workflow === 'staff_onboarding' ? 'staff' : 'participant';
+  return {
+    warning: `No ${label} onboarding documents configured yet. You can still send the invite, but the email will have no document attachments unless you choose documents to send.`,
+    warning_code: 'NO_ONBOARDING_DOCUMENTS'
+  };
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -1176,34 +1193,22 @@ export function assertProviderOnboardingReady(orgId) {
     throw err;
   }
 
-  const policyCount =
-    db.prepare('SELECT COUNT(*) as c FROM company_policy_files WHERE provider_profile_id = ?').get(profile.id)?.c || 0;
-  if (policyCount === 0) {
-    const err = new Error('No company policy PDFs uploaded. Upload at least one policy PDF in Forms before sending onboarding.');
-    err.code = 'NO_POLICY_PDFS';
-    throw err;
-  }
-
-  const packCount =
-    db.prepare('SELECT COUNT(*) as c FROM onboarding_document_packs WHERE provider_profile_id = ?').get(profile.id)?.c || 0;
-  if (packCount === 0) {
-    const err = new Error('No onboarding document pack configured. Create at least one pack in Forms.');
-    err.code = 'NO_DOCUMENT_PACK';
-    throw err;
-  }
-
-  return { ready: true, profile };
+  const availability = documentAvailabilityForOnboarding(orgId, profile.id, 'participant_onboarding');
+  return {
+    ready: true,
+    profile,
+    ...availability,
+    ...buildDocumentWarning('participant_onboarding', availability)
+  };
 }
 
 /**
- * Phase 3: Readiness gate for staff onboarding. Mirrors `assertProviderOnboardingReady`
- * but enforces the staff-workflow specific requirements:
- *   - Provider profile exists with onboarding enabled
- *   - At least one company policy PDF uploaded
- *   - At least one document pack with workflow `staff_onboarding` or `both`
+ * Phase 3: Readiness gate for staff onboarding.
+ * Hard-blocks only when onboarding is disabled or the provider profile is missing.
+ * Document availability comes from cloned library masters tagged `staff_onboarding`
+ * (primary) plus optional extra org PDFs — neither is required to send.
  *
- * Throws an Error with `.code` matching the reason; callers (orchestrator + UI)
- * use the code to render guided "fix this" links into the relevant Forms page.
+ * Returns `{ warning, warning_code }` when no documents are configured yet.
  */
 export function assertStaffOnboardingReady(orgId) {
   if (!orgId) {
@@ -1223,34 +1228,13 @@ export function assertStaffOnboardingReady(orgId) {
     throw err;
   }
 
-  const policyCount =
-    db.prepare('SELECT COUNT(*) as c FROM company_policy_files WHERE provider_profile_id = ?').get(profile.id)?.c || 0;
-  if (policyCount === 0) {
-    const err = new Error('No company policy PDFs uploaded. Upload policy PDFs in Forms before sending staff onboarding.');
-    err.code = 'NO_POLICY_PDFS';
-    throw err;
-  }
-
-  // A staff-onboarding pack is one whose workflow is `staff_onboarding` or `both` (or NULL
-  // for legacy rows — those count as participant-only so we exclude them here).
-  const staffPackCount =
-    db
-      .prepare(
-        `SELECT COUNT(*) as c
-         FROM onboarding_document_packs
-         WHERE provider_profile_id = ?
-           AND (workflow = 'staff_onboarding' OR workflow = 'both')`
-      )
-      .get(profile.id)?.c || 0;
-  if (staffPackCount === 0) {
-    const err = new Error(
-      'No staff onboarding document pack configured. Create a pack in Forms with workflow "Staff" or "Both".'
-    );
-    err.code = 'NO_STAFF_DOCUMENT_PACK';
-    throw err;
-  }
-
-  return { ready: true, profile };
+  const availability = documentAvailabilityForOnboarding(orgId, profile.id, 'staff_onboarding');
+  return {
+    ready: true,
+    profile,
+    ...availability,
+    ...buildDocumentWarning('staff_onboarding', availability)
+  };
 }
 
 export function upsertRenewalTasksForParticipant(participantOnboardingId) {
