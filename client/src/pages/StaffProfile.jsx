@@ -4,6 +4,8 @@ import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { backToStaffListPath } from '../lib/listViewUrl.js';
 import { staff, participants, shifts, forms } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
+import OnboardingDocumentSelectModal from '../components/OnboardingDocumentSelectModal.jsx';
+import { inferStaffOnboardingRole } from '@nexus-shared/onboardingDocumentContext.js';
 import { groupShiftsByExcelPeriods, groupShiftsByPayPeriod } from '../lib/payPeriod';
 import { formatDate } from '../lib/dateUtils';
 import {
@@ -56,6 +58,8 @@ export default function StaffProfile() {
   const [saving, setSaving] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [onboardingSending, setOnboardingSending] = useState(false);
+  const [showPackModal, setShowPackModal] = useState(false);
+  const [extraPdfCount, setExtraPdfCount] = useState(null);
   // Phase 3: one-click orchestrator UI state.
   const [orchBusy, setOrchBusy] = useState(false);
   const [orchResult, setOrchResult] = useState(null);
@@ -264,22 +268,26 @@ export default function StaffProfile() {
     }
   };
 
-  const handleStartOnboarding = async (isResend = false) => {
+  const handleStartOnboarding = async () => {
     if (!data?.email) {
       alert('Add an email address for this staff member first.');
       return;
     }
-    const confirmMsg = isResend
-      ? `Resend the onboarding form link to ${data.email}?`
-      : `Send onboarding email to ${data.email}? They will receive a link to complete the onboarding form.`;
-    if (!confirm(confirmMsg)) return;
+    try {
+      const extraDocs = await forms.policyFilesList().catch(() => []);
+      setExtraPdfCount(Array.isArray(extraDocs) ? extraDocs.length : 0);
+    } catch {
+      setExtraPdfCount(null);
+    }
+    setShowPackModal(true);
+  };
+
+  const handleConfirmSendStaffOnboarding = async (payload) => {
     setOnboardingSending(true);
     try {
-      await staff.startOnboarding(id, {});
+      await staff.startOnboarding(id, payload);
       alert('Onboarding email sent. The staff member can complete the form using the link in the email.');
       load();
-    } catch (err) {
-      alert(err.message || 'Failed to send onboarding email');
     } finally {
       setOnboardingSending(false);
     }
@@ -562,12 +570,12 @@ export default function StaffProfile() {
               {orchBusy ? 'Running…' : 'Run staff onboarding'}
             </button>
             {(!data.onboarding_status || data.onboarding_status === 'not_started') && data.email && (
-              <button type="button" className="btn btn-primary" onClick={() => handleStartOnboarding(false)} disabled={onboardingSending}>
+              <button type="button" className="btn btn-primary" onClick={() => handleStartOnboarding()} disabled={onboardingSending}>
                 {onboardingSending ? 'Sending…' : 'Onboard'}
               </button>
             )}
             {data.onboarding_status === 'in_progress' && data.email && (
-              <button type="button" className="btn btn-secondary" onClick={() => handleStartOnboarding(true)} disabled={onboardingSending}>
+              <button type="button" className="btn btn-secondary" onClick={() => handleStartOnboarding()} disabled={onboardingSending}>
                 {onboardingSending ? 'Sending…' : 'Resend onboarding email'}
               </button>
             )}
@@ -1084,6 +1092,17 @@ export default function StaffProfile() {
           </div>
         </div>
       )}
+
+      <OnboardingDocumentSelectModal
+        open={showPackModal}
+        mode="staff"
+        recipientEmail={data?.email?.trim() || ''}
+        recipientName={data?.name || ''}
+        defaultContextValue={inferStaffOnboardingRole(data || {})}
+        extraPdfCount={extraPdfCount}
+        onClose={() => setShowPackModal(false)}
+        onSend={handleConfirmSendStaffOnboarding}
+      />
     </div>
   );
 }

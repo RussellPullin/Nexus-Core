@@ -16,5 +16,8 @@
   "required_signer_role": "participant",
   "signature_count": 1,
   "renewal_days": 365,
-  "is_active": true
+  "is_active": true,
+  "participant_service_types": [
+    "all"
+  ]
 }

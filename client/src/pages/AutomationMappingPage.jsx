@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { formatContextTagsForDisplay } from '@nexus-shared/onboardingDocumentContext.js';
 import { documentLibrary, forms } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
@@ -106,6 +107,25 @@ function CategoryBadge({ category }) {
   );
 }
 
+function ContextTagsCell({ doc }) {
+  const pack = doc.pack || '';
+  if (pack === 'participant_onboarding') {
+    return (
+      <span style={{ fontSize: '0.8rem', color: '#475569' }}>
+        {formatContextTagsForDisplay(doc.participant_service_types, 'participant')}
+      </span>
+    );
+  }
+  if (pack === 'staff_onboarding') {
+    return (
+      <span style={{ fontSize: '0.8rem', color: '#475569' }}>
+        {formatContextTagsForDisplay(doc.staff_roles, 'staff')}
+      </span>
+    );
+  }
+  return <span className="forms-muted">—</span>;
+}
+
 function LibraryDocTable({ docs, canEdit, onPackChange, savingByDocId, errorByDocId, packSelectRevision }) {
   if (!docs.length) {
     return <p className="forms-muted" style={{ margin: 0 }}>No documents in this group.</p>;
@@ -119,6 +139,7 @@ function LibraryDocTable({ docs, canEdit, onPackChange, savingByDocId, errorByDo
             <th>Document</th>
             <th>Category</th>
             <th>{canEdit ? 'Workflow' : 'Pack'}</th>
+            <th>Context tags</th>
             <th>Signature</th>
             <th></th>
           </tr>
@@ -170,6 +191,9 @@ function LibraryDocTable({ docs, canEdit, onPackChange, savingByDocId, errorByDo
                       Saving…
                     </span>
                   ) : null}
+                </td>
+                <td>
+                  <ContextTagsCell doc={doc} />
                 </td>
                 <td>
                   {sigCount > 0 ? (
@@ -373,8 +397,8 @@ export default function AutomationMappingPage() {
       <section className="card forms-section" style={{ marginBottom: '1.25rem', background: '#f8fafc' }}>
         <h2 className="forms-section-heading" style={{ marginBottom: '0.5rem' }}>How automations work</h2>
         <ul className="forms-lede" style={{ margin: 0, paddingLeft: '1.25rem' }}>
-          <li><strong>Participant onboarding emails</strong> — attach every library document tagged <em>participant_onboarding</em>, plus any extra organisation PDFs.</li>
-          <li><strong>Staff onboarding emails</strong> — attach every document tagged <em>staff_onboarding</em>, plus the same extra organisation PDFs.</li>
+          <li><strong>Participant onboarding emails</strong> — attach library documents tagged <em>participant_onboarding</em>. At send time you can filter by service type (SIL, SDA, etc.); docs tagged <em>All</em> are always suggested.</li>
+          <li><strong>Staff onboarding emails</strong> — attach documents tagged <em>staff_onboarding</em>. At send time you can filter by role; docs tagged <em>All roles</em> are always suggested.</li>
           <li><strong>Library only</strong> — branded templates for reference and manual use; not auto-emailed.</li>
           <li><strong>Register templates</strong> — seed the Registers page; not part of onboarding email packs.</li>
           <li><strong>Extra organisation documents</strong> — optional PDFs uploaded on the Forms page; attached to both participant and staff onboarding emails (not pack-controlled).</li>

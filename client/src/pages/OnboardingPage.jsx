@@ -144,6 +144,8 @@ export default function OnboardingPage() {
     time: []
   });
   const [intakeSavedAt, setIntakeSavedAt] = useState(0);
+  const [showPackModal, setShowPackModal] = useState(false);
+  const [extraPdfCount, setExtraPdfCount] = useState(null);
 
   useEffect(() => {
     organisations.list('', 'plan_manager').then(setOrgs).catch(() => []);
@@ -517,14 +519,21 @@ export default function OnboardingPage() {
       alert('Add a participant email address before sending the onboarding documents.');
       return;
     }
-    if (!confirm(`Email onboarding documents to ${participant.email.trim()}? Uses your connected email (Settings).`)) return;
+    try {
+      const extraDocs = await forms.policyFilesList().catch(() => []);
+      setExtraPdfCount(Array.isArray(extraDocs) ? extraDocs.length : 0);
+    } catch {
+      setExtraPdfCount(null);
+    }
+    setShowPackModal(true);
+  };
+
+  const handleConfirmSendParticipantPack = async (payload) => {
     setWorking(true);
     try {
-      await onboarding.sendOnboardingPack(id, {});
+      await onboarding.sendOnboardingPack(id, payload);
       await refresh();
       alert('Onboarding documents emailed to the participant.');
-    } catch (err) {
-      alert(err.message || 'Could not send onboarding documents');
     } finally {
       setWorking(false);
     }
@@ -1491,6 +1500,17 @@ export default function OnboardingPage() {
           </>
         )}
       </div>
+
+      <OnboardingDocumentSelectModal
+        open={showPackModal}
+        mode="participant"
+        recipientEmail={participant?.email?.trim() || ''}
+        recipientName={participant?.name || ''}
+        defaultContextValue={inferParticipantServiceType(intake)}
+        extraPdfCount={extraPdfCount}
+        onClose={() => setShowPackModal(false)}
+        onSend={handleConfirmSendParticipantPack}
+      />
     </div>
   );
 }

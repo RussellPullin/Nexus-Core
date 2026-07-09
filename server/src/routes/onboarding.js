@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { db } from '../db/index.js';
-import { canAccessParticipant } from '../middleware/roles.js';
+import { canAccessParticipant, sessionIsAdminOrDelegate } from '../middleware/roles.js';
 import {
   initializeParticipantOnboarding,
   upsertIntakeFields,
@@ -41,7 +41,6 @@ import { tryPushParticipantDocument } from '../services/orgOnedriveSync.service.
 import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from '../services/notification.service.js';
 import { buildOnboardingAttachments, validateOnboardingMasterIds } from '../services/onboardingDocumentPacks.service.js';
 import { VALID_PARTICIPANT_SERVICE_TYPES } from '../../../shared/onboardingDocumentContext.js';
-import { sessionIsAdminOrDelegate } from '../middleware/roles.js';
 import { orchestrateParticipantOnboarding } from '../services/participantOnboardingOrchestrator.service.js';
 import {
   issueIntakeToken,

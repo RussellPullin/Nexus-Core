@@ -88,7 +88,9 @@ export default function OnboardingDocumentSelectModal({
     ? participantServiceTypeLabel(contextValue)
     : staffOnboardingRoleLabel(contextValue);
 
-  const canSend = selectedIds.size > 0 || (includeExtraPdfs && extraPdfCount !== 0);
+  const canSend =
+    selectedIds.size > 0 ||
+    (includeExtraPdfs && (extraPdfCount == null || extraPdfCount > 0));
 
   const handleSend = async () => {
     if (!canSend) {
