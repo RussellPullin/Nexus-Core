@@ -1,8 +1,20 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { activityRiskAssessments, participants } from '../lib/api';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import ActivityRiskAssessmentEditor from './ActivityRiskAssessmentEditor';
 
+const SIGN_OFF_FIELD_PREFIXES = ['pre_activity_', 'post_activity_'];
+const SIGN_OFF_EXTRA_FIELDS = new Set(['consent_yes', 'consent_na']);
+
+function isSignOffField(name) {
+  const key = String(name || '');
+  if (SIGN_OFF_EXTRA_FIELDS.has(key)) return true;
+  return SIGN_OFF_FIELD_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
 export default function ActivityRiskAssessmentsPanel({ onMessage }) {
+  const prefix = useProductPathPrefix();
   const [templates, setTemplates] = useState([]);
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -53,8 +65,15 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
     [templates, recordsByTemplateId]
   );
 
-  const assignRecord = assignRecordId ? records.find((r) => r.id === assignRecordId) : null;
-  const assignedParticipantIds = new Set((assignRecord?.assignments || []).map((a) => a.participant_id));
+  const assignRecord = useMemo(
+    () => (assignRecordId ? records.find((r) => r.id === assignRecordId) : null),
+    [assignRecordId, records]
+  );
+
+  const assignedParticipantIds = useMemo(
+    () => new Set((assignRecord?.assignments || []).map((a) => a.participant_id)),
+    [assignRecord]
+  );
 
   useEffect(() => {
     if (!assignRecordId) return;
@@ -141,11 +160,29 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
     }
   };
 
+  const handleSignAsAdmin = async (record) => {
+    setBusy(true);
+    try {
+      await activityRiskAssessments.signRecordAsAdmin(record.id);
+      notify(`“${record.template_activity_name || record.title}” signed by admin.`);
+      reload();
+    } catch (err) {
+      notify(err.message || 'Could not sign assessment', true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const openAssignModal = (recordId) => {
+    setEditingRecordId(null);
     setAssignRecordId(recordId);
     setSelectedParticipantId('');
     setParticipantSearch('');
     setAssignMessage('');
+    participants
+      .list('', false, false)
+      .then((rows) => setParticipantOptions(Array.isArray(rows) ? rows : []))
+      .catch(() => setParticipantOptions([]));
   };
 
   const closeAssignModal = () => {
@@ -189,12 +226,20 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
     return `${names.slice(0, 3).join(', ')} +${names.length - 3} more`;
   };
 
+  const renderStatus = (record) => {
+    if (!record) return <span className="forms-muted">Not started</span>;
+    if (record.is_admin_signed) return <span style={{ color: '#166534' }}>Signed — ready to assign</span>;
+    if (record.is_complete) return <span style={{ color: '#b45309' }}>Awaiting admin signature</span>;
+    return <span style={{ color: '#b45309' }}>In progress</span>;
+  };
+
   return (
     <div className="activity-risk-assessments-panel">
       <p className="forms-lede">
-        Complete a risk assessment <strong>once per activity</strong>, then assign that same completed assessment to as
-        many participants as you need. Each participant gets their own copy in their file. Assignments also appear in
-        Registers → Risk register and sync to OneDrive when connected.
+        Complete a risk assessment <strong>once per activity</strong>, then have an admin sign it with Nexus Core
+        (using your saved signature and default signatory in{' '}
+        <Link to={`${prefix}/settings`}>Settings</Link>). After signing, assign the assessment to as many
+        participants as you need. Each participant gets their own copy in their file.
       </p>
 
       <form onSubmit={handleCreateTemplate} className="forms-add-row" style={{ marginBottom: '1rem', flexWrap: 'wrap' }}>
@@ -231,15 +276,7 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
               {activities.map(({ template, record }) => (
                 <tr key={template.id}>
                   <td>{template.activity_name}</td>
-                  <td>
-                    {!record ? (
-                      <span className="forms-muted">Not started</span>
-                    ) : record.is_complete ? (
-                      <span style={{ color: '#166534' }}>Complete</span>
-                    ) : (
-                      <span style={{ color: '#b45309' }}>In progress</span>
-                    )}
-                  </td>
+                  <td>{renderStatus(record)}</td>
                   <td>
                     {record ? (
                       <span title={(record.assignments || []).map((a) => a.participant_name).join(', ')}>
@@ -275,12 +312,32 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
                         >
                           PDF
                         </a>
+                        {!record.is_admin_signed ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ marginRight: '0.35rem' }}
+                            disabled={busy || !record.is_complete}
+                            title={
+                              record.is_complete
+                                ? 'Sign pre-activity sign-off as admin via Nexus Core'
+                                : 'Save the assessment before signing'
+                            }
+                            onClick={() => handleSignAsAdmin(record)}
+                          >
+                            Sign with Nexus Core
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="btn btn-secondary btn-sm"
                           style={{ marginRight: '0.35rem' }}
-                          disabled={busy || !record.is_complete}
-                          title={record.is_complete ? undefined : 'Save the assessment before assigning'}
+                          disabled={busy || !record.is_admin_signed}
+                          title={
+                            record.is_admin_signed
+                              ? undefined
+                              : 'An admin must sign with Nexus Core before assigning'
+                          }
                           onClick={() => openAssignModal(record.id)}
                         >
                           Assign to participant
@@ -327,7 +384,7 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
             position: 'fixed',
             inset: 0,
             background: 'rgba(15, 23, 42, 0.45)',
-            zIndex: 1100,
+            zIndex: 1300,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -341,7 +398,7 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
             <h3 style={{ marginTop: 0 }}>Assign to participant</h3>
             <p className="forms-muted" style={{ marginTop: 0 }}>
               Add <strong>{assignRecord?.template_activity_name || assignRecord?.title}</strong> to a participant&apos;s
-              file. You can assign the same completed assessment to many participants — keep this window open and pick
+              file. You can assign the same signed assessment to many participants — keep this window open and pick
               another name after each one.
             </p>
             {(assignRecord?.assignments || []).length > 0 ? (
@@ -380,9 +437,13 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
                 style={{
                   margin: '0 0 0.75rem',
                   fontSize: '0.88rem',
-                  color: assignMessage.includes('Could not') || assignMessage.includes('Choose') || assignMessage.includes('already')
-                    ? '#991b1b'
-                    : '#166534'
+                  color:
+                    assignMessage.includes('Could not') ||
+                    assignMessage.includes('Choose') ||
+                    assignMessage.includes('already') ||
+                    assignMessage.includes('must sign')
+                      ? '#991b1b'
+                      : '#166534'
                 }}
               >
                 {assignMessage}

@@ -92,6 +92,12 @@ function textToHtml(text) {
     .join('');
 }
 
+function sectionHasOrgFields(section) {
+  return (section.blocks || []).some((b) =>
+    (b.fields || []).some((f) => f.editableByOrg && ORG_FIELD_KEYS.has(f.key))
+  );
+}
+
 export default function ServiceAgreementTemplateEditor({ onMessage }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -101,12 +107,6 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
   const [metadata, setMetadata] = useState({});
   const [expandedSection, setExpandedSection] = useState('s1');
   const [expandedBodySection, setExpandedBodySection] = useState(null);
-  const [logoFile, setLogoFile] = useState(null);
-  const [orgProfile, setOrgProfile] = useState(null);
-  const [brandPrimary, setBrandPrimary] = useState('#1e3a5f');
-  const [brandAccent, setBrandAccent] = useState('#2563eb');
-  const [savingBrand, setSavingBrand] = useState(false);
-  // Body section state — separate text map avoids HTML↔text round-trip on every keystroke
   const [docSections, setDocSections] = useState([]);
   const [docSectionTexts, setDocSectionTexts] = useState({});
 
@@ -164,7 +164,6 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
           ''
       });
 
-      // Load body sections and pre-convert to plain text for textarea editing
       const bodySections = model.sections || [];
       setDocSections(bodySections);
       const texts = {};
@@ -183,61 +182,18 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
     load();
   }, [load]);
 
-  useEffect(() => {
-    organisations
-      .getMyProfile()
-      .then((p) => {
-        setOrgProfile(p?.org || null);
-        if (p?.branding?.primaryColor) setBrandPrimary(p.branding.primaryColor);
-        if (p?.branding?.accentColor) setBrandAccent(p.branding.accentColor);
-      })
-      .catch(() => {});
-  }, []);
-
-  const handleSaveBranding = async () => {
-    setSavingBrand(true);
-    try {
-      await organisations.updateMyProfile({
-        brand_primary_color: brandPrimary || null,
-        brand_accent_color: brandAccent || null
-      });
-      notify('Brand colours saved. Download a sample to see them applied.');
-    } catch (e) {
-      notify(e.message || 'Save failed', true);
-    } finally {
-      setSavingBrand(false);
-    }
-  };
-
-  const handleUploadOrgLogo = async (file) => {
-    if (!file) return;
-    setSavingBrand(true);
-    try {
-      await organisations.uploadMyLogo(file);
-      const refreshed = await organisations.getMyProfile();
-      setOrgProfile(refreshed?.org || null);
-      notify('Logo uploaded — download a sample to see it in the header.');
-    } catch (e) {
-      notify(e.message || 'Upload failed', true);
-    } finally {
-      setSavingBrand(false);
-    }
-  };
-
-  /** Convert current textarea text back to HTML sections ready for the API */
   const buildSectionsPayload = () =>
     docSections.map((s) => ({
       ...s,
       body_html: textToHtml(docSectionTexts[s.id] ?? stripHtml(s.body_html || ''))
     }));
 
-  /** Sync key org fields to the organisations table so all renderers use the correct name */
   const syncOrgProfile = async (variable_values) => {
     try {
       const orgUpdate = {};
       if (variable_values.org_legal_name?.trim()) {
         orgUpdate.legal_name = variable_values.org_legal_name.trim();
-        orgUpdate.trading_name = variable_values.org_legal_name.trim(); // keep in sync
+        orgUpdate.trading_name = variable_values.org_legal_name.trim();
       }
       if (variable_values.org_abn?.trim()) orgUpdate.abn = variable_values.org_abn.trim();
       if (variable_values.org_address?.trim())
@@ -248,7 +204,7 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
         await organisations.updateMyProfile(orgUpdate);
       }
     } catch {
-      // Non-blocking — org table sync failure doesn't prevent template save
+      // Non-blocking
     }
   };
 
@@ -269,10 +225,6 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
         },
         sections: buildSectionsPayload()
       });
-      if (logoFile) {
-        await formTemplates.uploadInstanceLogo(instanceId, logoFile);
-        setLogoFile(null);
-      }
       await syncOrgProfile(variable_values);
       notify('Service agreement template saved.');
       await load();
@@ -285,7 +237,6 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
 
   const handleDownloadSample = async () => {
     if (!instanceId) return;
-    // Always save + sync before generating so the PDF reflects what's on screen
     setSaving(true);
     try {
       const variable_values = { ...values };
@@ -316,8 +267,7 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
     setDocSectionTexts((prev) => ({ ...prev, [id]: text }));
   };
 
-  const logoPath = preview?.branding?.logo_relative_path;
-  const editableSections = preview?.editable_sections || [];
+  const editableSections = (preview?.editable_sections || []).filter(sectionHasOrgFields);
   const templateReady = orgTemplateLooksReady(values);
 
   if (loading) {
@@ -331,139 +281,12 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
   return (
     <div className="sa-template-editor">
       <p className="forms-lede">
-        Set your organisation details here once. Participant fields stay blank on the sample preview
-        and are filled from each participant&apos;s profile and intake when you generate an
-        agreement.
+        Set your organisation details here once. Brand colours and logo are managed under{' '}
+        <strong>Settings → Organisation profile &amp; branding</strong>. Participant fields stay blank on the sample
+        preview and are filled from each participant&apos;s profile and intake when you generate an agreement.
       </p>
 
-      {/* ── Organisation branding ─────────────────────────────────── */}
-      <div className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-        <h3 className="forms-subheading" style={{ marginTop: 0 }}>Organisation branding</h3>
-        <p className="forms-muted" style={{ fontSize: '0.85rem', margin: '0 0 0.75rem' }}>
-          Colours and logo applied to every generated document (Service Agreement, policies,
-          registers). Saved to your organisation profile.
-        </p>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            gap: '0.75rem',
-            alignItems: 'end'
-          }}
-        >
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <span style={{ fontSize: '0.8rem', color: '#475569' }}>Primary colour (header band)</span>
-            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-              <input
-                type="color"
-                value={brandPrimary || '#1e3a5f'}
-                onChange={(e) => setBrandPrimary(e.target.value)}
-                style={{ width: 40, height: 32, padding: 0, border: '1px solid #cbd5e1', borderRadius: 4 }}
-              />
-              <input
-                type="text"
-                className="form-input"
-                value={brandPrimary || ''}
-                onChange={(e) => setBrandPrimary(e.target.value)}
-                placeholder="#1e3a5f"
-                style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
-              />
-            </div>
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <span style={{ fontSize: '0.8rem', color: '#475569' }}>Accent colour (section bars)</span>
-            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-              <input
-                type="color"
-                value={brandAccent || '#2563eb'}
-                onChange={(e) => setBrandAccent(e.target.value)}
-                style={{ width: 40, height: 32, padding: 0, border: '1px solid #cbd5e1', borderRadius: 4 }}
-              />
-              <input
-                type="text"
-                className="form-input"
-                value={brandAccent || ''}
-                onChange={(e) => setBrandAccent(e.target.value)}
-                placeholder="#2563eb"
-                style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
-              />
-            </div>
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <span style={{ fontSize: '0.8rem', color: '#475569' }}>Replace org logo</span>
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/svg+xml,image/webp"
-              onChange={(e) => handleUploadOrgLogo(e.target.files?.[0] || null)}
-            />
-            {orgProfile?.hasLogo || orgProfile?.logoPath ? (
-              <span style={{ fontSize: '0.75rem', color: '#16a34a' }}>Org logo on file ✓</span>
-            ) : (
-              <span style={{ fontSize: '0.75rem', color: '#b91c1c' }}>No org logo on file</span>
-            )}
-          </label>
-        </div>
-        <div style={{ marginTop: '0.75rem' }}>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleSaveBranding}
-            disabled={savingBrand}
-          >
-            {savingBrand ? 'Saving…' : 'Save brand colours'}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Template-only logo override ───────────────────────────── */}
-      <div className="forms-logo-row card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-        <div>
-          <h3 className="forms-subheading" style={{ marginTop: 0 }}>
-            Template-only logo override (optional)
-          </h3>
-          <p className="forms-muted" style={{ fontSize: '0.85rem', margin: '0 0 0.5rem' }}>
-            Use this only if you want a logo different from your org logo for the Service Agreement
-            specifically. Most users should leave this empty and rely on the org logo above.
-          </p>
-          <input
-            type="file"
-            accept="image/png,image/jpeg"
-            onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
-          />
-        </div>
-        <div className="forms-logo-preview-slot" aria-hidden>
-          {logoPath ? (
-            <img
-              src={formTemplates.instanceLogoUrl(instanceId)}
-              alt=""
-              style={{ maxHeight: 48, maxWidth: 120, objectFit: 'contain' }}
-            />
-          ) : (
-            <div
-              className="forms-logo-placeholder"
-              style={{
-                width: 88,
-                height: 40,
-                border: '1px dashed #cbd5e1',
-                borderRadius: 4,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#94a3b8',
-                fontSize: '0.75rem'
-              }}
-            >
-              Logo
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Editable field sections (org variables, checklist, etc.) ─ */}
-      {(editableSections || []).map((section) => {
-        const showOrgInputs = (section.blocks || []).some((b) =>
-          (b.fields || []).some((f) => f.editableByOrg && ORG_FIELD_KEYS.has(f.key))
-        );
+      {editableSections.map((section) => {
         const isOpen = expandedSection === section.id;
 
         return (
@@ -496,71 +319,51 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
             ) : null}
             {isOpen && (
               <div style={{ marginTop: '0.75rem' }}>
-                {(section.blocks || []).map((block) => (
-                  <div key={block.id} style={{ marginBottom: '1rem' }}>
-                    <h3 className="forms-subheading">{block.label}</h3>
-                    {showOrgInputs &&
-                    (block.fields || []).some((f) => f.editableByOrg && ORG_FIELD_KEYS.has(f.key)) ? (
+                {(section.blocks || []).map((block) => {
+                  const orgFields = (block.fields || []).filter(
+                    (f) => f.editableByOrg && ORG_FIELD_KEYS.has(f.key)
+                  );
+                  if (!orgFields.length) return null;
+                  return (
+                    <div key={block.id} style={{ marginBottom: '1rem' }}>
+                      <h3 className="forms-subheading">{block.label}</h3>
                       <div className="forms-field-grid">
-                        {(block.fields || [])
-                          .filter((f) => f.editableByOrg && ORG_FIELD_KEYS.has(f.key))
-                          .map((f) => {
-                            const desc = (preview.variable_groups || [])
-                              .flatMap((g) => Object.entries(g.descriptions || {}))
-                              .find(([k]) => k === f.key)?.[1];
-                            const val = values[f.key];
-                            const displayVal =
-                              val === undefined || val === null ? '' : String(val);
-                            return (
-                              <div key={f.key} className="form-group">
-                                <label className="forms-label">{f.label}</label>
-                                <input
-                                  type={fieldInputType(f.key)}
-                                  className="form-input"
-                                  value={displayVal}
-                                  onChange={(e) => setValue(f.key, e.target.value)}
-                                />
-                                {desc ? (
-                                  <p
-                                    className="forms-muted"
-                                    style={{ fontSize: '0.78rem', margin: '0.2rem 0 0' }}
-                                  >
-                                    {desc}
-                                  </p>
-                                ) : null}
-                              </div>
-                            );
-                          })}
+                        {orgFields.map((f) => {
+                          const desc = (preview.variable_groups || [])
+                            .flatMap((g) => Object.entries(g.descriptions || {}))
+                            .find(([k]) => k === f.key)?.[1];
+                          const val = values[f.key];
+                          const displayVal = val === undefined || val === null ? '' : String(val);
+                          return (
+                            <div key={f.key} className="form-group">
+                              <label className="forms-label">{f.label}</label>
+                              <input
+                                type={fieldInputType(f.key)}
+                                className="form-input"
+                                value={displayVal}
+                                onChange={(e) => setValue(f.key, e.target.value)}
+                              />
+                              {desc ? (
+                                <p
+                                  className="forms-muted"
+                                  style={{ fontSize: '0.78rem', margin: '0.2rem 0 0' }}
+                                >
+                                  {desc}
+                                </p>
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
-                    ) : null}
-                    {!showOrgInputs ||
-                    !(block.fields || []).some((f) => f.editableByOrg && ORG_FIELD_KEYS.has(f.key)) ? (
-                      <ul
-                        className="forms-field-list"
-                        style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.88rem' }}
-                      >
-                        {(block.fields || []).map((f) => (
-                          <li key={f.key} style={{ marginBottom: '0.25rem' }}>
-                            <strong>{f.label}</strong>
-                            {f.hint ? (
-                              <span className="forms-muted"> — {f.hint}</span>
-                            ) : null}
-                            {f.format ? (
-                              <span className="forms-muted"> ({f.format})</span>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>
         );
       })}
 
-      {/* ── Document body sections (editable) ─────────────────────── */}
       {docSections.length > 0 && (
         <div className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
           <h3 className="forms-subheading" style={{ marginTop: 0 }}>Document sections</h3>
@@ -648,7 +451,6 @@ export default function ServiceAgreementTemplateEditor({ onMessage }) {
         </div>
       )}
 
-      {/* ── Save / sample buttons ─────────────────────────────────── */}
       <div
         style={{
           marginTop: '1rem',

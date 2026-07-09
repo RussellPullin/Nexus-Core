@@ -16,7 +16,7 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
     activityRiskAssessments
       .listRecords()
       .then((res) => {
-        const list = (res?.records || []).filter((r) => r.is_complete);
+        const list = (res?.records || []).filter((r) => r.is_complete && r.is_admin_signed);
         setRecords(list);
         setSelectedId((prev) => (prev && list.some((r) => r.id === prev) ? prev : list[0]?.id || ''));
       })
@@ -58,9 +58,9 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
   if (!records.length) {
     return (
       <p className="forms-muted" style={{ fontSize: '0.9rem' }}>
-        No completed activity risk assessments yet. Complete one under{' '}
-        <Link to={`${pathPrefix}/forms`}>Forms → Activity risk assessments</Link>, then return here to add it to this
-        participant.
+        No signed activity risk assessments yet. Complete one under{' '}
+        <Link to={`${pathPrefix}/forms`}>Forms → Activity risk assessments</Link>, have an admin sign it with
+        Nexus Core, then return here to add it to this participant.
       </p>
     );
   }
@@ -81,7 +81,7 @@ export default function ActivityRiskAssessmentAssign({ participantId, onAssigned
     >
       <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Activity risk assessment</h4>
       <p style={{ margin: '0 0 0.75rem', fontSize: '0.88rem', color: '#64748b' }}>
-        Pick a <strong>completed</strong> activity assessment from Forms. The same assessment can be assigned to many
+        Pick a <strong>signed</strong> activity assessment from Forms. The same assessment can be assigned to many
         participants — each gets their own copy in their file.
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>

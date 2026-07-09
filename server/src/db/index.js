@@ -2305,6 +2305,21 @@ try {
     if (!e.message?.includes('already exists')) console.warn('activity_risk_assessment_records migration:', e.message);
   }
 
+  try {
+    const riskRecordCols = db.prepare('PRAGMA table_info(activity_risk_assessment_records)').all();
+    if (!riskRecordCols.some((c) => c.name === 'admin_signed_at')) {
+      db.exec('ALTER TABLE activity_risk_assessment_records ADD COLUMN admin_signed_at TEXT');
+    }
+    if (!riskRecordCols.some((c) => c.name === 'admin_signed_by_user_id')) {
+      db.exec('ALTER TABLE activity_risk_assessment_records ADD COLUMN admin_signed_by_user_id TEXT');
+    }
+    if (!riskRecordCols.some((c) => c.name === 'admin_signature_data')) {
+      db.exec('ALTER TABLE activity_risk_assessment_records ADD COLUMN admin_signature_data TEXT');
+    }
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('activity_risk_records admin sign migration:', e.message);
+  }
+
   // One-time data correction: a shift whose date is still in the future can never have been
   // delivered, so it must not sit as 'completed' (and must not carry charges). Earlier imports
   // marked future roster shifts completed when Shifter sent a completed-like status. Reset those

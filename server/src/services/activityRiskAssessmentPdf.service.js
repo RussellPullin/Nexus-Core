@@ -723,6 +723,67 @@ export async function listActivityRiskPdfFieldSchema(pdfBytes) {
   });
 }
 
+/** Field prefixes excluded from the in-app editor — signed by admin via Nexus Core. */
+export const ACTIVITY_RISK_ADMIN_SIGN_FIELD_PREFIXES = ['pre_activity_', 'post_activity_'];
+export const ACTIVITY_RISK_ADMIN_SIGN_EXTRA_FIELDS = new Set(['consent_yes', 'consent_na']);
+
+export function isActivityRiskAdminSignField(fieldName) {
+  const name = String(fieldName || '');
+  if (ACTIVITY_RISK_ADMIN_SIGN_EXTRA_FIELDS.has(name)) return true;
+  return ACTIVITY_RISK_ADMIN_SIGN_FIELD_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+function dataUrlToBuffer(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string') return null;
+  const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+  if (!match) return null;
+  try {
+    return { format: match[1].toLowerCase(), buffer: Buffer.from(match[2], 'base64') };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Draw the admin signature image over the pre-activity signature field.
+ * @param {Buffer} pdfBytes
+ * @param {string|null} signatureDataUrl
+ * @param {Array<{ name: string, pageIndex: number, x: number, y: number, width: number, height: number }>} schema
+ */
+export async function embedAdminSignatureInActivityRiskPdf(pdfBytes, signatureDataUrl, schema) {
+  if (!signatureDataUrl) return pdfBytes;
+  const sigField = (schema || []).find((f) => f.name === 'pre_activity_signature');
+  if (!sigField) return pdfBytes;
+
+  const decoded = dataUrlToBuffer(signatureDataUrl);
+  if (!decoded?.buffer) return pdfBytes;
+
+  const pdfDoc = await PdfLibDocument.load(pdfBytes);
+  const pages = pdfDoc.getPages();
+  const page = pages[sigField.pageIndex];
+  if (!page) return Buffer.from(await pdfDoc.save({ updateFieldAppearances: true }));
+
+  const pageHeight = page.getHeight();
+  const pdfY = pageHeight - sigField.y - sigField.height;
+
+  try {
+    const image =
+      decoded.format === 'jpeg' || decoded.format === 'jpg'
+        ? await pdfDoc.embedJpg(decoded.buffer)
+        : await pdfDoc.embedPng(decoded.buffer);
+    page.drawImage(image, {
+      x: sigField.x,
+      y: pdfY,
+      width: sigField.width,
+      height: sigField.height
+    });
+  } catch (err) {
+    console.warn('[activityRiskAssessmentPdf] Could not embed admin signature:', err?.message);
+  }
+
+  return Buffer.from(await pdfDoc.save({ updateFieldAppearances: true }));
+}
+
 /** @param {Buffer|Uint8Array} pdfBytes @param {Record<string, unknown>} fieldValues */
 export async function fillActivityRiskPdfFields(pdfBytes, fieldValues) {
   const pdfDoc = await PdfLibDocument.load(pdfBytes);

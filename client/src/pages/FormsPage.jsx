@@ -204,33 +204,7 @@ export default function FormsPage() {
         <ServiceAgreementTemplateEditor onMessage={(msg, isError) => setMessage(isError ? `Error: ${msg}` : msg)} />
       </section>
 
-      {/* ── 2. Participant Intake ─────────────────────────────────────────── */}
-      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <h2 className="forms-section-heading">Participant intake form</h2>
-        <p className="forms-lede">
-          Send participants (or their guardian/family) a secure self-service link to complete their details before onboarding.
-          Their answers feed directly into their profile and service agreement.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', marginTop: '0.75rem' }}>
-          <div style={{ padding: '1rem', background: '#f0f9ff', borderRadius: 8, border: '1px solid #bae6fd' }}>
-            <div style={{ fontSize: '1.5rem', marginBottom: '0.35rem' }}>📋</div>
-            <strong style={{ display: 'block', marginBottom: '0.25rem' }}>4-step intake wizard</strong>
-            <p className="forms-muted" style={{ margin: 0, fontSize: '0.85rem' }}>About you · Contact details · NDIS plan · Representative &amp; consent</p>
-          </div>
-          <div style={{ padding: '1rem', background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0' }}>
-            <div style={{ fontSize: '1.5rem', marginBottom: '0.35rem' }}>✉️</div>
-            <strong style={{ display: 'block', marginBottom: '0.25rem' }}>Flexible delivery</strong>
-            <p className="forms-muted" style={{ margin: 0, fontSize: '0.85rem' }}>Send to the participant, a parent, guardian, or any email. Autosaves as they type.</p>
-          </div>
-          <div style={{ padding: '1rem', background: '#faf5ff', borderRadius: 8, border: '1px solid #e9d5ff' }}>
-            <div style={{ fontSize: '1.5rem', marginBottom: '0.35rem' }}>🔗</div>
-            <strong style={{ display: 'block', marginBottom: '0.25rem' }}>Send from participant profile</strong>
-            <p className="forms-muted" style={{ margin: 0, fontSize: '0.85rem' }}>Go to any participant → click <strong>Send self-intake link</strong> to choose who receives it.</p>
-          </div>
-        </div>
-      </section>
-
-      {/* ── 3. Activity Risk Assessments ─────────────────────────────────── */}
+      {/* ── 2. Activity Risk Assessments ─────────────────────────────────── */}
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
         <h2 className="forms-section-heading">Activity risk assessments</h2>
         <ActivityRiskAssessmentsPanel onMessage={(msg) => setMessage(msg)} />

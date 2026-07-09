@@ -16,6 +16,7 @@ import {
   getActivityRiskTemplateFilePath,
   listActivityRiskRecords,
   listActivityRiskTemplates,
+  signActivityRiskRecordByAdmin,
   updateActivityRiskRecord
 } from '../services/activityRiskAssessments.service.js';
 
@@ -155,6 +156,21 @@ router.get('/records/:recordId/file', async (req, res) => {
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/activity-risk-assessments/records/:recordId/sign-admin — admin sign-off via Nexus Core */
+router.post('/records/:recordId/sign-admin', async (req, res) => {
+  try {
+    if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
+    const orgId = orgIdForUser(req.session.user.id);
+    if (!orgId) return res.status(400).json({ error: 'No organisation set for your account.' });
+    const signed = await signActivityRiskRecordByAdmin(orgId, req.params.recordId, {
+      userId: req.session.user.id
+    });
+    res.json(signed);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

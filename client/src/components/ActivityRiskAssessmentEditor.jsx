@@ -5,6 +5,15 @@ import { activityRiskAssessments } from '../lib/api';
 
 GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
+const SIGN_OFF_FIELD_PREFIXES = ['pre_activity_', 'post_activity_'];
+const SIGN_OFF_EXTRA_FIELDS = new Set(['consent_yes', 'consent_na']);
+
+function isSignOffField(name) {
+  const key = String(name || '');
+  if (SIGN_OFF_EXTRA_FIELDS.has(key)) return true;
+  return SIGN_OFF_FIELD_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
 const PAGE_WIDTH_PT = 595.28;
 const PAGE_HEIGHT_PT = 841.89;
 const DISPLAY_WIDTH = 820;
@@ -151,7 +160,11 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
         if (cancelled) return;
         setTitle(record?.title || '');
         setValues(record?.field_values && typeof record.field_values === 'object' ? record.field_values : {});
-        setSchema(Array.isArray(schemaRes?.fields) ? schemaRes.fields : []);
+        setSchema(
+          (Array.isArray(schemaRes?.fields) ? schemaRes.fields : []).filter(
+            (f) => !isSignOffField(f.name)
+          )
+        );
       })
       .catch((e) => {
         if (!cancelled) setError(e.message || 'Could not load risk assessment.');
@@ -274,7 +287,8 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
           <div>
             <h3 style={{ margin: 0 }}>Complete risk assessment</h3>
             <p className="forms-muted" style={{ margin: '0.35rem 0 0', fontSize: '0.9rem' }}>
-              Fill in the form on the PDF layout below. Tick boxes and type directly where shown, then click Save.
+              Fill in the form on the PDF layout below. Pre-activity sign-off is completed by an admin via{' '}
+              <strong>Sign with Nexus Core</strong> after saving — not on this form.
             </p>
           </div>
           <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>

@@ -137,6 +137,10 @@ export const activityRiskAssessments = {
   deleteRecord: (recordId) =>
     fetchApi(`/activity-risk-assessments/records/${encodeURIComponent(recordId)}`, { method: 'DELETE' }),
   recordFileUrl: (recordId) => `${API}/activity-risk-assessments/records/${encodeURIComponent(recordId)}/file`,
+  signRecordAsAdmin: (recordId) =>
+    fetchApi(`/activity-risk-assessments/records/${encodeURIComponent(recordId)}/sign-admin`, {
+      method: 'POST'
+    }),
   assignRecordToParticipant: (recordId, participantId) =>
     fetchApi(`/activity-risk-assessments/records/${encodeURIComponent(recordId)}/assign`, {
       method: 'POST',

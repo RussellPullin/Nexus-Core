@@ -11,7 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { getDataRoot } from './formTemplatePath.service.js';
 import { tryPushParticipantDocument } from './orgOnedriveSync.service.js';
-import { bundledMasterPath, GENERIC_MASTER_FILENAME, fillActivityRiskPdfFields, listActivityRiskPdfFieldSchema } from './activityRiskAssessmentPdf.service.js';
+import { bundledMasterPath, GENERIC_MASTER_FILENAME, fillActivityRiskPdfFields, listActivityRiskPdfFieldSchema, embedAdminSignatureInActivityRiskPdf, isActivityRiskAdminSignField } from './activityRiskAssessmentPdf.service.js';
 
 const DEFAULT_ACTIVITY_NAME = 'Health & Safety Risk Assessment (blank)';
 
@@ -341,7 +341,8 @@ export function listActivityRiskRecords(orgId) {
     return {
       ...row,
       field_values,
-      is_complete: recordHasFilledContent(field_values),
+      is_complete: recordHasFilledContent(stripAdminSignFieldsFromValues(field_values)),
+      is_admin_signed: Boolean(row.admin_signed_at),
       assignments,
       assignment_count: assignments.length
     };
@@ -409,8 +410,18 @@ export function updateActivityRiskRecord(orgId, recordId, { title, field_values,
   const nextTitle = title != null ? String(title).trim() : existing.title;
   if (!nextTitle) throw new Error('Title is required.');
 
-  const nextValues =
+  let nextValues =
     field_values != null ? field_values : parseFieldValuesJson(existing.field_values_json);
+  nextValues = stripAdminSignFieldsFromValues(nextValues);
+  if (existing.admin_signed_at) {
+    nextValues = {
+      ...nextValues,
+      pre_activity_prepared_by: existing.field_values?.pre_activity_prepared_by || '',
+      pre_activity_prepared_role: existing.field_values?.pre_activity_prepared_role || '',
+      pre_activity_date_prepared: existing.field_values?.pre_activity_date_prepared || '',
+      pre_activity_signature: ''
+    };
+  }
 
   db.prepare(
     `UPDATE activity_risk_assessment_records
@@ -432,7 +443,82 @@ export async function generateActivityRiskRecordPdfBuffer(orgId, recordId) {
   const record = getActivityRiskRecord(orgId, recordId);
   if (!record) throw new Error('Risk assessment not found.');
   const blank = await masterPdfBuffer();
-  return fillActivityRiskPdfFields(blank, record.field_values);
+  let buffer = await fillActivityRiskPdfFields(blank, record.field_values);
+  if (record.admin_signature_data) {
+    const schema = await getActivityRiskFieldSchema();
+    buffer = await embedAdminSignatureInActivityRiskPdf(buffer, record.admin_signature_data, schema);
+  }
+  return buffer;
+}
+
+function stripAdminSignFieldsFromValues(fieldValues) {
+  const next = { ...(fieldValues || {}) };
+  for (const key of Object.keys(next)) {
+    if (isActivityRiskAdminSignField(key)) delete next[key];
+  }
+  return next;
+}
+
+/**
+ * Apply organisation admin sign-off to the pre-activity section using Settings default signatory + user signature.
+ */
+export async function signActivityRiskRecordByAdmin(orgId, recordId, { userId = null } = {}) {
+  const record = getActivityRiskRecord(orgId, recordId);
+  if (!record) throw new Error('Risk assessment not found.');
+
+  const contentValues = stripAdminSignFieldsFromValues(record.field_values);
+  if (!recordHasFilledContent(contentValues)) {
+    throw new Error('Complete the assessment before signing.');
+  }
+
+  const org = db
+    .prepare(
+      `SELECT default_signatory_name, default_signatory_role
+       FROM organisations WHERE id = ?`
+    )
+    .get(orgId);
+  const user = userId
+    ? db.prepare('SELECT name, signature_data FROM users WHERE id = ?').get(userId)
+    : null;
+
+  const signatoryName = String(org?.default_signatory_name || user?.name || '').trim();
+  if (!signatoryName) {
+    throw new Error('Set the default signatory name in Settings → Business before signing.');
+  }
+
+  const signatureData = user?.signature_data || null;
+  if (!signatureData) {
+    throw new Error('Save your signature under Settings → Your signature before signing with Nexus Core.');
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const nextValues = {
+    ...contentValues,
+    pre_activity_prepared_by: signatoryName,
+    pre_activity_prepared_role: String(org?.default_signatory_role || '').trim(),
+    pre_activity_date_prepared: today,
+    pre_activity_signature: ''
+  };
+
+  db.prepare(
+    `UPDATE activity_risk_assessment_records
+     SET field_values_json = ?,
+         admin_signed_at = datetime('now'),
+         admin_signed_by_user_id = ?,
+         admin_signature_data = ?,
+         updated_by_user_id = ?,
+         updated_at = datetime('now')
+     WHERE id = ? AND organisation_id = ?`
+  ).run(
+    serializeFieldValues(nextValues),
+    userId || null,
+    signatureData,
+    userId || null,
+    recordId,
+    orgId
+  );
+
+  return getActivityRiskRecord(orgId, recordId);
 }
 
 /**
@@ -449,6 +535,9 @@ export async function assignActivityRiskRecordToParticipant(participantId, recor
 
   const record = getActivityRiskRecord(orgId, recordId);
   if (!record) throw new Error('Risk assessment not found.');
+  if (!record.admin_signed_at) {
+    throw new Error('An admin must sign this assessment with Nexus Core before assigning to participants.');
+  }
 
   const buffer = await generateActivityRiskRecordPdfBuffer(orgId, recordId);
   const datePart = new Date().toISOString().slice(0, 10);
