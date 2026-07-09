@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
-import { onboarding, participants, organisations, ndis, smartDefaults } from '../lib/api';
+import { onboarding, participants, organisations, ndis, smartDefaults, forms } from '../lib/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
+import OnboardingDocumentSelectModal from '../components/OnboardingDocumentSelectModal.jsx';
+import { inferParticipantServiceType } from '@nexus-shared/onboardingDocumentContext.js';
 import { formatDate } from '../lib/dateUtils';
 import {
   participantFieldLabels,

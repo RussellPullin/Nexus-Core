@@ -635,7 +635,17 @@ export const documentLibrary = {
   updateMasterPack: (masterId, pack) => fetchApi(`/document-library/masters/${masterId}/pack`, {
     method: 'PATCH',
     body: JSON.stringify({ pack })
-  })
+  }),
+  updateMasterContextTags: (masterId, tags) => fetchApi(`/document-library/masters/${masterId}/context-tags`, {
+    method: 'PATCH',
+    body: JSON.stringify(tags)
+  }),
+  onboardingPackDocuments: (workflow, { participantServiceType, staffRole } = {}) => {
+    const q = new URLSearchParams({ workflow });
+    if (participantServiceType) q.set('participant_service_type', participantServiceType);
+    if (staffRole) q.set('staff_role', staffRole);
+    return fetchApi(`/document-library/onboarding-pack?${q.toString()}`);
+  }
 };
 
 export const staff = {
