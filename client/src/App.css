@@ -482,6 +482,15 @@ body {
   background: #dc2626;
 }
 
+.btn-orange {
+  background: var(--brand-orange);
+  color: white;
+}
+
+.btn-orange:hover {
+  background: var(--brand-orange-dark);
+}
+
 .card {
   background: white;
   border-radius: 8px;
@@ -795,6 +804,7 @@ input[type="radio"] {
 }
 
 .badge-scheduled { background: #dbeafe; color: #1d4ed8; }
+.badge-open { background: #ffedd5; color: #c2410c; }
 .badge-in_progress { background: #fef3c7; color: #92400e; }
 .badge-completed { background: #d1fae5; color: #047857; }
 .badge-completed_by_admin { background: #d1fae5; color: #047857; }
@@ -1311,6 +1321,32 @@ input[type="radio"] {
 
 .week-planner-shift-card.week-planner-shift-sent:hover {
   background: #dcfce7;
+}
+
+.week-planner-shift-card.week-planner-shift-open {
+  border-left: 3px dashed #ea580c;
+  background: #fff7ed;
+}
+
+.week-planner-shift-card.week-planner-shift-open:hover {
+  background: #ffedd5;
+}
+
+.week-planner-post-open-btn {
+  display: block;
+  margin-top: 0.35rem;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.65rem;
+  line-height: 1.2;
+  border: 1px solid #ea580c;
+  border-radius: 4px;
+  background: #fff;
+  color: #c2410c;
+  cursor: pointer;
+}
+
+.week-planner-post-open-btn:hover {
+  background: #ffedd5;
 }
 
 .week-planner-shift-invoice-badge {
@@ -1903,6 +1939,15 @@ body {
 
 .btn-danger:hover {
   background: #8a2626;
+}
+
+.btn-orange {
+  background: var(--brand-orange);
+  color: var(--brand-white);
+}
+
+.btn-orange:hover {
+  background: var(--brand-orange-dark);
 }
 
 th,

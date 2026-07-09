@@ -112,6 +112,7 @@ export default function WeekPlanner({
   participantsList,
   staffList,
   onCreateShift,
+  onCreateOpenShift,
   onUpdateShift,
   onDeleteShift,
   onEditShift
@@ -177,6 +178,23 @@ export default function WeekPlanner({
 
   const handleDragLeave = () => {
     setDropTarget(null);
+  };
+
+  const handleCreateOpenShiftFromPending = async (e) => {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+    if (!pendingDrop?.participant_id || pendingDrop.staff_id) return;
+    try {
+      await onCreateOpenShift?.({
+        participant_id: pendingDrop.participant_id,
+        start_time: pendingDrop.start_time,
+        end_time: pendingDrop.end_time,
+        notes: ''
+      });
+      setPendingDrop(null);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleDrop = async (e, dateStr, slotIndex) => {
@@ -264,6 +282,14 @@ export default function WeekPlanner({
       if (!data.id) return;
 
       if (data.type === 'worker' && targetShift.participant_id) {
+        if (!targetShift.staff_id || targetShift.status === 'open') {
+          await onUpdateShift(targetShift.id, {
+            staff_id: data.id,
+            status: 'scheduled'
+          });
+          setPendingDrop(null);
+          return;
+        }
         await onCreateShift({
           participant_id: targetShift.participant_id,
           staff_id: data.id,
@@ -366,6 +392,7 @@ export default function WeekPlanner({
   };
 
   const renderShiftCard = (shift, day, layout) => {
+    const isOpen = shift.status === 'open' || !shift.staff_id;
     const dateStr = toLocalDateStr(day);
     const startSlot = slotIndexFromTime(dateStr, shift.start_time);
     const endSlot = slotIndexFromTime(dateStr, shift.end_time);
@@ -380,7 +407,7 @@ export default function WeekPlanner({
     return (
       <div
         key={shift.id}
-        className={`week-planner-shift-card ${dragging?.type === 'shift' && dragging?.id === shift.id ? 'dragging' : ''} ${shift.roster_sent_at ? 'week-planner-shift-sent' : ''}`}
+        className={`week-planner-shift-card ${isOpen ? 'week-planner-shift-open' : ''} ${dragging?.type === 'shift' && dragging?.id === shift.id ? 'dragging' : ''} ${shift.roster_sent_at ? 'week-planner-shift-sent' : ''}`}
         style={{
           left,
           right: laneCount > 1 ? 'auto' : '2px',
@@ -409,10 +436,13 @@ export default function WeekPlanner({
               {shift.invoice_number.length > 10 ? `${shift.invoice_number.slice(0, 8)}…` : shift.invoice_number}
             </span>
           )}
+          {shift.open_shift_broadcast_at && (
+            <span className="week-planner-shift-sent-badge" title="Sent to staff as available">📢</span>
+          )}
           {shift.roster_sent_at && (
             <span className="week-planner-shift-sent-badge" title="Roster sent">✓</span>
           )}
-          <span className="week-planner-shift-worker">{shift.staff_name}</span>
+          <span className="week-planner-shift-worker">{isOpen ? 'Available shift' : shift.staff_name}</span>
           <span className="week-planner-shift-client">{shift.participant_name}</span>
           {shift.notes && (
             <span className="week-planner-shift-notes" title={shift.notes}>
@@ -491,7 +521,7 @@ export default function WeekPlanner({
           </div>
         </div>
         <div className="week-planner-sidebar-footer">
-          <p className="week-planner-hint">Drag worker, then client (or the other way) onto a slot. Move shifts by dragging; extend with the bottom handle.</p>
+          <p className="week-planner-hint">Drag worker + client onto a slot, or drop a client and post as an available shift. Move shifts by dragging; extend with the bottom handle.</p>
           <div className="week-planner-zoom">
             <label>
               <span className="week-planner-zoom-label">Zoom</span>
@@ -540,7 +570,7 @@ export default function WeekPlanner({
 
                 const hasPending = pendingDrop?.dateStr === dateStr && pendingDrop?.slotIndex === slotIndex;
                 const pendingHint = hasPending
-                  ? (pendingDrop.staff_id ? 'Drop client' : 'Drop worker')
+                  ? (pendingDrop.staff_id ? 'Drop client' : 'Drop worker or post below')
                   : null;
 
                 return (
@@ -556,6 +586,15 @@ export default function WeekPlanner({
                         {pendingDrop.staff_name || pendingDrop.participant_name}
                         <br />
                         <small>{pendingHint}</small>
+                        {!pendingDrop.staff_id && onCreateOpenShift && (
+                          <button
+                            type="button"
+                            className="week-planner-post-open-btn"
+                            onClick={handleCreateOpenShiftFromPending}
+                          >
+                            Post as available shift
+                          </button>
+                        )}
                       </div>
                     )}
                     {shifts

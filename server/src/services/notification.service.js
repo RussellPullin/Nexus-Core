@@ -305,3 +305,64 @@ export async function sendICSByEmail(toEmail, subject, icsContent, filename = 's
   const attachments = [{ filename, content: icsContent, contentType: 'text/calendar' }];
   await sendEmailViaRelay(userId, toEmail, subject, text, from, attachments);
 }
+
+function formatShiftDateTimeRange(startTime, endTime) {
+  const startDate = new Date(String(startTime).replace(' ', 'T'));
+  const endDate = new Date(String(endTime).replace(' ', 'T'));
+  const dateStr = startDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const timeStr = `${startDate.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })} - ${endDate.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })}`;
+  return { dateStr, timeStr };
+}
+
+/**
+ * Email all eligible staff about an available (open) shift — first to call admin gets it.
+ */
+export async function sendOpenShiftAvailableEmail(shift, staffMember, adminPhone, userId) {
+  if (!shift || !staffMember?.email || !userId) return { ok: false, reason: 'missing_data' };
+  const participant = db.prepare('SELECT name FROM participants WHERE id = ?').get(shift.participant_id);
+  const participantName = participant?.name || 'Participant';
+  const { dateStr, timeStr } = formatShiftDateTimeRange(shift.start_time, shift.end_time);
+  const phoneLine = adminPhone
+    ? `To accept this shift, call ${adminPhone} as soon as possible. Shifts are filled first come, first served.`
+    : 'To accept this shift, contact your coordinator as soon as possible. Shifts are filled first come, first served.';
+
+  const subject = `Available shift – ${dateStr}`;
+  const text = `Hi ${staffMember.name || 'there'},\n\n` +
+    `A shift is available:\n\n` +
+    `Date: ${dateStr}\n` +
+    `Time: ${timeStr}\n` +
+    `Participant: ${participantName}\n` +
+    (shift.notes ? `Notes: ${shift.notes}\n` : '') +
+    `\n${phoneLine}\n\n` +
+    `If you are not interested, no action is needed.`;
+
+  if (!staffMember.notify_email || !isEmailConfiguredForUser(userId)) {
+    return { ok: false, reason: 'email_not_configured' };
+  }
+  const cfg = getEmailConfigForUser(userId);
+  await sendEmailViaRelay(userId, staffMember.email, subject, text, cfg.from, null);
+  return { ok: true };
+}
+
+/** Notify staff (except assignee) that an open shift has been filled. */
+export async function sendOpenShiftFilledEmail(shift, staffMember, assignedStaffName, userId) {
+  if (!shift || !staffMember?.email || !userId) return { ok: false, reason: 'missing_data' };
+  const participant = db.prepare('SELECT name FROM participants WHERE id = ?').get(shift.participant_id);
+  const participantName = participant?.name || 'Participant';
+  const { dateStr, timeStr } = formatShiftDateTimeRange(shift.start_time, shift.end_time);
+
+  const subject = `Shift filled – ${dateStr}`;
+  const text = `Hi ${staffMember.name || 'there'},\n\n` +
+    `The available shift below has been filled${assignedStaffName ? ` (${assignedStaffName})` : ''}:\n\n` +
+    `Date: ${dateStr}\n` +
+    `Time: ${timeStr}\n` +
+    `Participant: ${participantName}\n\n` +
+    `Thank you for your interest.`;
+
+  if (!staffMember.notify_email || !isEmailConfiguredForUser(userId)) {
+    return { ok: false, reason: 'email_not_configured' };
+  }
+  const cfg = getEmailConfigForUser(userId);
+  await sendEmailViaRelay(userId, staffMember.email, subject, text, cfg.from, null);
+  return { ok: true };
+}

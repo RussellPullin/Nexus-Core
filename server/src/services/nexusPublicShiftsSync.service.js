@@ -391,6 +391,9 @@ export async function mirrorShiftToNexusSupabase(shiftId) {
     .get(shiftId);
 
   if (!row) return { ok: false, skipped: true, reason: 'shift_not_found' };
+  if (!row.staff_id || row.status === 'open') {
+    return { ok: false, skipped: true, reason: 'open_shift_no_staff' };
+  }
 
   const nexusOrgForTz =
     isUuid(row.provider_org_id) ? row.provider_org_id.trim() : isUuid(row.staff_org_id) ? row.staff_org_id.trim() : null;

@@ -36,7 +36,7 @@ function ensureScheduleCoreTables() {
       CREATE TABLE shifts (
         id TEXT PRIMARY KEY,
         participant_id TEXT NOT NULL,
-        staff_id TEXT NOT NULL,
+        staff_id TEXT,
         start_time TEXT NOT NULL,
         end_time TEXT NOT NULL,
         status TEXT DEFAULT 'scheduled',
@@ -47,10 +47,11 @@ function ensureScheduleCoreTables() {
         shifter_shift_id TEXT,
         line_items_locked INTEGER NOT NULL DEFAULT 0,
         billing_invoice_id TEXT,
+        open_shift_broadcast_at TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
-        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE SET NULL
       );
     `);
   }
@@ -260,6 +261,83 @@ try {
       db.exec('ALTER TABLE shifts ADD COLUMN line_items_locked INTEGER NOT NULL DEFAULT 0');
     } catch (e) {
       if (!e.message?.includes('duplicate column')) console.warn('shifts.line_items_locked migration:', e.message);
+    }
+  }
+  const shiftColsOpen = db.prepare('PRAGMA table_info(shifts)').all();
+  if (!shiftColsOpen.some((c) => c.name === 'open_shift_broadcast_at')) {
+    try {
+      db.exec('ALTER TABLE shifts ADD COLUMN open_shift_broadcast_at TEXT');
+    } catch (e) {
+      if (!e.message?.includes('duplicate column')) console.warn('shifts.open_shift_broadcast_at migration:', e.message);
+    }
+  }
+  // Allow open shifts (participant only, no staff yet)
+  try {
+    const staffCol = db.prepare('PRAGMA table_info(shifts)').all().find((c) => c.name === 'staff_id');
+    if (staffCol?.notnull === 1) {
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec(`
+        CREATE TABLE shifts_open_migration (
+          id TEXT PRIMARY KEY,
+          participant_id TEXT NOT NULL,
+          staff_id TEXT,
+          start_time TEXT NOT NULL,
+          end_time TEXT NOT NULL,
+          status TEXT DEFAULT 'scheduled',
+          notes TEXT,
+          roster_sent_at TEXT,
+          recurring_group_id TEXT,
+          expenses REAL DEFAULT 0,
+          shifter_shift_id TEXT,
+          line_items_locked INTEGER NOT NULL DEFAULT 0,
+          billing_invoice_id TEXT,
+          open_shift_broadcast_at TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
+          FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE SET NULL
+        );
+        INSERT INTO shifts_open_migration (
+          id, participant_id, staff_id, start_time, end_time, status, notes,
+          roster_sent_at, recurring_group_id, expenses, shifter_shift_id,
+          line_items_locked, billing_invoice_id, open_shift_broadcast_at, created_at, updated_at
+        )
+        SELECT
+          id, participant_id, staff_id, start_time, end_time, status, notes,
+          roster_sent_at, recurring_group_id, expenses, shifter_shift_id,
+          line_items_locked, billing_invoice_id, open_shift_broadcast_at, created_at, updated_at
+        FROM shifts;
+        DROP TABLE shifts;
+        ALTER TABLE shifts_open_migration RENAME TO shifts;
+      `);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_shifts_participant ON shifts(participant_id);
+        CREATE INDEX IF NOT EXISTS idx_shifts_staff ON shifts(staff_id);
+        CREATE INDEX IF NOT EXISTS idx_shifts_start ON shifts(start_time);
+        CREATE INDEX IF NOT EXISTS idx_shifts_recurring_group ON shifts(recurring_group_id);
+        CREATE INDEX IF NOT EXISTS idx_shifts_shifter_shift_id ON shifts(shifter_shift_id);
+      `);
+      db.exec('PRAGMA foreign_keys = ON');
+    }
+  } catch (e) {
+    console.warn('shifts nullable staff_id migration:', e.message);
+    try { db.exec('PRAGMA foreign_keys = ON'); } catch (_) {}
+  }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS open_shift_recipients (
+        shift_id TEXT NOT NULL,
+        staff_id TEXT NOT NULL,
+        notified_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (shift_id, staff_id),
+        FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_open_shift_recipients_shift ON open_shift_recipients(shift_id);
+    `);
+  } catch (e) {
+    if (!/already exists|duplicate table/i.test(String(e.message || ''))) {
+      console.warn('open_shift_recipients migration:', e.message);
     }
   }
   // Prevent re-importing the same external shift after hard-delete (Excel / Shifter pull)

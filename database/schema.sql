@@ -291,14 +291,24 @@ CREATE TABLE IF NOT EXISTS ndis_line_items (
 CREATE TABLE IF NOT EXISTS shifts (
   id TEXT PRIMARY KEY,
   participant_id TEXT NOT NULL,
-  staff_id TEXT NOT NULL,
+  staff_id TEXT,
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
   status TEXT DEFAULT 'scheduled',
   notes TEXT,
+  open_shift_broadcast_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
+  FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS open_shift_recipients (
+  shift_id TEXT NOT NULL,
+  staff_id TEXT NOT NULL,
+  notified_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (shift_id, staff_id),
+  FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
   FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
 );
 

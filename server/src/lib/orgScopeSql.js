@@ -26,13 +26,14 @@ export function tenantParticipantClause(userId, tableAlias = 'p') {
   return { sql: `${a}.provider_org_id = ?`, params: [orgId], orgId };
 }
 
-/** Same tenant as {@link tenantParticipantClause} plus staff.org_id (shifts, progress_notes, etc.). */
-export function tenantParticipantAndStaffClause(userId, pAlias = 'p', stAlias = 'st') {
+/** Same tenant as {@link tenantParticipantClause} plus staff.org_id (shifts, progress_notes, etc.). Open shifts (no staff) match on participant org only. */
+export function tenantParticipantAndStaffClause(userId, pAlias = 'p', stAlias = 'st', sAlias = 's') {
   const base = tenantParticipantClause(userId, pAlias);
   if (!base.orgId) return { sql: '1=0', params: [], orgId: null };
   const st = stAlias;
+  const s = sAlias;
   return {
-    sql: `${base.sql} AND ${st}.org_id = ?`,
+    sql: `${base.sql} AND (${s}.staff_id IS NULL OR ${st}.org_id = ?)`,
     params: [...base.params, base.orgId],
     orgId: base.orgId
   };
@@ -61,14 +62,14 @@ export function isCoordinatorTaskInRequesterTenant(taskId, userId) {
 }
 
 export function isShiftInRequesterTenant(shiftId, userId) {
-  const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+  const c = tenantParticipantAndStaffClause(userId, 'p', 'st', 's');
   if (!c.orgId || !shiftId) return false;
   const row = db
     .prepare(
       `
     SELECT 1 AS x FROM shifts s
     JOIN participants p ON p.id = s.participant_id
-    JOIN staff st ON st.id = s.staff_id
+    LEFT JOIN staff st ON st.id = s.staff_id
     WHERE s.id = ? AND (${c.sql})
   `
     )

@@ -783,6 +783,7 @@ export const shifts = {
   icsUrl: (id) => `${API}/shifts/${id}/ics`,
   sendIcs: (id) => fetchApi(`/shifts/${id}/send-ics`, { method: 'POST' }),
   sendRoster: (start, end) => fetchApi('/shifts/send-roster', { method: 'POST', body: JSON.stringify({ start, end }) }),
+  broadcastOpen: (id) => fetchApi(`/shifts/${id}/broadcast-open`, { method: 'POST' }),
   receipts: (id) => fetchApi(`/shifts/${id}/receipts`),
   refreshExpense: (id) => fetchApi(`/shifts/${id}/refresh-expense`),
   /** Get duplicate shift groups (optional staff_id to filter by staff). */

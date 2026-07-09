@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { formatDate, formatDateInTimeZone, formatDateLocal, formatTimeInTimeZone } from '../lib/dateUtils';
 import { useSearchParams } from 'react-router-dom';
-import { shifts, participants, staff, appShifts, settings, syncFromExcel, syncFromShifter, learning } from '../lib/api';
+import { shifts, participants, staff, appShifts, settings, syncFromShifter, learning } from '../lib/api';
 import WeekPlanner from '../components/WeekPlanner';
 import SearchableSelect from '../components/SearchableSelect';
 import SuggestionPanel from '../components/SuggestionPanel';
@@ -29,6 +29,10 @@ function toApiDateTime(s) {
   if (!s) return '';
   const t = String(s).replace('T', ' ');
   return t.length === 16 ? `${t}:00` : t;
+}
+
+function isOpenShift(shift) {
+  return shift?.status === 'open' || !shift?.staff_id;
 }
 
 const SHIFTS_LIST_STORAGE_KEY = 'nexus_shifts_list';
@@ -80,11 +84,12 @@ export default function ShiftsPage() {
   const [duplicatesStaffId, setDuplicatesStaffId] = useState('');
   const [appShiftsList, setAppShiftsList] = useState([]);
   const [showAppShifts, setShowAppShifts] = useState(true);
-  const [syncingExcel, setSyncingExcel] = useState(false);
   const [syncingShifter, setSyncingShifter] = useState(false);
   const [resolvingShift, setResolvingShift] = useState(null);
   const [availabilityPreview, setAvailabilityPreview] = useState(null);
   const [shiftSaveWarnings, setShiftSaveWarnings] = useState(null);
+  const [formIsOpenShift, setFormIsOpenShift] = useState(false);
+  const [broadcastingOpen, setBroadcastingOpen] = useState(false);
   const sendAfterRef = useRef(false);
   const formRef = useRef(null);
 
@@ -313,20 +318,6 @@ export default function ShiftsPage() {
     }
   };
 
-  const handleSyncFromExcel = async () => {
-    setSyncingExcel(true);
-    try {
-      const result = await syncFromExcel.run();
-      loadAppShifts();
-      load();
-      alertSyncResult(result, 'Excel / OneDrive');
-    } catch (err) {
-      alert(err.message || 'Sync from Excel failed');
-    } finally {
-      setSyncingExcel(false);
-    }
-  };
-
   const handleSyncFromShifter = async () => {
     setSyncingShifter(true);
     try {
@@ -386,11 +377,12 @@ export default function ShiftsPage() {
         setEditingShift(s);
         setForm({
           participant_id: s.participant_id,
-          staff_id: s.staff_id,
+          staff_id: s.staff_id || '',
           start_time: toDatetimeLocal(s.start_time),
           end_time: toDatetimeLocal(s.end_time),
           notes: s.notes || ''
         });
+        setFormIsOpenShift(isOpenShift(s));
         setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' });
         setShowModal(true);
       }).catch(() => {});
@@ -419,20 +411,25 @@ export default function ShiftsPage() {
     sendAfterRef.current = false;
     try {
       const payload = { ...form };
+      if (formIsOpenShift) {
+        payload.staff_id = null;
+        payload.status = 'open';
+      }
       let shiftId;
       if (editingShift) {
-        await shifts.update(editingShift.id, { ...payload, status: editingShift.status });
+        await shifts.update(editingShift.id, { ...payload, status: formIsOpenShift ? 'open' : (editingShift.status === 'open' && form.staff_id ? 'scheduled' : editingShift.status) });
         shiftId = editingShift.id;
       } else {
         const created = await shifts.create(payload);
         shiftId = created.id;
       }
-      if (sendAfter && shiftId) {
+      if (sendAfter && shiftId && !formIsOpenShift) {
         await shifts.sendIcs(shiftId);
         alert('Shift saved and sent to staff.');
       }
       setShowModal(false);
       setEditingShift(null);
+      setFormIsOpenShift(false);
       setForm({ participant_id: '', staff_id: '', start_time: '', end_time: '', notes: '' });
       setAvailabilityPreview(null);
       load();
@@ -601,15 +598,53 @@ export default function ShiftsPage() {
 
   const handleEditShift = (shift) => {
     setEditingShift(shift);
+    setFormIsOpenShift(isOpenShift(shift));
     setForm({
       participant_id: shift.participant_id,
-      staff_id: shift.staff_id,
+      staff_id: shift.staff_id || '',
       start_time: toDatetimeLocal(shift.start_time),
       end_time: toDatetimeLocal(shift.end_time),
       notes: shift.notes || ''
     });
     setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' });
     setShowModal(true);
+  };
+
+  const handleBroadcastOpenShift = async (shiftId) => {
+    setBroadcastingOpen(true);
+    try {
+      const r = await shifts.broadcastOpen(shiftId);
+      if (r.sent === 0 && r.errors?.length > 0) {
+        alert(`Could not send to staff:\n\n${r.errors.join('\n')}`);
+      } else if (r.errors?.length > 0) {
+        alert(`Sent to ${r.sent} staff. ${r.skipped} skipped. Some failed:\n\n${r.errors.join('\n')}`);
+      } else {
+        alert(`Available shift sent to ${r.sent} staff.${r.skipped ? ` (${r.skipped} skipped — no email or notifications off)` : ''}`);
+      }
+      load({ silent: true });
+    } catch (err) {
+      if (err.code === 'EMAIL_NOT_CONNECTED' || err.code === 'EMAIL_RECONNECT_REQUIRED') {
+        alert(err.code === 'EMAIL_RECONNECT_REQUIRED'
+          ? 'Your email connection expired. Open Settings and reconnect your email.'
+          : 'Connect your email in Settings first, then try again.');
+      } else {
+        alert(err.message || 'Failed to send available shift');
+      }
+    } finally {
+      setBroadcastingOpen(false);
+    }
+  };
+
+  const createOpenShift = async (data) => {
+    const created = await shifts.create({ ...data, status: 'open', staff_id: null });
+    setShiftList((prev) => [...prev, {
+      ...created,
+      participant_name: participantsList.find((p) => p.id === data.participant_id)?.name ?? '',
+      staff_name: '',
+      status: 'open'
+    }]);
+    load({ silent: true });
+    return created;
   };
 
   const [sendingRoster, setSendingRoster] = useState(false);
@@ -702,7 +737,7 @@ export default function ShiftsPage() {
             setListWeek(next);
           }}>Next</button>
           <Link to="/shifts/availability" className="btn btn-secondary">Roster availability</Link>
-          <button className="btn btn-primary" onClick={() => { setEditingShift(null); setForm({ participant_id: '', staff_id: '', start_time: '', end_time: '', notes: '' }); setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' }); setShowModal(true); }}>New Shift</button>
+          <button className="btn btn-primary" onClick={() => { setEditingShift(null); setFormIsOpenShift(false); setForm({ participant_id: '', staff_id: '', start_time: '', end_time: '', notes: '' }); setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' }); setShowModal(true); }}>New Shift</button>
           <button className="btn btn-secondary" onClick={handleSendRoster} disabled={sendingRoster || shiftList.length === 0} title="Email roster (ICS) to staff with unsent shifts this week. Sent shifts are highlighted; move or edit to send again.">
             {sendingRoster ? 'Sending…' : 'Send roster to all staff'}
           </button>
@@ -721,36 +756,21 @@ export default function ShiftsPage() {
             {showAppShifts ? '▼' : '▶'}
           </button>
           Shifts from App ({appShiftsList.length})
-          <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              onClick={handleSyncFromExcel}
-              disabled={syncingExcel || syncingShifter}
-              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', cursor: syncingExcel || syncingShifter ? 'wait' : 'pointer' }}
-            >
-              {syncingExcel ? 'Pulling Excel…' : 'Pull from OneDrive Excel'}
-            </button>
-            <button
-              type="button"
-              onClick={handleSyncFromShifter}
-              disabled={syncingExcel || syncingShifter}
-              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', cursor: syncingExcel || syncingShifter ? 'wait' : 'pointer' }}
-            >
-              {syncingShifter ? 'Pulling Shifter…' : 'Pull from Shifter DB'}
-            </button>
-          </span>
+          <button
+            type="button"
+            className="btn btn-orange"
+            onClick={handleSyncFromShifter}
+            disabled={syncingShifter}
+            style={{ marginLeft: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.8rem', cursor: syncingShifter ? 'wait' : 'pointer' }}
+          >
+            {syncingShifter ? 'Pulling Shifter…' : 'Pull from Shifter'}
+          </button>
         </h3>
-        <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-          Shifts can come from the Progress app (webhook), from an Excel workbook on OneDrive (connect Microsoft in Settings and set the path in
-          Shifter), or from Shifter directly — use <strong>Pull from Shifter DB</strong> when shifts already live there. Matched names become
-          shifts; unmatched rows stay here for linking.
-        </p>
         {showAppShifts && (
           <div style={{ marginTop: '0.75rem', maxHeight: 300, overflowY: 'auto' }}>
             {appShiftsList.length === 0 ? (
               <div className="empty-state" style={{ padding: '1rem', fontSize: '0.9rem', color: '#64748b' }}>
-                No shifts yet. Use Pull from OneDrive Excel or Pull from Shifter DB, or ensure the Progress app can reach your Nexus webhook (see
-                Settings → Shifter).
+                No shifts yet. Use Pull from Shifter, or ensure the Progress app can reach your Nexus webhook (see Settings → Shifter).
                 <div style={{ marginTop: '0.6rem' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => navigate(`${pathPrefix}/settings`)}>
                     Open Settings
@@ -916,6 +936,13 @@ export default function ShiftsPage() {
                   alert(err.message);
                 }
               }}
+              onCreateOpenShift={async (data) => {
+                try {
+                  await createOpenShift(data);
+                } catch (err) {
+                  alert(err.message);
+                }
+              }}
               onUpdateShift={async (id, data) => {
                 try {
                   const shift = shiftList.find((s) => s.id === id);
@@ -980,8 +1007,8 @@ export default function ShiftsPage() {
                         }
                       </td>
                       <td>{s.participant_name}</td>
-                      <td>{s.staff_name}</td>
-                      <td><span className={`badge badge-${s.status}`}>{s.status}</span></td>
+                      <td>{isOpenShift(s) ? <span className="badge badge-open">Unassigned</span> : s.staff_name}</td>
+                      <td><span className={`badge badge-${isOpenShift(s) ? 'open' : s.status}`}>{isOpenShift(s) ? 'open' : s.status}</span></td>
                       <td>
                         {s.invoice_number ? (
                           <span
@@ -1000,8 +1027,22 @@ export default function ShiftsPage() {
                       </td>
                       <td>
                         {s.roster_sent_at && <span className="badge badge-completed" style={{ marginRight: '0.25rem' }} title="Roster sent">Sent</span>}
+                        {isOpenShift(s) && (
+                          <button
+                            type="button"
+                            className="btn btn-orange"
+                            style={{ fontSize: '0.75rem', marginRight: '0.25rem' }}
+                            disabled={broadcastingOpen}
+                            onClick={() => handleBroadcastOpenShift(s.id)}
+                            title="Email all staff about this available shift"
+                          >
+                            {s.open_shift_broadcast_at ? 'Resend' : 'Send to staff'}
+                          </button>
+                        )}
                         <button className="btn btn-primary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} onClick={() => navigate(`${pathPrefix}/shifts/${s.id}?${shiftDetailPeriodQuery()}`)}>View / Charges</button>
-                        <a href={shifts.icsUrl(s.id)} download className="btn btn-secondary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} title="Download ICS">ICS</a>
+                        {!isOpenShift(s) && (
+                          <a href={shifts.icsUrl(s.id)} download className="btn btn-secondary" style={{ fontSize: '0.75rem', marginRight: '0.25rem' }} title="Download ICS">ICS</a>
+                        )}
                         <button className="btn btn-secondary" style={{ fontSize: '0.75rem' }} onClick={() => handleEditShift(s)}>Edit</button>
                       </td>
                     </tr>
@@ -1039,13 +1080,30 @@ export default function ShiftsPage() {
                 />
               </div>
               <div className="form-group">
-                <label>Staff *</label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={formIsOpenShift}
+                    onChange={(e) => {
+                      setFormIsOpenShift(e.target.checked);
+                      if (e.target.checked) setForm((f) => ({ ...f, staff_id: '' }));
+                    }}
+                    disabled={editingShift && !isOpenShift(editingShift) && editingShift.staff_id}
+                  />
+                  Available shift (no worker yet — send to staff to fill)
+                </label>
+              </div>
+              <div className="form-group">
+                <label>Staff {!formIsOpenShift && '*'}</label>
                 <SearchableSelect
                   options={staffList.map((s) => ({ id: s.id, name: s.name }))}
                   value={form.staff_id}
-                  onChange={(id) => setForm({ ...form, staff_id: id })}
-                  placeholder="Search workers..."
-                  required
+                  onChange={(id) => {
+                    setForm({ ...form, staff_id: id });
+                    if (id) setFormIsOpenShift(false);
+                  }}
+                  placeholder={formIsOpenShift ? 'Assign when a worker calls…' : 'Search workers...'}
+                  required={!formIsOpenShift}
                 />
               </div>
               <SuggestionPanel
@@ -1124,17 +1182,30 @@ export default function ShiftsPage() {
               )}
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
                 <button type="submit" className="btn btn-primary">{editingShift ? 'Save' : 'Create'}</button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => {
-                    sendAfterRef.current = true;
-                    formRef.current?.requestSubmit();
-                  }}
-                  title="Save shift and email it to the assigned staff member"
-                >
-                  {editingShift ? 'Save & send to staff' : 'Create & send to staff'}
-                </button>
+                {editingShift && isOpenShift(editingShift) && (
+                  <button
+                    type="button"
+                    className="btn btn-orange"
+                    disabled={broadcastingOpen}
+                    onClick={() => handleBroadcastOpenShift(editingShift.id)}
+                    title="Email all staff — first to call admin gets the shift"
+                  >
+                    {broadcastingOpen ? 'Sending…' : (editingShift.open_shift_broadcast_at ? 'Resend to staff' : 'Send to staff')}
+                  </button>
+                )}
+                {!formIsOpenShift && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      sendAfterRef.current = true;
+                      formRef.current?.requestSubmit();
+                    }}
+                    title="Save shift and email it to the assigned staff member"
+                  >
+                    {editingShift ? 'Save & send to staff' : 'Create & send to staff'}
+                  </button>
+                )}
                 {editingShift && (
                   <button type="button" className="btn btn-primary" onClick={() => { setShowModal(false); setEditingShift(null); navigate(`${pathPrefix}/shifts/${editingShift.id}?${shiftDetailPeriodQuery()}`); }}>
                     View / Charges

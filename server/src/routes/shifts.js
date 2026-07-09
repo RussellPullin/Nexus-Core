@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
-import { sendICSByEmail, isEmailConfiguredForUser } from '../services/notification.service.js';
+import { sendICSByEmail, isEmailConfiguredForUser, sendOpenShiftAvailableEmail, sendOpenShiftFilledEmail } from '../services/notification.service.js';
 import { generateICS, generateICSForMultipleShifts } from '../services/calendar.service.js';
 import { recordEvent } from '../services/learningEvent.service.js';
 import { updateAggregatesForShift } from '../services/featureStore.service.js';
@@ -28,6 +28,32 @@ import { hardDeleteShiftRow } from '../services/shiftHardDelete.service.js';
 import { cleanupDuplicateUnworkedShifts } from '../services/shiftDuplicateCleanup.service.js';
 
 const router = Router();
+
+const STAFF_JOIN = 'LEFT JOIN staff st ON s.staff_id = st.id';
+
+function isOpenShiftRow(shift) {
+  return shift?.status === 'open' || !shift?.staff_id;
+}
+
+async function notifyOpenShiftFilledRecipients(shiftId, assignedStaffId, userId) {
+  const recipients = db.prepare(`
+    SELECT osr.staff_id, st.name, st.email, st.notify_email
+    FROM open_shift_recipients osr
+    JOIN staff st ON st.id = osr.staff_id
+    WHERE osr.shift_id = ? AND osr.staff_id != ?
+  `).all(shiftId, assignedStaffId);
+  if (!recipients.length) return;
+  const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(shiftId);
+  const assigned = db.prepare('SELECT name FROM staff WHERE id = ?').get(assignedStaffId);
+  const assignedName = assigned?.name || '';
+  for (const r of recipients) {
+    try {
+      await sendOpenShiftFilledEmail(shift, r, assignedName, userId);
+    } catch (err) {
+      console.warn('[open-shift] filled notification failed for', r.email, err?.message);
+    }
+  }
+}
 
 function isEnvTruthyTrue(v) {
   const s = String(v ?? '')
@@ -67,7 +93,7 @@ function getShiftByIdForUser(shiftId, userId) {
              ${SHIFT_INVOICE_RESOLVE}
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
-      JOIN staff st ON s.staff_id = st.id
+      ${STAFF_JOIN}
       LEFT JOIN billing_invoices bi_inv ON bi_inv.id = s.billing_invoice_id
       WHERE s.id = ? AND (${c.sql})
     `
@@ -93,7 +119,7 @@ router.get('/', (req, res) => {
         ${SHIFT_INVOICE_RESOLVE}
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
-      JOIN staff st ON s.staff_id = st.id
+      ${STAFF_JOIN}
       LEFT JOIN billing_invoices bi_inv ON bi_inv.id = s.billing_invoice_id
       WHERE (${c.sql})
       ORDER BY s.start_time
@@ -145,13 +171,16 @@ router.post('/send-roster', async (req, res) => {
       SELECT s.*, p.name as participant_name, st.name as staff_name, st.email as staff_email
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
-      JOIN staff st ON s.staff_id = st.id
+      ${STAFF_JOIN}
       WHERE (${c.sql})
+        AND s.staff_id IS NOT NULL
+        AND s.status != 'open'
         AND s.start_time >= ? AND s.start_time <= ? AND s.roster_sent_at IS NULL
       ORDER BY st.id, s.start_time
     `).all(...c.params, `${start}T00:00:00`, `${end}T23:59:59`);
     const byStaff = {};
     for (const s of shifts) {
+      if (!s.staff_id) continue;
       if (!byStaff[s.staff_id]) byStaff[s.staff_id] = { staff: { name: s.staff_name, email: s.staff_email }, shifts: [] };
       byStaff[s.staff_id].shifts.push(s);
     }
@@ -159,8 +188,10 @@ router.post('/send-roster', async (req, res) => {
       const anyShifts = db.prepare(`
         SELECT 1 FROM shifts s
         JOIN participants p ON s.participant_id = p.id
-        JOIN staff st ON s.staff_id = st.id
+        ${STAFF_JOIN}
         WHERE (${c.sql})
+          AND s.staff_id IS NOT NULL
+          AND s.status != 'open'
           AND s.start_time >= ? AND s.start_time <= ?
       `).get(...c.params, `${start}T00:00:00`, `${end}T23:59:59`);
       return res.status(400).json({
@@ -219,7 +250,7 @@ router.get('/duplicates', (req, res) => {
              p.name as participant_name, st.name as staff_name
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
-      JOIN staff st ON s.staff_id = st.id
+      ${STAFF_JOIN}
       ${tenantWhere}
     `;
     const staffFilter = staff_id ? ' AND s.staff_id = ?' : '';
@@ -232,7 +263,7 @@ router.get('/duplicates', (req, res) => {
         `
       SELECT s.shifter_shift_id FROM shifts s
       JOIN participants p ON s.participant_id = p.id
-      JOIN staff st ON s.staff_id = st.id
+      ${STAFF_JOIN}
       WHERE (${c.sql}) AND s.shifter_shift_id IS NOT NULL AND TRIM(s.shifter_shift_id) != ''
       GROUP BY s.shifter_shift_id HAVING COUNT(*) > 1
     `
@@ -249,7 +280,7 @@ router.get('/duplicates', (req, res) => {
              p.name as participant_name, st.name as staff_name
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
-      JOIN staff st ON s.staff_id = st.id
+      ${STAFF_JOIN}
       WHERE (${c.sql}) AND s.shifter_shift_id IN (${duplicateShifterIds.map(() => '?').join(',')})
       ${staff_id ? ' AND s.staff_id = ?' : ''}
       ORDER BY s.shifter_shift_id, s.start_time
@@ -405,38 +436,46 @@ router.post('/', async (req, res) => {
     if (!orgId) {
       return res.status(403).json({ error: 'No organisation on your account.' });
     }
-    const { participant_id, staff_id, start_time, end_time, notes, recurring_group_id } = req.body;
+    const { participant_id, staff_id, start_time, end_time, notes, recurring_group_id, status: bodyStatus } = req.body;
     if (!isParticipantInRequesterTenant(participant_id, userId)) {
       return res.status(404).json({ error: 'Participant not found' });
     }
-    const staffRow = db.prepare('SELECT id FROM staff WHERE id = ? AND org_id = ?').get(staff_id, orgId);
-    if (!staffRow) {
-      return res.status(404).json({ error: 'Staff not found' });
+    const isOpen = bodyStatus === 'open' || !staff_id;
+    let resolvedStaffId = staff_id || null;
+    let shiftStatus = isOpen ? 'open' : 'scheduled';
+    if (!isOpen) {
+      const staffRow = db.prepare('SELECT id FROM staff WHERE id = ? AND org_id = ?').get(staff_id, orgId);
+      if (!staffRow) {
+        return res.status(404).json({ error: 'Staff not found' });
+      }
+    } else {
+      resolvedStaffId = null;
     }
     const id = uuidv4();
     db.prepare(`
       INSERT INTO shifts (id, participant_id, staff_id, start_time, end_time, notes, status, recurring_group_id)
-      VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?)
-    `).run(id, participant_id, staff_id, start_time, end_time, notes || null, recurring_group_id || null);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, participant_id, resolvedStaffId, start_time, end_time, notes || null, shiftStatus, recurring_group_id || null);
 
     const shift = getShiftByIdForUser(id, userId);
 
-    try {
-      recordEvent({
-        event_type: 'shift_created',
-        participant_id, staff_id, shift_id: id,
-        date: start_time, start_time, end_time
-      });
-      updateAggregatesForShift({
-        participant_id, staff_id,
-        day_of_week: new Date(start_time).getDay(),
-        time_bucket: null, start_time, end_time,
-        shift_type: 'standard', line_items: []
-      });
-    } catch (e) { console.warn('[shifts] learning event error:', e.message); }
-
-    scheduleMirrorShiftToNexusSupabase(id);
-    res.status(201).json(shift || { id, participant_id, staff_id, start_time, end_time, notes, status: 'scheduled', recurring_group_id: recurring_group_id || null });
+    if (!isOpen && resolvedStaffId) {
+      try {
+        recordEvent({
+          event_type: 'shift_created',
+          participant_id, staff_id: resolvedStaffId, shift_id: id,
+          date: start_time, start_time, end_time
+        });
+        updateAggregatesForShift({
+          participant_id, staff_id: resolvedStaffId,
+          day_of_week: new Date(start_time).getDay(),
+          time_bucket: null, start_time, end_time,
+          shift_type: 'standard', line_items: []
+        });
+      } catch (e) { console.warn('[shifts] learning event error:', e.message); }
+      scheduleMirrorShiftToNexusSupabase(id);
+    }
+    res.status(201).json(shift || { id, participant_id, staff_id: resolvedStaffId, start_time, end_time, notes, status: shiftStatus, recurring_group_id: recurring_group_id || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -457,17 +496,30 @@ router.put('/:id', async (req, res) => {
     const existing = db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Shift not found' });
 
+    const wasOpen = isOpenShiftRow(existing);
     const nextParticipantId = participant_id ?? existing.participant_id;
-    const nextStaffId = staff_id ?? existing.staff_id;
+    const nextStaffId = staff_id !== undefined ? (staff_id || null) : existing.staff_id;
     if (!isParticipantInRequesterTenant(nextParticipantId, userId)) {
       return res.status(404).json({ error: 'Participant not found' });
     }
-    const staffRow = db.prepare('SELECT id FROM staff WHERE id = ? AND org_id = ?').get(nextStaffId, orgId);
-    if (!staffRow) {
-      return res.status(404).json({ error: 'Staff not found' });
+    if (nextStaffId) {
+      const staffRow = db.prepare('SELECT id FROM staff WHERE id = ? AND org_id = ?').get(nextStaffId, orgId);
+      if (!staffRow) {
+        return res.status(404).json({ error: 'Staff not found' });
+      }
+    }
+
+    let nextStatus = status ?? existing.status;
+    if (nextStaffId && wasOpen) {
+      nextStatus = 'scheduled';
+    } else if (!nextStaffId) {
+      nextStatus = 'open';
+    } else if (!nextStatus || nextStatus === 'open') {
+      nextStatus = nextStaffId ? 'scheduled' : 'open';
     }
 
     const rgId = recurring_group_id !== undefined ? recurring_group_id : existing.recurring_group_id;
+    const assigningFromOpen = wasOpen && nextStaffId && nextStaffId !== existing.staff_id;
 
     db.prepare(`
       UPDATE shifts SET
@@ -477,11 +529,11 @@ router.put('/:id', async (req, res) => {
         roster_sent_at = NULL
       WHERE id = ?
     `).run(
-      participant_id ?? existing.participant_id,
-      staff_id ?? existing.staff_id,
+      nextParticipantId,
+      nextStaffId,
       start_time ?? existing.start_time,
       end_time ?? existing.end_time,
-      status ?? existing.status,
+      nextStatus,
       notes ?? existing.notes,
       rgId,
       req.params.id
@@ -496,30 +548,44 @@ router.put('/:id', async (req, res) => {
     const shift = getShiftByIdForUser(req.params.id, userId);
     // Invoicing is done via batch (Financial > Batch invoices); no per-shift invoice creation.
 
-    try {
-      const changedFields = {};
-      if (start_time && start_time !== existing.start_time) changedFields.start_time = { old: existing.start_time, new: start_time };
-      if (end_time && end_time !== existing.end_time) changedFields.end_time = { old: existing.end_time, new: end_time };
-      if (participant_id && participant_id !== existing.participant_id) changedFields.participant_id = { old: existing.participant_id, new: participant_id };
-      if (staff_id && staff_id !== existing.staff_id) changedFields.staff_id = { old: existing.staff_id, new: staff_id };
+    if (nextStaffId) {
+      try {
+        const changedFields = {};
+        if (start_time && start_time !== existing.start_time) changedFields.start_time = { old: existing.start_time, new: start_time };
+        if (end_time && end_time !== existing.end_time) changedFields.end_time = { old: existing.end_time, new: end_time };
+        if (participant_id && participant_id !== existing.participant_id) changedFields.participant_id = { old: existing.participant_id, new: participant_id };
+        if (staff_id && staff_id !== existing.staff_id) changedFields.staff_id = { old: existing.staff_id, new: staff_id };
 
-      for (const [field, vals] of Object.entries(changedFields)) {
-        recordEvent({
-          event_type: 'shift_edited',
-          participant_id: shift.participant_id, staff_id: shift.staff_id, shift_id: shift.id,
-          date: shift.start_time, start_time: shift.start_time, end_time: shift.end_time,
-          field_name: field, old_value: vals.old, new_value: vals.new
+        for (const [field, vals] of Object.entries(changedFields)) {
+          recordEvent({
+            event_type: 'shift_edited',
+            participant_id: shift.participant_id, staff_id: shift.staff_id, shift_id: shift.id,
+            date: shift.start_time, start_time: shift.start_time, end_time: shift.end_time,
+            field_name: field, old_value: vals.old, new_value: vals.new
+          });
+        }
+        updateAggregatesForShift({
+          participant_id: shift.participant_id, staff_id: shift.staff_id,
+          day_of_week: new Date(shift.start_time).getDay(),
+          start_time: shift.start_time, end_time: shift.end_time,
+          shift_type: 'standard', line_items: []
         });
-      }
-      updateAggregatesForShift({
-        participant_id: shift.participant_id, staff_id: shift.staff_id,
-        day_of_week: new Date(shift.start_time).getDay(),
-        start_time: shift.start_time, end_time: shift.end_time,
-        shift_type: 'standard', line_items: []
-      });
-    } catch (e) { console.warn('[shifts] learning event error:', e.message); }
+      } catch (e) { console.warn('[shifts] learning event error:', e.message); }
+    }
 
-    scheduleMirrorShiftToNexusSupabase(req.params.id);
+    if (assigningFromOpen) {
+      try {
+        await notifyOpenShiftFilledRecipients(req.params.id, nextStaffId, userId);
+      } catch (e) {
+        console.warn('[open-shift] filled notifications error:', e?.message);
+      }
+    }
+
+    if (nextStaffId && !wasOpen) {
+      scheduleMirrorShiftToNexusSupabase(req.params.id);
+    } else if (assigningFromOpen) {
+      scheduleMirrorShiftToNexusSupabase(req.params.id);
+    }
     syncCaseNoteFromShift(req.params.id);
     if (!shift) {
       return res.status(404).json({ error: 'Shift not found' });
@@ -733,10 +799,11 @@ router.get('/:id/ics', (req, res) => {
     SELECT s.*, p.name as participant_name, st.name as staff_name
     FROM shifts s
     JOIN participants p ON s.participant_id = p.id
-    JOIN staff st ON s.staff_id = st.id
+    ${STAFF_JOIN}
     WHERE s.id = ? AND (${c.sql})
   `).get(req.params.id, ...c.params);
   if (!shift) return res.status(404).json({ error: 'Shift not found' });
+  if (isOpenShiftRow(shift)) return res.status(400).json({ error: 'Open shifts cannot be exported until a worker is assigned.' });
   (async () => {
     const tzSpec = await getEffectiveOrgTzSpecForUser(userId);
     const ics = generateICS(shift, shift.participant_name, shift.staff_name, { tzSpec });
@@ -744,6 +811,72 @@ router.get('/:id/ics', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="shift-${req.params.id}.ics"`);
     res.send(ics);
   })().catch((err) => res.status(500).json({ error: err.message }));
+});
+
+router.post('/:id/broadcast-open', async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    const orgId = getProviderOrgIdForUser(userId);
+    if (!orgId) {
+      return res.status(403).json({ error: 'No organisation on your account.' });
+    }
+    if (!isShiftInRequesterTenant(req.params.id, userId)) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
+    if (!isEmailConfiguredForUser(userId)) {
+      return res.status(400).json({
+        error: 'Connect your email in Settings to send shift notifications.',
+        code: 'EMAIL_NOT_CONNECTED',
+      });
+    }
+    const shift = getShiftByIdForUser(req.params.id, userId);
+    if (!shift) return res.status(404).json({ error: 'Shift not found' });
+    if (!isOpenShiftRow(shift)) {
+      return res.status(400).json({ error: 'This shift already has a worker assigned.' });
+    }
+
+    const org = db.prepare('SELECT phone, name FROM organisations WHERE id = ?').get(orgId);
+    const adminPhone = org?.phone?.trim() || '';
+
+    const staffMembers = db.prepare(`
+      SELECT id, name, email, notify_email
+      FROM staff
+      WHERE org_id = ?
+        AND (archived_at IS NULL OR archived_at = '')
+        AND email IS NOT NULL AND TRIM(email) != ''
+    `).all(orgId);
+
+    const results = { sent: 0, skipped: 0, errors: [] };
+    for (const st of staffMembers) {
+      if (!st.notify_email) {
+        results.skipped++;
+        continue;
+      }
+      try {
+        await sendOpenShiftAvailableEmail(shift, st, adminPhone, userId);
+        db.prepare(`
+          INSERT INTO open_shift_recipients (shift_id, staff_id, notified_at)
+          VALUES (?, ?, datetime('now'))
+          ON CONFLICT(shift_id, staff_id) DO UPDATE SET notified_at = datetime('now')
+        `).run(shift.id, st.id);
+        results.sent++;
+      } catch (err) {
+        results.errors.push(`${st.name}: ${err.message}`);
+      }
+    }
+
+    db.prepare(`UPDATE shifts SET open_shift_broadcast_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`).run(shift.id);
+
+    if (results.sent === 0 && results.errors.length > 0) {
+      return res.status(400).json({
+        error: 'Could not send to any staff.',
+        ...results,
+      });
+    }
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/:id/send-ics', async (req, res) => {
@@ -755,10 +888,13 @@ router.post('/:id/send-ics', async (req, res) => {
       SELECT s.*, p.name as participant_name, st.name as staff_name, st.email as staff_email
       FROM shifts s
       JOIN participants p ON s.participant_id = p.id
-      JOIN staff st ON s.staff_id = st.id
+      ${STAFF_JOIN}
       WHERE s.id = ? AND (${c.sql})
     `).get(req.params.id, ...c.params);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
+    if (isOpenShiftRow(shift)) {
+      return res.status(400).json({ error: 'Assign a worker before sending this shift.' });
+    }
     if (!shift.staff_email) return res.status(400).json({ error: 'Staff member has no email address' });
     if (shift.roster_sent_at) {
       return res.status(400).json({
