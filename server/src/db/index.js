@@ -898,6 +898,23 @@ try {
     if (!e.message?.includes('already exists')) console.warn('register_cell_overrides migration:', e.message);
   }
 
+  // Per-org which registers appear in the live Registers UI and whether inline editing is enabled.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS org_register_settings (
+        org_id TEXT NOT NULL,
+        view_id TEXT NOT NULL,
+        visible INTEGER NOT NULL DEFAULT 0,
+        editable INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (org_id, view_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_org_register_settings_org ON org_register_settings(org_id);
+    `);
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('org_register_settings migration:', e.message);
+  }
+
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS onboarding_renewal_tasks (

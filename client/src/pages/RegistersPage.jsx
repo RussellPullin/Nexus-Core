@@ -92,6 +92,10 @@ export default function RegistersPage() {
   const [editCell, setEditCell] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [savingCell, setSavingCell] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [catalogDraft, setCatalogDraft] = useState([]);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState('');
   const canManageIncidents = isAdmin || canAccessCaseTasks;
   const canEditRegisters = isAdmin || canAccessCaseTasks;
 
@@ -110,6 +114,7 @@ export default function RegistersPage() {
         setData(snapshot);
         const first = snapshot?.views?.[0]?.id;
         if (first) setActiveId(first);
+        setCatalogDraft(snapshot?.register_catalog || []);
         setLibraryRegisters((masters || []).filter((m) => m.category === 'register'));
         setIncidentEntries(incidents?.entries || []);
         setParticipantsList(participantRows || []);
@@ -135,7 +140,43 @@ export default function RegistersPage() {
   const reloadRegisters = async () => {
     const [snapshot, incidents] = await Promise.all([registers.snapshot(), registers.incidents().catch(() => ({ entries: [] }))]);
     setData(snapshot);
+    setCatalogDraft(snapshot?.register_catalog || []);
     setIncidentEntries(incidents?.entries || []);
+    if (activeId && !(snapshot?.views || []).some((v) => v.id === activeId)) {
+      const next = snapshot?.views?.[0]?.id;
+      if (next) setActiveId(next);
+    }
+  };
+
+  const updateCatalogItem = (viewId, patch) => {
+    setCatalogDraft((prev) =>
+      prev.map((item) => {
+        if (item.id !== viewId) return item;
+        const next = { ...item, ...patch };
+        if (patch.visible === false) next.editable = false;
+        return next;
+      })
+    );
+  };
+
+  const saveRegisterSettings = async () => {
+    setSavingSettings(true);
+    setSettingsMessage('');
+    try {
+      const payload = catalogDraft.map(({ id, visible, editable }) => ({ view_id: id, visible, editable }));
+      const snapshot = await registers.updateSettings(payload);
+      setData(snapshot);
+      setCatalogDraft(snapshot?.register_catalog || []);
+      if (activeId && !(snapshot?.views || []).some((v) => v.id === activeId)) {
+        const next = snapshot?.views?.[0]?.id;
+        if (next) setActiveId(next);
+      }
+      setSettingsMessage('Register layout saved.');
+    } catch (err) {
+      setSettingsMessage(err.message || 'Could not save register settings');
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
   const active = data?.views?.find((v) => v.id === activeId) || data?.views?.[0];
@@ -348,9 +389,86 @@ export default function RegistersPage() {
         </div>
       </div>
 
+      {canEditRegisters && catalogDraft.length > 0 && (
+        <div className="card" style={{ marginBottom: '1rem', padding: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.05rem' }}>Register layout</h2>
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                Choose which registers appear in the live view above and which allow inline cell editing.
+              </p>
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={() => setSettingsOpen((v) => !v)}>
+              {settingsOpen ? 'Hide options' : 'Configure registers'}
+            </button>
+          </div>
+          {settingsOpen && (
+            <>
+              <div style={{ overflowX: 'auto', marginTop: '0.75rem' }}>
+                <table className="table-condensed" style={{ width: '100%', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left' }}>Register</th>
+                      <th style={{ textAlign: 'center', width: '7rem' }}>Live view</th>
+                      <th style={{ textAlign: 'center', width: '7rem' }}>Editable</th>
+                      <th style={{ textAlign: 'left' }}>Rows</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {catalogDraft.map((item) => (
+                      <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '0.4rem 0.35rem' }}>
+                          <strong>{item.title}</strong>
+                          {item.roadmap_note && (
+                            <div style={{ color: '#94a3b8', fontSize: '0.78rem', marginTop: '0.15rem' }}>Coming soon — no Nexus data yet</div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!item.visible}
+                            onChange={(e) => updateCatalogItem(item.id, { visible: e.target.checked })}
+                            aria-label={`Show ${item.title} in live view`}
+                          />
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {item.supports_inline_edit ? (
+                            <input
+                              type="checkbox"
+                              checked={!!item.editable}
+                              disabled={!item.visible}
+                              onChange={(e) => updateCatalogItem(item.id, { editable: e.target.checked })}
+                              aria-label={`Allow inline editing for ${item.title}`}
+                            />
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: '0.78rem' }} title="Uses dedicated form (e.g. Log Incident)">Form</span>
+                          )}
+                        </td>
+                        <td style={{ color: '#64748b' }}>{item.row_count ?? 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-primary" onClick={saveRegisterSettings} disabled={savingSettings}>
+                  {savingSettings ? 'Saving...' : 'Save register layout'}
+                </button>
+                {settingsMessage && <span style={{ fontSize: '0.85rem', color: '#334155' }}>{settingsMessage}</span>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="card" style={{ padding: '1rem' }}>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.75rem' }}>
-          {(data?.views || []).map((v) => (
+          {(data?.views || []).length === 0 ? (
+            <p style={{ margin: 0, color: '#64748b', fontSize: '0.9rem' }}>
+              No registers selected for the live view. Use <strong>Configure registers</strong> to add them.
+            </p>
+          ) : (
+            (data?.views || []).map((v) => (
             <button
               key={v.id}
               type="button"
@@ -364,7 +482,8 @@ export default function RegistersPage() {
             >
               {v.title} <span style={{ opacity: 0.75 }}>({v.row_count})</span>
             </button>
-          ))}
+            ))
+          )}
         </div>
 
         {active && (
@@ -372,7 +491,12 @@ export default function RegistersPage() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1rem' }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{active.title}</h2>
-                {active.data_source && <p style={{ margin: '0.2rem 0 0', color: '#64748b', fontSize: '0.85rem' }}>Source: <code>{active.data_source}</code></p>}
+                {active.data_source && (
+                  <p style={{ margin: '0.2rem 0 0', color: '#64748b', fontSize: '0.85rem' }}>Source: <code>{active.data_source}</code></p>
+                )}
+                {active.roadmap_note && (
+                  <p style={{ margin: '0.35rem 0 0', color: '#b45309', fontSize: '0.85rem' }}>{active.roadmap_note}</p>
+                )}
                 {isEditableView && (
                   <p style={{ margin: '0.2rem 0 0', color: branding.accentColor, fontSize: '0.8rem' }}>
                     Click any cell to edit. Manual edits override the auto-generated value and sync to the register files.

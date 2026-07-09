@@ -52,6 +52,9 @@ export const registers = {
       method: 'PUT',
       body: JSON.stringify({ row_key: rowKey, col_index: colIndex, value })
     }),
+  updateSettings: (registers) =>
+    fetchApi('/registers/settings', { method: 'PUT', body: JSON.stringify({ registers }) }),
+  getSettings: () => fetchApi('/registers/settings'),
   clearCell: (viewId, { rowKey, colIndex }) => {
     const q = new URLSearchParams({ row_key: rowKey, col_index: String(colIndex) });
     return fetchApi(`/registers/${encodeURIComponent(viewId)}/cell?${q.toString()}`, { method: 'DELETE' });

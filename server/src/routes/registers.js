@@ -2,7 +2,7 @@ import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import { requireCoordinatorOrAdmin } from '../middleware/roles.js';
 import { db } from '../db/index.js';
-import { buildRegisterSnapshotForOrg, EDITABLE_REGISTER_VIEWS } from '../services/registerSnapshots.service.js';
+import { buildRegisterSnapshotForOrg, getOrgRegisterSettings, isRegisterEditableForOrg, saveOrgRegisterSettings, REGISTER_CATALOG, sheetKeyToViewId } from '../services/registerSnapshots.service.js';
 
 const router = Router();
 
@@ -20,18 +20,15 @@ function requireOrg(req, res) {
   return orgId;
 }
 
-const VIEW_ALIASES = {
-  staff_compliance: 'staff_compliance_register',
-  staff_compliance_register: 'staff_compliance_register',
-  incidents: 'incident_register',
-  incident_register: 'incident_register',
-  risk_assessments: 'risk_assessment_register',
-  risk_assessment_register: 'risk_assessment_register',
-  participants: 'participant_register',
-  participant_register: 'participant_register',
-  staff: 'staff_register',
-  staff_register: 'staff_register'
-};
+const VIEW_ALIASES = Object.fromEntries(
+  REGISTER_CATALOG.flatMap((def) => {
+    const id = sheetKeyToViewId(def.sheetKey);
+    const aliases = [id];
+    const short = id.replace(/_register$/, '').replace(/_/g, '');
+    if (short && short !== id) aliases.push(short);
+    return aliases.map((a) => [a, id]);
+  })
+);
 
 function filterRowsByDate(view, from, to) {
   if (!view?.date_column || (!from && !to)) return view?.rows || [];
@@ -187,6 +184,45 @@ router.delete('/incidents/:id', requireCoordinatorOrAdmin, (req, res) => {
   }
 });
 
+router.get('/settings', requireCoordinatorOrAdmin, (req, res) => {
+  try {
+    const orgId = requireOrg(req, res);
+    if (!orgId) return;
+    const settings = getOrgRegisterSettings(orgId);
+    const catalog = REGISTER_CATALOG.map((def) => {
+      const id = sheetKeyToViewId(def.sheetKey);
+      const s = settings[id] || { visible: false, editable: false };
+      return {
+        id,
+        title: def.title,
+        sheet_key: def.sheetKey,
+        visible: !!s.visible,
+        editable: !!s.editable,
+        supports_inline_edit: def.inline_edit !== false,
+        pending: !!def.pending
+      };
+    });
+    res.json({ catalog });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put('/settings', requireCoordinatorOrAdmin, (req, res) => {
+  try {
+    const orgId = requireOrg(req, res);
+    if (!orgId) return;
+    const items = Array.isArray(req.body?.registers) ? req.body.registers : req.body?.items;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ error: 'registers array is required' });
+    }
+    saveOrgRegisterSettings(orgId, items);
+    res.json(buildRegisterSnapshotForOrg(orgId));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /**
  * Set (upsert) a manual override for a single cell of a derived register. Overrides are layered
  * on top of the auto-generated rows so editing a register never mutates the source records.
@@ -196,7 +232,7 @@ router.put('/:viewId/cell', requireCoordinatorOrAdmin, (req, res) => {
     const orgId = requireOrg(req, res);
     if (!orgId) return;
     const viewId = String(req.params.viewId || '').trim();
-    if (!EDITABLE_REGISTER_VIEWS[viewId]) {
+    if (!isRegisterEditableForOrg(orgId, viewId)) {
       return res.status(400).json({ error: 'This register cannot be edited inline.' });
     }
     const rowKey = String(req.body?.row_key ?? '').trim();
@@ -224,7 +260,7 @@ router.delete('/:viewId/cell', requireCoordinatorOrAdmin, (req, res) => {
     const orgId = requireOrg(req, res);
     if (!orgId) return;
     const viewId = String(req.params.viewId || '').trim();
-    if (!EDITABLE_REGISTER_VIEWS[viewId]) {
+    if (!isRegisterEditableForOrg(orgId, viewId)) {
       return res.status(400).json({ error: 'This register cannot be edited inline.' });
     }
     const rowKey = String(req.query.row_key ?? '').trim();

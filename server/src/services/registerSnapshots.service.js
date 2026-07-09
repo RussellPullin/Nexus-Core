@@ -86,21 +86,104 @@ function tableExists(name) {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 }
 
-/**
- * Registers whose rows are derived from other Nexus data but can still be hand-edited in-app.
- * Edits are stored as per-cell overrides keyed by the first column (a stable natural key such as
- * the staff/participant name) so we never mutate the underlying operational records.
- */
-export const EDITABLE_REGISTER_VIEWS = {
-  staff_compliance_register: { sheet_key: 'Staff Compliance Register', key_column_index: 0 },
-  risk_assessment_register: { sheet_key: 'Risk Assessment Register', key_column_index: 0 },
-  participant_register: { sheet_key: 'Participant Register', key_column_index: 0 },
-  staff_register: { sheet_key: 'Staff Register', key_column_index: 0 }
-};
+/** Stable view id from an Excel sheet name (must match buildRegisterSnapshotForOrg). */
+export function sheetKeyToViewId(sheetKey) {
+  return String(sheetKey || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '');
+}
 
-const SHEET_KEY_TO_VIEW_ID = Object.fromEntries(
-  Object.entries(EDITABLE_REGISTER_VIEWS).map(([viewId, def]) => [def.sheet_key, viewId])
+/**
+ * All registers Nexus can populate. Orgs choose which appear in the live UI via org_register_settings.
+ * incident_register uses form CRUD instead of inline cell editing even when marked editable.
+ */
+export const REGISTER_CATALOG = [
+  { sheetKey: 'Staff Compliance Register', title: 'Staff Compliance', source: 'staff_compliance_documents', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Next expiry', status_column: 'Status' },
+  { sheetKey: 'Incident register', title: 'Incidents', source: 'progress_notes_audit_events_manual_incidents', defaultVisible: true, defaultEditable: false, date_column: 'When', source_column: 'Source', manual_id_column: 'Manual ID', inline_edit: false },
+  { sheetKey: 'Risk Assessment Register', title: 'Risk Assessments', source: 'participant_intake_clinical', defaultVisible: true, defaultEditable: true, key_column_index: 0 },
+  { sheetKey: 'Participant Register', title: 'Participants', source: 'participants', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Plan end', status_column: 'Status' },
+  { sheetKey: 'Staff Register', title: 'Staff', source: 'staff', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Last shift date', status_column: 'Status' },
+  { sheetKey: 'Complaints', title: 'Complaints', source: 'case_notes', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Contact date' },
+  { sheetKey: 'Document Register', title: 'Documents', source: 'onedrive_document_register', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Date recorded' },
+  { sheetKey: 'Feedback and complaints', title: 'Feedback', source: 'case_notes', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Contact date' },
+  { sheetKey: 'HR role register', title: 'HR Roles', source: 'staff', defaultVisible: false, defaultEditable: false, key_column_index: 0 },
+  { sheetKey: 'Significant risk factor', title: 'Significant Risk', source: 'participant_intake_clinical', defaultVisible: false, defaultEditable: false, key_column_index: 0 },
+  { sheetKey: 'Risk register', title: 'Risk Register', source: 'participant_documents', defaultVisible: false, defaultEditable: false, key_column_index: 0 },
+  { sheetKey: 'Training and Development', title: 'Training', source: 'staff_compliance_documents', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Expiry', status_column: 'Status' },
+  { sheetKey: 'Policy register', title: 'Policies', source: 'company_policy_files', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Effective date' },
+  { sheetKey: 'Conflict of interest register', title: 'Conflict of Interest', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true },
+  { sheetKey: 'Collection and storage of Med', title: 'Medication Storage', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true },
+  { sheetKey: 'Continuous improvment', title: 'Continuous Improvement', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true },
+  { sheetKey: 'Emergency test register', title: 'Emergency Tests', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true },
+  { sheetKey: 'Waste removal Register', title: 'Waste Removal', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true }
+];
+
+export const REGISTER_CATALOG_BY_VIEW_ID = Object.fromEntries(
+  REGISTER_CATALOG.map((def) => [sheetKeyToViewId(def.sheetKey), def])
 );
+
+/** @deprecated Use isRegisterEditableForOrg — kept for OneDrive override map. */
+export const EDITABLE_REGISTER_VIEWS = Object.fromEntries(
+  REGISTER_CATALOG.filter((d) => d.defaultEditable && d.inline_edit !== false).map((d) => {
+    const viewId = sheetKeyToViewId(d.sheetKey);
+    return [viewId, { sheet_key: d.sheetKey, key_column_index: d.key_column_index ?? 0 }];
+  })
+);
+
+const SHEET_KEY_TO_VIEW_ID = Object.fromEntries(REGISTER_CATALOG.map((d) => [d.sheetKey, sheetKeyToViewId(d.sheetKey)]));
+
+function tableExistsLocal(name) {
+  return tableExists(name);
+}
+
+/** Org preferences for which registers show in the live UI and allow inline edits. */
+export function getOrgRegisterSettings(organizationId) {
+  const defaults = Object.fromEntries(
+    REGISTER_CATALOG.map((def) => {
+      const viewId = sheetKeyToViewId(def.sheetKey);
+      return [viewId, { visible: !!def.defaultVisible, editable: !!def.defaultEditable }];
+    })
+  );
+  if (!tableExistsLocal('org_register_settings')) return defaults;
+  const rows = db
+    .prepare('SELECT view_id, visible, editable FROM org_register_settings WHERE org_id = ?')
+    .all(organizationId);
+  const merged = { ...defaults };
+  for (const row of rows) {
+    if (!REGISTER_CATALOG_BY_VIEW_ID[row.view_id]) continue;
+    merged[row.view_id] = { visible: !!row.visible, editable: !!row.editable };
+  }
+  return merged;
+}
+
+export function isRegisterEditableForOrg(organizationId, viewId) {
+  const def = REGISTER_CATALOG_BY_VIEW_ID[viewId];
+  if (!def || def.inline_edit === false) return false;
+  const settings = getOrgRegisterSettings(organizationId);
+  return !!settings[viewId]?.editable;
+}
+
+export function saveOrgRegisterSettings(organizationId, items = []) {
+  if (!tableExistsLocal('org_register_settings')) {
+    throw new Error('Register settings are not available yet.');
+  }
+  const upsert = db.prepare(
+    `INSERT INTO org_register_settings (org_id, view_id, visible, editable, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(org_id, view_id)
+     DO UPDATE SET visible = excluded.visible, editable = excluded.editable, updated_at = datetime('now')`
+  );
+  const tx = db.transaction((rows) => {
+    for (const item of rows) {
+      const viewId = String(item.view_id || '').trim();
+      if (!REGISTER_CATALOG_BY_VIEW_ID[viewId]) continue;
+      upsert.run(organizationId, viewId, item.visible ? 1 : 0, item.editable ? 1 : 0);
+    }
+  });
+  tx(items);
+  return getOrgRegisterSettings(organizationId);
+}
 
 export function rowKeyForRegister(row, keyColIndex = 0) {
   return String(row?.[keyColIndex] ?? '').trim();
@@ -137,7 +220,9 @@ export function applyCellOverrides(organizationId, viewId, rows, keyColIndex = 0
 function applyOverridesForSheet(organizationId, sheetKey, rows) {
   const viewId = SHEET_KEY_TO_VIEW_ID[sheetKey];
   if (!viewId) return rows;
-  return applyCellOverrides(organizationId, viewId, rows, EDITABLE_REGISTER_VIEWS[viewId].key_column_index);
+  const def = REGISTER_CATALOG_BY_VIEW_ID[viewId];
+  const keyCol = def?.key_column_index ?? 0;
+  return applyCellOverrides(organizationId, viewId, rows, keyCol);
 }
 
 function safeJson(raw) {
@@ -1060,13 +1145,7 @@ export function buildTemplateDataBySheet(organizationId) {
   };
 }
 
-const REGISTER_DISPLAY_ORDER = [
-  { sheetKey: 'Staff Compliance Register', title: 'Staff Compliance', source: 'staff_compliance_documents' },
-  { sheetKey: 'Incident register', title: 'Incidents', source: 'progress_notes_audit_events_manual_incidents' },
-  { sheetKey: 'Risk Assessment Register', title: 'Risk Assessments', source: 'participant_intake_clinical' },
-  { sheetKey: 'Participant Register', title: 'Participants', source: 'participants' },
-  { sheetKey: 'Staff Register', title: 'Staff', source: 'staff' }
-];
+const REGISTER_DISPLAY_ORDER = REGISTER_CATALOG;
 
 function headersForSheet(sheetKey, rows) {
   const base = REGISTER_UI_HEADERS[sheetKey] || [];
@@ -1112,40 +1191,65 @@ function buildRegisterSummary(views) {
   };
 }
 
-const VIEW_METADATA = {
-  staff_compliance_register: { date_column: 'Next expiry', status_column: 'Status', editable: true, key_column_index: 0 },
-  incident_register: { date_column: 'When', source_column: 'Source', manual_id_column: 'Manual ID' },
-  risk_assessment_register: { date_column: null, editable: true, key_column_index: 0 },
-  participant_register: { date_column: 'Plan end', status_column: 'Status', editable: true, key_column_index: 0 },
-  staff_register: { date_column: 'Last shift date', status_column: 'Status', editable: true, key_column_index: 0 }
-};
+function viewMetadataFromCatalog(def, viewId, orgSettings) {
+  const meta = {
+    date_column: def.date_column || null,
+    status_column: def.status_column || null,
+    source_column: def.source_column || null,
+    manual_id_column: def.manual_id_column || null,
+    key_column_index: def.key_column_index ?? 0
+  };
+  if (def.inline_edit !== false && orgSettings[viewId]?.editable) {
+    meta.editable = true;
+  }
+  return meta;
+}
 
 /**
  * JSON payload for GET /api/registers/snapshot — same underlying rows as OneDrive template sync.
  */
 export function buildRegisterSnapshotForOrg(organizationId) {
   const sheetData = buildTemplateDataBySheet(organizationId);
+  const orgSettings = getOrgRegisterSettings(organizationId);
   const generatedAt = new Date().toISOString();
   const views = [];
+  const catalog = [];
 
-  for (const def of REGISTER_DISPLAY_ORDER) {
-    const pendingNote = PENDING_REGISTER_DATA_SOURCES[def.sheetKey];
+  for (const def of REGISTER_CATALOG) {
+    const pendingNote = def.pending ? PENDING_REGISTER_DATA_SOURCES[def.sheetKey] : null;
     const rawRows = sheetData[def.sheetKey] || [];
-    const rows = normalizeRows(rawRows);
+    let rows = normalizeRows(rawRows);
+    const id = sheetKeyToViewId(def.sheetKey);
+    const keyCol = def.key_column_index ?? 0;
+    if (isRegisterEditableForOrg(organizationId, id)) {
+      rows = applyCellOverrides(organizationId, id, rows, keyCol);
+    }
     const columns = headersForSheet(def.sheetKey, rows);
-    const id = def.sheetKey.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-    views.push({
+    const setting = orgSettings[id] || { visible: false, editable: false };
+    const view = {
       id,
       sheet_key: def.sheetKey,
       title: def.title,
       data_source: def.source,
-      populated_from_nexus: !pendingNote,
+      populated_from_nexus: !pendingNote && !!def.source,
       roadmap_note: pendingNote || null,
       row_count: rows.length,
       columns,
       rows,
-      ...(VIEW_METADATA[id] || {})
+      ...viewMetadataFromCatalog(def, id, orgSettings)
+    };
+    catalog.push({
+      id,
+      title: def.title,
+      sheet_key: def.sheetKey,
+      populated_from_nexus: view.populated_from_nexus,
+      roadmap_note: view.roadmap_note,
+      row_count: rows.length,
+      visible: !!setting.visible,
+      editable: !!setting.editable,
+      supports_inline_edit: def.inline_edit !== false
     });
+    if (setting.visible) views.push(view);
   }
 
   return {
@@ -1153,6 +1257,7 @@ export function buildRegisterSnapshotForOrg(organizationId) {
     organisation_id: organizationId,
     summary: buildRegisterSummary(views),
     views,
+    register_catalog: catalog,
     hint:
       'Rows mirror what is pushed to OneDrive Register/*.xlsx when connected. Extend registerSnapshots.service.js when new Nexus features supply register data.'
   };
