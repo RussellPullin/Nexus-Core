@@ -4,6 +4,7 @@ import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { useAuth } from '../context/AuthContext';
 import { staff, learning, settings, auth, microsoftDrive, organisations } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
+import SignatureCanvas from '../components/SignatureCanvas';
 import { formatDate } from '../lib/dateUtils';
 
 const SIGNATURE_WIDTH = 300;
@@ -51,7 +52,6 @@ export default function SettingsPage() {
   const [savingSignature, setSavingSignature] = useState(false);
   const [signatureMessage, setSignatureMessage] = useState('');
   const signatureCanvasRef = useRef(null);
-  const isDrawingRef = useRef(false);
   const [msDriveStatus, setMsDriveStatus] = useState(null);
   const [msDriveBusy, setMsDriveBusy] = useState(false);
   useEffect(() => {
@@ -157,26 +157,14 @@ export default function SettingsPage() {
     }
   };
 
-  const getSignatureDataFromCanvas = () => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return null;
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const hasContent = imageData.data.some((v, i) => i % 4 === 3 && v > 0);
-    return hasContent ? canvas.toDataURL('image/png') : null;
-  };
-
   const handleSaveSignature = async () => {
     setSignatureMessage('');
     setSavingSignature(true);
     try {
-      const data = signatureDraft === null ? null : (signatureDraft !== undefined ? signatureDraft : (getSignatureDataFromCanvas() || user?.signature_data || null));
+      const data = signatureDraft === null ? null : (signatureDraft !== undefined ? signatureDraft : (signatureCanvasRef.current?.getDataUrl() || user?.signature_data || null));
       await updateSettings({ signature_data: data || null });
       setSignatureDraft(undefined);
-      if (signatureCanvasRef.current) {
-        const ctx = signatureCanvasRef.current.getContext('2d');
-        ctx.clearRect(0, 0, signatureCanvasRef.current.width, signatureCanvasRef.current.height);
-      }
+      signatureCanvasRef.current?.clear();
       setSignatureMessage(data ? 'Signature saved. It will appear on documents you send for signature.' : 'Signature cleared.');
     } catch (err) {
       setSignatureMessage(err.message || 'Failed to save signature');
@@ -187,10 +175,7 @@ export default function SettingsPage() {
 
   const handleClearSignature = () => {
     setSignatureDraft(null);
-    if (signatureCanvasRef.current) {
-      const ctx = signatureCanvasRef.current.getContext('2d');
-      ctx.clearRect(0, 0, signatureCanvasRef.current.width, signatureCanvasRef.current.height);
-    }
+    signatureCanvasRef.current?.clear();
     setSignatureMessage('');
   };
 
@@ -204,57 +189,6 @@ export default function SettingsPage() {
     reader.readAsDataURL(file);
     e.target.value = '';
   };
-
-  useEffect(() => {
-    const canvas = signatureCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-
-    const getPos = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
-    };
-
-    const start = (e) => {
-      e.preventDefault();
-      isDrawingRef.current = true;
-      const pos = getPos(e);
-      ctx.beginPath();
-      ctx.moveTo(pos.x, pos.y);
-    };
-    const move = (e) => {
-      e.preventDefault();
-      if (!isDrawingRef.current) return;
-      const pos = getPos(e);
-      ctx.lineTo(pos.x, pos.y);
-      ctx.stroke();
-    };
-    const end = () => { isDrawingRef.current = false; };
-
-    canvas.addEventListener('mousedown', start);
-    canvas.addEventListener('mousemove', move);
-    canvas.addEventListener('mouseup', end);
-    canvas.addEventListener('mouseleave', end);
-    canvas.addEventListener('touchstart', start, { passive: false });
-    canvas.addEventListener('touchmove', move, { passive: false });
-    canvas.addEventListener('touchend', end);
-    return () => {
-      canvas.removeEventListener('mousedown', start);
-      canvas.removeEventListener('mousemove', move);
-      canvas.removeEventListener('mouseup', end);
-      canvas.removeEventListener('mouseleave', end);
-      canvas.removeEventListener('touchstart', start);
-      canvas.removeEventListener('touchmove', move);
-      canvas.removeEventListener('touchend', end);
-    };
-  }, []);
 
   const displaySignature = signatureDraft === null ? null : (signatureDraft !== undefined ? signatureDraft : user?.signature_data);
 
@@ -396,13 +330,7 @@ export default function SettingsPage() {
               <img src={displaySignature} alt="Your signature" style={{ maxWidth: 280, maxHeight: 100, border: '1px solid #e2e8f0', borderRadius: 4 }} />
             </div>
           ) : (
-            <canvas
-              ref={signatureCanvasRef}
-              width={SIGNATURE_WIDTH}
-              height={SIGNATURE_HEIGHT}
-              style={{ display: 'block', border: '1px solid #cbd5e1', borderRadius: 4, touchAction: 'none', cursor: 'crosshair', maxWidth: '100%', height: 'auto' }}
-              aria-label="Draw your signature"
-            />
+            <SignatureCanvas ref={signatureCanvasRef} width={SIGNATURE_WIDTH} height={SIGNATURE_HEIGHT} />
           )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
             {!displaySignature && (

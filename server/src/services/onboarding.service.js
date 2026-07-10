@@ -824,7 +824,7 @@ export function createEnvelopeRecords({
     INSERT INTO signature_envelopes (
       id, participant_onboarding_id, participant_id, packet_mode, provider_name,
       status, packet_reasoning, sent_at
-    ) VALUES (?, ?, ?, ?, 'docuseal', 'sent', ?, ?)
+    ) VALUES (?, ?, ?, ?, 'native', 'sent', ?, ?)
   `);
   const linkForm = db.prepare(`
     INSERT INTO envelope_form_instances (id, envelope_id, form_instance_id)
@@ -848,7 +848,7 @@ export function createEnvelopeRecords({
       db.prepare(`
         INSERT INTO signature_events (
           id, envelope_id, form_instance_id, provider_name, event_type, event_timestamp, payload_json
-        ) VALUES (?, ?, ?, 'docuseal', 'agreement_sent', ?, ?)
+        ) VALUES (?, ?, ?, 'native', 'agreement_sent', ?, ?)
       `).run(uuidv4(), envelopeId, form.id, nowIso(), JSON.stringify({ reason: packetReasoning }));
     });
     created.push({ envelope_id: envelopeId, form_instance_ids: forms.map((f) => f.id), packet_reasoning: packetReasoning });
@@ -985,7 +985,8 @@ export function markEnvelopeCompleted({
   signedBuffer = null,
   certificateBuffer = null,
   sourceIp = null,
-  userAgent = null
+  userAgent = null,
+  providerName = 'docuseal'
 }) {
   const envelope = db.prepare('SELECT * FROM signature_envelopes WHERE id = ?').get(envelopeId);
   if (!envelope) throw new Error('Envelope not found');
@@ -1014,11 +1015,12 @@ export function markEnvelopeCompleted({
       INSERT INTO signature_events (
         id, envelope_id, form_instance_id, provider_name, external_event_id,
         event_type, event_timestamp, payload_json
-      ) VALUES (?, ?, ?, 'docuseal', ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       uuidv4(),
       envelopeId,
       form.id,
+      providerName,
       externalEventId,
       eventType,
       nowIso(),
@@ -1047,8 +1049,8 @@ export function markEnvelopeCompleted({
   createAuditEvent({
     participantId: envelope.participant_id,
     participantOnboardingId: envelope.participant_onboarding_id,
-    actorType: 'webhook',
-    actorId: 'docuseal',
+    actorType: providerName === 'native' ? 'external_signer' : 'webhook',
+    actorId: providerName,
     eventType: 'signature_completed',
     entityType: 'envelope',
     entityId: envelopeId,

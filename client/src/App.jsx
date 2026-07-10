@@ -23,6 +23,7 @@ import RegistersPage from './pages/RegistersPage';
 import FeatureFlagsAdminPage from './pages/FeatureFlagsAdminPage';
 import DocumentLibraryAdminPage from './pages/DocumentLibraryAdminPage';
 import IntakePage from './pages/IntakePage';
+import SignDocumentPage from './pages/SignDocumentPage';
 import CompliancePage from './pages/CompliancePage';
 import LoginPage from './pages/LoginPage';
 import SetupOrgPage from './pages/SetupOrgPage';
@@ -310,6 +311,7 @@ export default function App() {
           <Route path="/staff-onboarding/:token" element={<StaffOnboardingFormPage />} />
           <Route path="/staff-onboarding/renew/:token" element={<StaffRenewalPage />} />
           <Route path="/intake/:token" element={<IntakePage />} />
+          <Route path="/sign/:token" element={<SignDocumentPage />} />
 
           <Route path="/participants/*" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />
           <Route path="/directory" element={<ProtectedRoute><LegacyPathRedirect /></ProtectedRoute>} />

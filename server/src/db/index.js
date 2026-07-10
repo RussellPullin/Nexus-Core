@@ -896,6 +896,62 @@ try {
     if (!e.message?.includes('already exists')) console.warn('signature_events migration:', e.message);
   }
 
+  // envelope_id deliberately has no FK to signature_envelopes: the library-master send path
+  // (branded onboarding-pack documents, including staff onboarding which has no participant_id)
+  // never creates a signature_envelopes row — envelope_id is just a grouping key there. Rows
+  // sent via createEnvelopeRecords (the primary /send-form, /send-signatures paths) do have a
+  // matching signature_envelopes row, looked up by id when present.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS signature_envelope_documents (
+        id TEXT PRIMARY KEY,
+        envelope_id TEXT NOT NULL,
+        org_id TEXT,
+        form_instance_id TEXT,
+        display_name TEXT,
+        document_path TEXT NOT NULL,
+        signing_layout_json TEXT NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (form_instance_id) REFERENCES participant_form_instances(id) ON DELETE SET NULL
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_signature_envelope_documents_envelope ON signature_envelope_documents(envelope_id)');
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('signature_envelope_documents migration:', e.message);
+  }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS signature_envelope_signers (
+        id TEXT PRIMARY KEY,
+        envelope_id TEXT NOT NULL,
+        name TEXT,
+        email TEXT,
+        role TEXT,
+        sequence INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'pending',
+        token_hash TEXT NOT NULL UNIQUE,
+        values_json TEXT,
+        signature_data TEXT,
+        consent_given INTEGER DEFAULT 0,
+        sent_at TEXT,
+        viewed_at TEXT,
+        signed_at TEXT,
+        declined_at TEXT,
+        decline_reason TEXT,
+        source_ip TEXT,
+        user_agent TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_signature_envelope_signers_envelope ON signature_envelope_signers(envelope_id, sequence)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_signature_envelope_signers_token ON signature_envelope_signers(token_hash)');
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('signature_envelope_signers migration:', e.message);
+  }
+
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS audit_events (

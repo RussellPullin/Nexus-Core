@@ -1,13 +1,13 @@
 /**
- * Send branded library masters (signature_count > 0) via DocuSeal.
+ * Send branded library masters (signature_count > 0) via the native e-signature service.
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import {
-  hasDocuSealConfigured,
+  hasNativeSignatureConfigured,
   sendMultiDocumentAgreement
-} from './docuSeal.service.js';
+} from './nativeSignature.service.js';
 import {
   renderLibraryMasterAttachment,
   splitOnboardingMasters
@@ -18,10 +18,10 @@ import {
   resolveOrgSignatoryForDocuSeal
 } from './customFormDocuSealFields.service.js';
 
-const DOCUSEAL_SETTINGS_HINT = 'Enable e-signing under Forms → Onboarding settings.';
+const ESIGNATURE_SETTINGS_HINT = 'Enable e-signing under Forms → Onboarding settings.';
 
-export function isDocuSealEnabledForOrg(orgId) {
-  if (!orgId) return hasDocuSealConfigured();
+export function isNativeSignatureEnabledForOrg(orgId) {
+  if (!orgId) return hasNativeSignatureConfigured();
   const row = db.prepare(`SELECT config_json FROM provider_profiles WHERE organisation_id = ?`).get(orgId);
   let config = {};
   try {
@@ -29,20 +29,15 @@ export function isDocuSealEnabledForOrg(orgId) {
   } catch {
     config = {};
   }
-  const enabled = config.docuseal_enabled ?? config.dropbox_sign_enabled;
+  const enabled = config.esignature_enabled ?? config.docuseal_enabled ?? config.dropbox_sign_enabled;
   if (enabled === true) return true;
   if (enabled === false) return false;
-  return hasDocuSealConfigured();
+  return hasNativeSignatureConfigured();
 }
 
-export function assertDocuSealReady(orgId) {
-  if (!hasDocuSealConfigured()) {
-    const err = new Error(`DocuSeal is not configured on this server. Set DOCUSEAL_API_KEY.`);
-    err.code = 'DOCUSEAL_NOT_CONFIGURED';
-    throw err;
-  }
-  if (!isDocuSealEnabledForOrg(orgId)) {
-    const err = new Error(`E-signing is not enabled for this organisation. ${DOCUSEAL_SETTINGS_HINT}`);
+export function assertNativeSignatureReady(orgId) {
+  if (!isNativeSignatureEnabledForOrg(orgId)) {
+    const err = new Error(`E-signing is not enabled for this organisation. ${ESIGNATURE_SETTINGS_HINT}`);
     err.code = 'DOCUSEAL_NOT_ENABLED';
     throw err;
   }
@@ -236,7 +231,8 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
       buffer: p.buffer,
       filename: p.filename,
       formFields: p.formFields
-    }))
+    })),
+    envelopeId
   });
 
   return prepared.map((p) => ({
@@ -262,7 +258,7 @@ export async function sendLibraryMastersForSignature({
   orgName = null
 }) {
   if (!formMasters?.length) return [];
-  assertDocuSealReady(orgId);
+  assertNativeSignatureReady(orgId);
 
   const packets = computeLibrarySignaturePackets(formMasters, signatureMode);
   const signatureRequests = [];

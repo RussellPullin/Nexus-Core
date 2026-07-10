@@ -529,6 +529,49 @@ CREATE TABLE IF NOT EXISTS signature_events (
   FOREIGN KEY (form_instance_id) REFERENCES participant_form_instances(id) ON DELETE SET NULL
 );
 
+-- Native e-signature: one row per PDF in an envelope (a packet can hold several).
+-- envelope_id deliberately has no FK to signature_envelopes: the library-master send path
+-- (branded onboarding-pack documents, including staff onboarding which has no participant_id)
+-- never creates a signature_envelopes row — envelope_id is just a grouping key there. Rows sent
+-- via createEnvelopeRecords (the primary /send-form, /send-signatures paths) do have a matching
+-- signature_envelopes row, looked up by id when present.
+CREATE TABLE IF NOT EXISTS signature_envelope_documents (
+  id TEXT PRIMARY KEY,
+  envelope_id TEXT NOT NULL,
+  org_id TEXT,
+  form_instance_id TEXT,
+  display_name TEXT,
+  document_path TEXT NOT NULL, -- draft (unsigned, pre-filled) PDF on disk
+  signing_layout_json TEXT NOT NULL, -- serialized SigningLayout incl. per-field signer ownership
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (form_instance_id) REFERENCES participant_form_instances(id) ON DELETE SET NULL
+);
+
+-- Native e-signature: one row per signer per envelope, folding in identity + status + own token
+CREATE TABLE IF NOT EXISTS signature_envelope_signers (
+  id TEXT PRIMARY KEY,
+  envelope_id TEXT NOT NULL,
+  name TEXT,
+  email TEXT,
+  role TEXT,
+  sequence INTEGER DEFAULT 0, -- 0-based turn order
+  status TEXT DEFAULT 'pending', -- pending | viewed | signed | declined
+  token_hash TEXT NOT NULL UNIQUE,
+  values_json TEXT, -- this signer's date/checkbox field inputs
+  signature_data TEXT, -- this signer's signature PNG data URL
+  consent_given INTEGER DEFAULT 0,
+  sent_at TEXT,
+  viewed_at TEXT,
+  signed_at TEXT,
+  declined_at TEXT,
+  decline_reason TEXT,
+  source_ip TEXT,
+  user_agent TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Immutable audit events for onboarding/compliance
 CREATE TABLE IF NOT EXISTS audit_events (
   id TEXT PRIMARY KEY,

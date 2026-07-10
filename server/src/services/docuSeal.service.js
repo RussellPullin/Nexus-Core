@@ -19,7 +19,9 @@ async function requestDocuSeal(path, options = {}) {
   const apiKey = process.env.DOCUSEAL_API_KEY?.trim();
   if (!apiKey) throw new Error('DocuSeal is not configured on this server. Set DOCUSEAL_API_KEY.');
 
-  const res = await fetch(`${DOCUSEAL_BASE_URL}${path}`, {
+  // Self-hosted DocuSeal mounts its API under /api (unlike the hosted api.docuseal.com
+  // subdomain the public OpenAPI docs describe, which has no such prefix).
+  const res = await fetch(`${DOCUSEAL_BASE_URL}/api${path}`, {
     ...options,
     headers: {
       'X-Auth-Token': apiKey,

@@ -21,7 +21,7 @@ import {
   createAuditEvent,
   assertProviderOnboardingReady
 } from '../services/onboarding.service.js';
-import { createAgreementPacket, createAgreementWithDocument, uploadTransientDocument } from '../services/docuSeal.service.js';
+import { createAgreementPacket, createAgreementWithDocument, uploadTransientDocument } from '../services/nativeSignature.service.js';
 import {
   buildServiceAgreementDocuSealFields,
   isServiceAgreementSnapshot
@@ -624,7 +624,7 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
       UPDATE signature_envelopes
       SET external_envelope_id = ?, provider_name = ?, status = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(agreement.external_envelope_id, agreement.provider || 'docuseal', agreement.status || 'sent', envelope.envelope_id);
+    `).run(agreement.external_envelope_id, agreement.provider || 'native', agreement.status || 'sent', envelope.envelope_id);
 
     if (oneDriveCopy) {
       try {
@@ -684,7 +684,7 @@ router.post('/participants/:id/send-signatures', async (req, res) => {
         UPDATE signature_envelopes
         SET external_envelope_id = ?, provider_name = ?, status = ?, updated_at = datetime('now')
         WHERE id = ?
-      `).run(agreement.external_envelope_id, agreement.provider || 'docuseal', agreement.status || 'sent', envelope.envelope_id);
+      `).run(agreement.external_envelope_id, agreement.provider || 'native', agreement.status || 'sent', envelope.envelope_id);
       envelopeResponses.push({ ...envelope, ...agreement });
     }
 

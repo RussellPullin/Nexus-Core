@@ -628,6 +628,62 @@ export const intakePublic = {
   }
 };
 
+export const signingPublic = {
+  load: async (token) => {
+    const res = await fetch(`${API}/sign/${encodeURIComponent(token)}`);
+    const text = await res.text();
+    if (!res.ok) {
+      let err = null;
+      try { err = JSON.parse(text); } catch { /* ignore */ }
+      const e = new Error(err?.error || text || res.statusText);
+      e.code = err?.code || 'SIGNING_ERROR';
+      throw e;
+    }
+    return text ? JSON.parse(text) : {};
+  },
+  documentUrl: (token, documentId) => `${API}/sign/${encodeURIComponent(token)}/document/${encodeURIComponent(documentId)}`,
+  save: async (token, body) => {
+    const res = await fetch(`${API}/sign/${encodeURIComponent(token)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || res.statusText);
+    }
+    return res.json();
+  },
+  submit: async (token, body) => {
+    const res = await fetch(`${API}/sign/${encodeURIComponent(token)}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let err = null;
+      try { err = JSON.parse(text); } catch { /* ignore */ }
+      const e = new Error(err?.error || text || res.statusText);
+      e.code = err?.code || 'SIGNING_ERROR';
+      throw e;
+    }
+    return text ? JSON.parse(text) : {};
+  },
+  decline: async (token, reason) => {
+    const res = await fetch(`${API}/sign/${encodeURIComponent(token)}/decline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || res.statusText);
+    }
+    return res.json();
+  }
+};
+
 export const documentLibrary = {
   listMasters: () => fetchApi('/document-library/masters'),
   sync: () => fetchApi('/document-library/sync', { method: 'POST' }),
