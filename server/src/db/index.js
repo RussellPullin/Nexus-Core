@@ -995,6 +995,21 @@ try {
 
   try {
     db.exec(`
+      CREATE TABLE IF NOT EXISTS register_onedrive_sheet_cache (
+        org_id TEXT NOT NULL,
+        sheet_key TEXT NOT NULL,
+        rows_json TEXT NOT NULL DEFAULT '[]',
+        imported_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (org_id, sheet_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_register_onedrive_sheet_cache_org ON register_onedrive_sheet_cache(org_id);
+    `);
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('register_onedrive_sheet_cache migration:', e.message);
+  }
+
+  try {
+    db.exec(`
       CREATE TABLE IF NOT EXISTS onboarding_renewal_tasks (
         id TEXT PRIMARY KEY,
         participant_id TEXT NOT NULL,

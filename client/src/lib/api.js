@@ -47,6 +47,13 @@ export const registers = {
     fetchApi(`/registers/incidents/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data || {}) }),
   deleteIncident: (id) => fetchApi(`/registers/incidents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // Upsert a manual override for one cell of a derived register; resolves to the fresh snapshot.
+  addRow: (viewId, values = []) =>
+    fetchApi(`/registers/${encodeURIComponent(viewId)}/rows`, {
+      method: 'POST',
+      body: JSON.stringify({ values })
+    }),
+  deleteRow: (viewId, rowKey) =>
+    fetchApi(`/registers/${encodeURIComponent(viewId)}/rows/${encodeURIComponent(rowKey)}`, { method: 'DELETE' }),
   setCell: (viewId, { rowKey, colIndex, value }) =>
     fetchApi(`/registers/${encodeURIComponent(viewId)}/cell`, {
       method: 'PUT',

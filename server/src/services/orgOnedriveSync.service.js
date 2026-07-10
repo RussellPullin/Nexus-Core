@@ -12,6 +12,8 @@ import {
   buildTemplateDataBySheet,
   RISK_REGISTER_ACTIVITY_SECTION
 } from './registerSnapshots.service.js';
+import { REGISTER_SHEET_DATA_START } from './registerSheetConfig.js';
+import { refreshOnedriveLinkedRegisters } from './registerOnedriveImport.service.js';
 import {
   getOnedriveLinkRow,
   getRefreshToken,
@@ -530,22 +532,14 @@ export async function syncTemplateRegistersNow(organizationId, suppliedAccessTok
   const primaryArgb = hexToArgb(org?.brand_primary_color, 'FF1D4ED8');
   await ensureFolderPath(accessToken, [ROOT_NAME, FOLDER_REGISTER]);
 
+  try {
+    await refreshOnedriveLinkedRegisters(organizationId);
+  } catch (e) {
+    console.warn('[orgOnedrive] linked register import skipped', e.message);
+  }
+
   const sheetData = buildTemplateDataBySheet(organizationId);
-  const dataStartBySheet = {
-    Complaints: 4,
-    'Document Register': 3,
-    'Feedback and complaints': 4,
-    'HR role register': 9,
-    'Significant risk factor': 4,
-    'Training and Development': 6,
-    'Policy register': 3,
-    'Conflict of interest register': 3,
-    'Collection and storage of Med': 4,
-    'Continuous improvment': 3,
-    'Emergency test register': 3,
-    'Incident register': 4,
-    'Waste removal Register': 4
-  };
+  const dataStartBySheet = REGISTER_SHEET_DATA_START;
 
   for (const src of templateWb.worksheets) {
     const outWb = new ExcelJS.Workbook();

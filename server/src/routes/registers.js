@@ -2,7 +2,8 @@ import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import { requireCoordinatorOrAdmin } from '../middleware/roles.js';
 import { db } from '../db/index.js';
-import { buildRegisterSnapshotForOrg, getOrgRegisterSettings, isRegisterEditableForOrg, saveOrgRegisterSettings, REGISTER_CATALOG, sheetKeyToViewId } from '../services/registerSnapshots.service.js';
+import { buildRegisterSnapshotForOrg, getOrgRegisterSettings, isRegisterEditableForOrg, saveOrgRegisterSettings, REGISTER_CATALOG, sheetKeyToViewId, createManualRegisterRow, deleteManualRegisterRow, migrateManualRegisterRowKey, isManualRegisterRowKey, REGISTER_CATALOG_BY_VIEW_ID } from '../services/registerSnapshots.service.js';
+import { ensureOnedriveLinkedRegistersImported, refreshOnedriveLinkedRegisters } from '../services/registerOnedriveImport.service.js';
 
 const router = Router();
 
@@ -67,10 +68,11 @@ function incidentPayload(body = {}) {
   };
 }
 
-router.get('/snapshot', requireCoordinatorOrAdmin, (req, res) => {
+router.get('/snapshot', requireCoordinatorOrAdmin, async (req, res) => {
   try {
     const orgId = requireOrg(req, res);
     if (!orgId) return;
+    await ensureOnedriveLinkedRegistersImported(orgId);
     res.json(buildRegisterSnapshotForOrg(orgId));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -184,6 +186,17 @@ router.delete('/incidents/:id', requireCoordinatorOrAdmin, (req, res) => {
   }
 });
 
+router.post('/import-onedrive', requireCoordinatorOrAdmin, async (req, res) => {
+  try {
+    const orgId = requireOrg(req, res);
+    if (!orgId) return;
+    await refreshOnedriveLinkedRegisters(orgId);
+    res.json(buildRegisterSnapshotForOrg(orgId));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/settings', requireCoordinatorOrAdmin, (req, res) => {
   try {
     const orgId = requireOrg(req, res);
@@ -223,6 +236,41 @@ router.put('/settings', requireCoordinatorOrAdmin, (req, res) => {
   }
 });
 
+router.post('/:viewId/rows', requireCoordinatorOrAdmin, (req, res) => {
+  try {
+    const orgId = requireOrg(req, res);
+    if (!orgId) return;
+    const viewId = VIEW_ALIASES[String(req.params.viewId || '').trim()] || String(req.params.viewId || '').trim();
+    const snapshot = buildRegisterSnapshotForOrg(orgId);
+    const view = snapshot.views.find((v) => v.id === viewId);
+    if (!view && !REGISTER_CATALOG_BY_VIEW_ID[viewId]) {
+      return res.status(404).json({ error: 'Register view not found' });
+    }
+    const values = Array.isArray(req.body?.values) ? req.body.values.map((v) => String(v ?? '')) : [];
+    createManualRegisterRow(orgId, viewId, req.session.user.id, {
+      values,
+      existingRows: view?.rows || []
+    });
+    res.status(201).json(buildRegisterSnapshotForOrg(orgId));
+  } catch (e) {
+    res.status(e.message?.includes('cannot be edited') ? 400 : 500).json({ error: e.message });
+  }
+});
+
+router.delete('/:viewId/rows/:rowKey', requireCoordinatorOrAdmin, (req, res) => {
+  try {
+    const orgId = requireOrg(req, res);
+    if (!orgId) return;
+    const viewId = VIEW_ALIASES[String(req.params.viewId || '').trim()] || String(req.params.viewId || '').trim();
+    deleteManualRegisterRow(orgId, viewId, decodeURIComponent(req.params.rowKey || ''));
+    res.json(buildRegisterSnapshotForOrg(orgId));
+  } catch (e) {
+    res.status(e.message?.includes('cannot be edited') || e.message?.includes('Only manually') ? 400 : 500).json({
+      error: e.message
+    });
+  }
+});
+
 /**
  * Set (upsert) a manual override for a single cell of a derived register. Overrides are layered
  * on top of the auto-generated rows so editing a register never mutates the source records.
@@ -235,19 +283,23 @@ router.put('/:viewId/cell', requireCoordinatorOrAdmin, (req, res) => {
     if (!isRegisterEditableForOrg(orgId, viewId)) {
       return res.status(400).json({ error: 'This register cannot be edited inline.' });
     }
-    const rowKey = String(req.body?.row_key ?? '').trim();
+    let rowKey = String(req.body?.row_key ?? '').trim();
     const colIndex = Number.parseInt(req.body?.col_index, 10);
     if (!rowKey) return res.status(400).json({ error: 'row_key is required' });
     if (!Number.isInteger(colIndex) || colIndex < 0) {
       return res.status(400).json({ error: 'col_index must be a non-negative integer' });
     }
     const value = req.body?.value == null ? '' : String(req.body.value);
+    const keyColIndex = REGISTER_CATALOG_BY_VIEW_ID[viewId]?.key_column_index ?? 0;
     db.prepare(
       `INSERT INTO register_cell_overrides (org_id, view_id, row_key, col_index, value, updated_by, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(org_id, view_id, row_key, col_index)
        DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = datetime('now')`
     ).run(orgId, viewId, rowKey, colIndex, value, req.session.user.id);
+    if (isManualRegisterRowKey(rowKey) && colIndex === keyColIndex && value.trim()) {
+      rowKey = migrateManualRegisterRowKey(orgId, viewId, rowKey, value.trim(), keyColIndex);
+    }
     res.json(buildRegisterSnapshotForOrg(orgId));
   } catch (e) {
     res.status(500).json({ error: e.message });

@@ -53,20 +53,6 @@ function rowDateInRange(row, view, from, to) {
   return true;
 }
 
-function sortRows(rows, sort) {
-  if (!sort) return rows;
-  const { index, dir } = sort;
-  return [...rows].sort((a, b) => {
-    const av = a[index] ?? '';
-    const bv = b[index] ?? '';
-    const ad = new Date(av).getTime();
-    const bd = new Date(bv).getTime();
-    const cmp = !Number.isNaN(ad) && !Number.isNaN(bd)
-      ? ad - bd
-      : String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
-    return dir === 'desc' ? -cmp : cmp;
-  });
-}
 
 export default function RegistersPage() {
   const pathPrefix = useProductPathPrefix();
@@ -92,6 +78,7 @@ export default function RegistersPage() {
   const [editCell, setEditCell] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [savingCell, setSavingCell] = useState(false);
+  const [addingRow, setAddingRow] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [catalogDraft, setCatalogDraft] = useState([]);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -189,18 +176,37 @@ export default function RegistersPage() {
       .filter(({ col }) => !['Manual ID', 'Shift ID'].includes(col));
   }, [active]);
 
-  const filteredRows = useMemo(() => {
+  const isEditableView = !!active?.editable && canEditRegisters;
+  const keyColIndex = active?.key_column_index ?? 0;
+
+  const filteredRowEntries = useMemo(() => {
     if (!active) return [];
     const search = String(activeFilter.search || '').trim().toLowerCase();
     const statusIdx = active.status_column ? getColumnIndex(active, active.status_column) : -1;
-    const rows = (active.rows || []).filter((row) => {
+    const entries = (active.rows || []).map((row, index) => ({
+      row,
+      rowKey: String(active.row_keys?.[index] ?? row[keyColIndex] ?? '').trim()
+    }));
+    const filtered = entries.filter(({ row }) => {
       if (activeFilter.status && statusIdx >= 0 && row[statusIdx] !== activeFilter.status) return false;
       if (!rowDateInRange(row, active, activeFilter.from, activeFilter.to)) return false;
       if (!search) return true;
       return visibleColumnIndexes.some(({ index }) => String(row[index] ?? '').toLowerCase().includes(search));
     });
-    return sortRows(rows, sort?.viewId === active.id ? sort : null);
-  }, [active, activeFilter, sort, visibleColumnIndexes]);
+    const sorted = [...filtered].sort((a, b) => {
+      if (!sort || sort.viewId !== active.id) return 0;
+      const { index, dir } = sort;
+      const av = a.row[index] ?? '';
+      const bv = b.row[index] ?? '';
+      const ad = new Date(av).getTime();
+      const bd = new Date(bv).getTime();
+      const cmp = !Number.isNaN(ad) && !Number.isNaN(bd)
+        ? ad - bd
+        : String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+      return dir === 'desc' ? -cmp : cmp;
+    });
+    return sorted;
+  }, [active, activeFilter, sort, visibleColumnIndexes, keyColIndex]);
 
   const setActiveFilter = (patch) => {
     if (!active?.id) return;
@@ -216,8 +222,39 @@ export default function RegistersPage() {
     }));
   };
 
-  const isEditableView = !!active?.editable && canEditRegisters;
-  const keyColIndex = active?.key_column_index ?? 0;
+  const addRegisterRow = async () => {
+    if (!active?.id || !isEditableView) return;
+    setAddingRow(true);
+    try {
+      const snapshot = await registers.addRow(active.id);
+      if (snapshot?.views) {
+        setData(snapshot);
+        const updated = snapshot.views.find((v) => v.id === active.id);
+        const newIndex = (updated?.rows?.length || 1) - 1;
+        const newRowKey = updated?.row_keys?.[newIndex] || '';
+        if (newRowKey) {
+          setEditCell({ rowKey: newRowKey, colIndex: keyColIndex });
+          setEditValue(String(updated?.rows?.[newIndex]?.[keyColIndex] ?? ''));
+        }
+      }
+    } catch (err) {
+      setError(err.message || 'Could not add row');
+    } finally {
+      setAddingRow(false);
+    }
+  };
+
+  const removeRegisterRow = async (rowKey) => {
+    if (!active?.id || !rowKey?.startsWith('@manual:')) return;
+    if (!window.confirm('Delete this row?')) return;
+    try {
+      const snapshot = await registers.deleteRow(active.id, rowKey);
+      if (snapshot?.views) setData(snapshot);
+      cancelEditCell();
+    } catch (err) {
+      setError(err.message || 'Could not delete row');
+    }
+  };
 
   const beginEditCell = (rowKey, colIndex, currentValue) => {
     if (!isEditableView) return;
@@ -359,7 +396,7 @@ export default function RegistersPage() {
         <h1 style={{ margin: 0, color: branding.primaryColor }}>Registers</h1>
         <p style={{ margin: '0.35rem 0 0', color: '#64748b', maxWidth: '52rem' }}>
           Live view of the same data Nexus pushes to <strong>Nexus Core / Register</strong> in OneDrive (when connected).
-          Extending a Nexus feature with new compliance data should update rows here and in the next register sync.
+          Compliance registers maintained in Excel (conflict of interest, medication storage, continuous improvement, emergency tests, waste removal) are imported from your Register folder.
         </p>
         {data?.generated_at && (
           <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', color: '#94a3b8' }}>
@@ -499,12 +536,17 @@ export default function RegistersPage() {
                 )}
                 {isEditableView && (
                   <p style={{ margin: '0.2rem 0 0', color: branding.accentColor, fontSize: '0.8rem' }}>
-                    Click any cell to edit. Manual edits override the auto-generated value and sync to the register files.
+                    Click any cell to edit, or use Add row when the register is empty. Manual edits sync to the register files.
                   </p>
                 )}
               </div>
               {active.id === 'incident_register' && canManageIncidents && (
                 <button type="button" className="btn btn-primary" onClick={openNewIncident}>Log Incident</button>
+              )}
+              {isEditableView && active.id !== 'incident_register' && (
+                <button type="button" className="btn btn-primary" onClick={addRegisterRow} disabled={addingRow}>
+                  {addingRow ? 'Adding...' : 'Add row'}
+                </button>
               )}
             </div>
 
@@ -542,21 +584,36 @@ export default function RegistersPage() {
                         {col}{sort?.viewId === active.id && sort.index === index ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
                       </th>
                     ))}
-                    {active.id === 'incident_register' && <th style={{ position: 'sticky', top: 0, background: branding.primaryColor, color: '#fff', zIndex: 1 }}>Actions</th>}
+                    {(active.id === 'incident_register' || (isEditableView && active.id !== 'incident_register')) && (
+                      <th style={{ position: 'sticky', top: 0, background: branding.primaryColor, color: '#fff', zIndex: 1 }}>Actions</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.length === 0 ? (
-                    <tr><td colSpan={visibleColumnIndexes.length + 1} style={{ color: '#64748b', padding: '1rem' }}>No rows match the current filters.</td></tr>
+                  {filteredRowEntries.length === 0 ? (
+                    <tr>
+                      <td colSpan={visibleColumnIndexes.length + (isEditableView || active.id === 'incident_register' ? 1 : 0)} style={{ color: '#64748b', padding: '1rem' }}>
+                        {isEditableView && active.id !== 'incident_register' && !(activeFilter.search || activeFilter.from || activeFilter.to || activeFilter.status) ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                            <span>No rows yet.</span>
+                            <button type="button" className="btn btn-secondary" onClick={addRegisterRow} disabled={addingRow}>
+                              {addingRow ? 'Adding...' : 'Add first row'}
+                            </button>
+                          </div>
+                        ) : (
+                          'No rows match the current filters.'
+                        )}
+                      </td>
+                    </tr>
                   ) : (
-                    filteredRows.map((row, ri) => {
+                    filteredRowEntries.map(({ row, rowKey }, ri) => {
                       const sourceIdx = getColumnIndex(active, 'Source');
                       const manualIdIdx = getColumnIndex(active, 'Manual ID');
                       const source = sourceIdx >= 0 ? row[sourceIdx] : '';
                       const manualId = manualIdIdx >= 0 ? row[manualIdIdx] : '';
-                      const rowKey = String(row[keyColIndex] ?? '');
+                      const canEditRow = isEditableView && !!rowKey;
                       return (
-                        <tr key={`${ri}-${row.join('|')}`} style={{ background: ri % 2 ? '#f8fafc' : '#fff' }}>
+                        <tr key={`${rowKey || ri}-${row.join('|')}`} style={{ background: ri % 2 ? '#f8fafc' : '#fff' }}>
                           {visibleColumnIndexes.map(({ index }) => {
                             const editing = isEditableView && editCell && editCell.rowKey === rowKey && editCell.colIndex === index;
                             if (editing) {
@@ -581,14 +638,23 @@ export default function RegistersPage() {
                             return (
                               <td
                                 key={index}
-                                onClick={() => isEditableView && rowKey && beginEditCell(rowKey, index, row[index])}
-                                title={isEditableView && rowKey ? 'Click to edit' : undefined}
-                                style={{ cursor: isEditableView && rowKey ? 'text' : 'default' }}
+                                onClick={() => canEditRow && beginEditCell(rowKey, index, row[index])}
+                                title={canEditRow ? 'Click to edit' : undefined}
+                                style={{ cursor: canEditRow ? 'text' : 'default' }}
                               >
                                 {statusBadge(row[index] ?? '')}
                               </td>
                             );
                           })}
+                          {isEditableView && active.id !== 'incident_register' && (
+                            <td>
+                              {rowKey.startsWith('@manual:') ? (
+                                <button type="button" className="btn btn-secondary" onClick={() => removeRegisterRow(rowKey)}>Delete</button>
+                              ) : (
+                                <span style={{ color: '#94a3b8' }}>—</span>
+                              )}
+                            </td>
+                          )}
                           {active.id === 'incident_register' && (
                             <td>
                               {source === 'Manual' && canManageIncidents ? (

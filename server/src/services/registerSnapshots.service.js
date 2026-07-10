@@ -6,7 +6,10 @@
  */
 
 import { db } from '../db/index.js';
+import crypto from 'crypto';
 import { PARTICIPANT_INTAKE_FIELD_DEFS } from '../../../shared/onboardingFieldRegistry.js';
+import { ONEDRIVE_LINKED_REGISTER_UI_HEADERS } from './registerSheetConfig.js';
+import { getOnedriveLinkedRegisterRows } from './registerOnedriveImport.service.js';
 
 /** Intake keys stored under participant onboarding — clinical section = risk assessment capture. */
 const RISK_ASSESSMENT_FIELD_KEYS = PARTICIPANT_INTAKE_FIELD_DEFS.filter((d) => d.section === 'clinical').map((d) => d.key);
@@ -112,11 +115,11 @@ export const REGISTER_CATALOG = [
   { sheetKey: 'Risk register', title: 'Risk Register', source: 'participant_documents', defaultVisible: false, defaultEditable: false, key_column_index: 0 },
   { sheetKey: 'Training and Development', title: 'Training', source: 'staff_compliance_documents', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Expiry', status_column: 'Status' },
   { sheetKey: 'Policy register', title: 'Policies', source: 'company_policy_files', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Effective date' },
-  { sheetKey: 'Conflict of interest register', title: 'Conflict of Interest', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true },
-  { sheetKey: 'Collection and storage of Med', title: 'Medication Storage', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true },
-  { sheetKey: 'Continuous improvment', title: 'Continuous Improvement', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true },
-  { sheetKey: 'Emergency test register', title: 'Emergency Tests', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true },
-  { sheetKey: 'Waste removal Register', title: 'Waste Removal', source: null, defaultVisible: false, defaultEditable: false, key_column_index: 0, pending: true }
+  { sheetKey: 'Conflict of interest register', title: 'Conflict of Interest', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 1, date_column: 'Date of Notification' },
+  { sheetKey: 'Collection and storage of Med', title: 'Medication Storage', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Date' },
+  { sheetKey: 'Continuous improvment', title: 'Continuous Improvement', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 0, status_column: 'Status', date_column: 'Due date' },
+  { sheetKey: 'Emergency test register', title: 'Emergency Tests', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Test date' },
+  { sheetKey: 'Waste removal Register', title: 'Waste Removal', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Date added' }
 ];
 
 export const REGISTER_CATALOG_BY_VIEW_ID = Object.fromEntries(
@@ -189,31 +192,163 @@ export function rowKeyForRegister(row, keyColIndex = 0) {
   return String(row?.[keyColIndex] ?? '').trim();
 }
 
+export const MANUAL_REGISTER_ROW_PREFIX = '@manual:';
+
+export function isManualRegisterRowKey(rowKey) {
+  return String(rowKey || '').startsWith(MANUAL_REGISTER_ROW_PREFIX);
+}
+
 /**
- * Layer manual cell overrides on top of derived register rows. Returns new row arrays where an
- * override exists; untouched rows are returned by reference.
+ * Layer manual cell overrides on top of derived rows and append user-added manual rows.
+ * Returns parallel row_keys used for edit/delete API calls (stable even when the key column is empty).
  */
-export function applyCellOverrides(organizationId, viewId, rows, keyColIndex = 0) {
-  if (!viewId || !tableExists('register_cell_overrides')) return rows;
+export function mergeRegisterRowsWithOverrides(organizationId, viewId, rows, keyColIndex = 0, columnCount = 0) {
+  const normalized = (rows || []).map((row) => [...row]);
+  const baseWidth = columnCount || normalized.reduce((max, row) => Math.max(max, row.length), 0);
+
+  if (!viewId || !tableExists('register_cell_overrides')) {
+    return {
+      rows: normalized,
+      row_keys: normalized.map((row) => rowKeyForRegister(row, keyColIndex)).filter(Boolean)
+    };
+  }
+
   const overrides = db
     .prepare('SELECT row_key, col_index, value FROM register_cell_overrides WHERE org_id = ? AND view_id = ?')
     .all(organizationId, viewId);
-  if (!overrides.length) return rows;
-  const map = new Map();
-  for (const o of overrides) map.set(`${o.row_key}::${o.col_index}`, o.value);
-  return rows.map((row) => {
+
+  const byRowKey = new Map();
+  for (const o of overrides) {
+    if (!byRowKey.has(o.row_key)) byRowKey.set(o.row_key, new Map());
+    byRowKey.get(o.row_key).set(o.col_index, o.value);
+  }
+
+  const derivedKeys = new Set(normalized.map((row) => rowKeyForRegister(row, keyColIndex)).filter(Boolean));
+
+  const applyOverrideMap = (row, rowKey) => {
+    const cols = byRowKey.get(rowKey);
+    if (!cols) return row;
+    const width = Math.max(baseWidth, row.length, ...cols.keys()) + 1;
+    const next = [...row];
+    while (next.length < width) next.push('');
+    for (const [col, val] of cols) next[col] = val;
+    return next;
+  };
+
+  const mergedRows = normalized.map((row) => {
     const key = rowKeyForRegister(row, keyColIndex);
     if (!key) return row;
-    let next = null;
-    for (let c = 0; c < row.length; c += 1) {
-      const override = map.get(`${key}::${c}`);
-      if (override !== undefined) {
-        if (!next) next = [...row];
-        next[c] = override;
-      }
-    }
-    return next || row;
+    return applyOverrideMap(row, key);
   });
+
+  const row_keys = normalized.map((row, index) => {
+    const displayKey = rowKeyForRegister(mergedRows[index], keyColIndex);
+    const sourceKey = rowKeyForRegister(row, keyColIndex);
+    return displayKey || sourceKey || '';
+  });
+
+  for (const [rowKey] of byRowKey) {
+    if (derivedKeys.has(rowKey)) continue;
+    const cols = byRowKey.get(rowKey);
+    const width = Math.max(baseWidth, ...cols.keys()) + 1;
+    const newRow = Array(width).fill('');
+    for (const [col, val] of cols) newRow[col] = val;
+    mergedRows.push(newRow);
+    row_keys.push(rowKey);
+  }
+
+  const filteredRows = [];
+  const filteredKeys = [];
+  for (let i = 0; i < mergedRows.length; i += 1) {
+    const row = mergedRows[i];
+    const key = row_keys[i] || rowKeyForRegister(row, keyColIndex);
+    if (key || row.some((cell) => String(cell ?? '').trim())) {
+      filteredRows.push(row);
+      filteredKeys.push(key);
+    }
+  }
+
+  return { rows: filteredRows, row_keys: filteredKeys };
+}
+
+/** @deprecated Prefer mergeRegisterRowsWithOverrides */
+export function applyCellOverrides(organizationId, viewId, rows, keyColIndex = 0) {
+  return mergeRegisterRowsWithOverrides(organizationId, viewId, rows, keyColIndex).rows;
+}
+
+export function suggestNextRegisterRowKey(viewId, rows, keyColIndex = 0) {
+  const def = REGISTER_CATALOG_BY_VIEW_ID[viewId];
+  const keyHeader = def?.key_column_index === keyColIndex
+    ? REGISTER_UI_HEADERS[def.sheetKey]?.[keyColIndex]
+    : null;
+  const numericKey =
+    keyHeader === 'No.' ||
+    viewId === 'continuous_improvment' ||
+    viewId === 'emergency_test_register';
+  if (!numericKey) return null;
+  const nums = (rows || [])
+    .map((row) => Number.parseInt(String(row[keyColIndex] ?? '').trim(), 10))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  return String((nums.length ? Math.max(...nums) : 0) + 1);
+}
+
+export function createManualRegisterRow(organizationId, viewId, userId, { values = [], existingRows = [] } = {}) {
+  if (!isRegisterEditableForOrg(organizationId, viewId)) {
+    throw new Error('This register cannot be edited inline.');
+  }
+  const def = REGISTER_CATALOG_BY_VIEW_ID[viewId];
+  if (!def) throw new Error('Unknown register view.');
+  const keyCol = def.key_column_index ?? 0;
+  const width = (REGISTER_UI_HEADERS[def.sheetKey] || []).length || values.length || 1;
+  const rowKey = `${MANUAL_REGISTER_ROW_PREFIX}${crypto.randomUUID()}`;
+  const initial = Array(width).fill('');
+  for (let i = 0; i < Math.min(values.length, width); i++) initial[i] = String(values[i] ?? '');
+  const suggested = suggestNextRegisterRowKey(viewId, existingRows, keyCol);
+  if (suggested && !initial[keyCol]) initial[keyCol] = suggested;
+
+  const insert = db.prepare(
+    `INSERT INTO register_cell_overrides (org_id, view_id, row_key, col_index, value, updated_by, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+  );
+  const tx = db.transaction(() => {
+    for (let c = 0; c < width; c++) {
+      insert.run(organizationId, viewId, rowKey, c, initial[c] ?? '', userId);
+    }
+  });
+  tx();
+  return { row_key: rowKey, values: initial };
+}
+
+export function deleteManualRegisterRow(organizationId, viewId, rowKey) {
+  if (!isRegisterEditableForOrg(organizationId, viewId)) {
+    throw new Error('This register cannot be edited inline.');
+  }
+  const key = String(rowKey || '').trim();
+  if (!isManualRegisterRowKey(key)) {
+    throw new Error('Only manually added rows can be deleted from this register.');
+  }
+  db.prepare('DELETE FROM register_cell_overrides WHERE org_id = ? AND view_id = ? AND row_key = ?').run(
+    organizationId,
+    viewId,
+    key
+  );
+  return { row_key: key, deleted: true };
+}
+
+export function migrateManualRegisterRowKey(organizationId, viewId, oldRowKey, newRowKey, keyColIndex) {
+  const oldKey = String(oldRowKey || '').trim();
+  const nextKey = String(newRowKey || '').trim();
+  if (!isManualRegisterRowKey(oldKey) || !nextKey || nextKey === oldKey) return oldKey;
+  const conflict = db
+    .prepare('SELECT 1 FROM register_cell_overrides WHERE org_id = ? AND view_id = ? AND row_key = ? LIMIT 1')
+    .get(organizationId, viewId, nextKey);
+  if (conflict) return oldKey;
+  db.prepare(
+    `UPDATE register_cell_overrides
+     SET row_key = ?
+     WHERE org_id = ? AND view_id = ? AND row_key = ?`
+  ).run(nextKey, organizationId, viewId, oldKey);
+  return nextKey;
 }
 
 /** Apply overrides using the sheet name (for the OneDrive Excel export path). */
@@ -222,7 +357,8 @@ function applyOverridesForSheet(organizationId, sheetKey, rows) {
   if (!viewId) return rows;
   const def = REGISTER_CATALOG_BY_VIEW_ID[viewId];
   const keyCol = def?.key_column_index ?? 0;
-  return applyCellOverrides(organizationId, viewId, rows, keyCol);
+  const width = (REGISTER_UI_HEADERS[sheetKey] || []).length;
+  return mergeRegisterRowsWithOverrides(organizationId, viewId, rows, keyCol, width).rows;
 }
 
 function safeJson(raw) {
@@ -789,7 +925,8 @@ export const REGISTER_UI_HEADERS = {
     'Logged date',
     'Manual ID',
     'Shift ID'
-  ]
+  ],
+  ...ONEDRIVE_LINKED_REGISTER_UI_HEADERS
 };
 
 /** Marker row in Registers.xlsx "Risk register" sheet for Nexus-appended participant activity rows. */
@@ -852,18 +989,8 @@ export function buildActivityRiskRegisterRows(organizationId) {
   });
 }
 
-/** Sheets that appear in the template but have no Nexus data pipeline yet — show placeholder in UI. */
-export const PENDING_REGISTER_DATA_SOURCES = {
-  'Conflict of interest register':
-    'Will auto-fill when conflict-of-interest declarations are stored in Nexus (feature pending).',
-  'Collection and storage of Med':
-    'Will auto-fill when medication storage records are captured in Nexus (feature pending).',
-  'Continuous improvment':
-    'Will auto-fill when continuous improvement actions are tracked in Nexus (feature pending).',
-  'Emergency test register':
-    'Will auto-fill when emergency drill / test records are captured in Nexus (feature pending).',
-  'Waste removal Register': 'Will auto-fill when waste disposal logs are captured in Nexus (feature pending).'
-};
+/** @deprecated All OneDrive-linked registers are now imported from Register/*.xlsx */
+export const PENDING_REGISTER_DATA_SOURCES = {};
 
 /**
  * Row data keyed by Excel sheet name (must match Registers.xlsx worksheet names for OneDrive export).
@@ -1128,6 +1255,13 @@ export function buildTemplateDataBySheet(organizationId) {
 
   const activityRiskRegisterRows = buildActivityRiskRegisterRows(organizationId);
 
+  const onedriveLinkedRows = (sheetKey) => {
+    const raw = getOnedriveLinkedRegisterRows(organizationId, sheetKey).filter((row) =>
+      row.some((cell) => String(cell ?? '').trim())
+    );
+    return applyOverridesForSheet(organizationId, sheetKey, raw);
+  };
+
   return {
     'Staff Compliance Register': staffCompliance,
     'Risk Assessment Register': riskRegisterRows,
@@ -1141,7 +1275,12 @@ export function buildTemplateDataBySheet(organizationId) {
     'Risk register': activityRiskRegisterRows,
     'Training and Development': trainingRows,
     'Policy register': policyRows,
-    'Incident register': incidentRegisterRows
+    'Incident register': incidentRegisterRows,
+    'Conflict of interest register': onedriveLinkedRows('Conflict of interest register'),
+    'Collection and storage of Med': onedriveLinkedRows('Collection and storage of Med'),
+    'Continuous improvment': onedriveLinkedRows('Continuous improvment'),
+    'Emergency test register': onedriveLinkedRows('Emergency test register'),
+    'Waste removal Register': onedriveLinkedRows('Waste removal Register')
   };
 }
 
@@ -1221,10 +1360,9 @@ export function buildRegisterSnapshotForOrg(organizationId) {
     let rows = normalizeRows(rawRows);
     const id = sheetKeyToViewId(def.sheetKey);
     const keyCol = def.key_column_index ?? 0;
-    if (isRegisterEditableForOrg(organizationId, id)) {
-      rows = applyCellOverrides(organizationId, id, rows, keyCol);
-    }
     const columns = headersForSheet(def.sheetKey, rows);
+    const merged = mergeRegisterRowsWithOverrides(organizationId, id, rows, keyCol, columns.length);
+    rows = merged.rows;
     const setting = orgSettings[id] || { visible: false, editable: false };
     const view = {
       id,
@@ -1236,6 +1374,7 @@ export function buildRegisterSnapshotForOrg(organizationId) {
       row_count: rows.length,
       columns,
       rows,
+      row_keys: merged.row_keys,
       ...viewMetadataFromCatalog(def, id, orgSettings)
     };
     catalog.push({
