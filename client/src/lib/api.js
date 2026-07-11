@@ -816,8 +816,11 @@ export const staff = {
     URL.revokeObjectURL(url);
   },
   getCustomForms: (staffId) => fetchApi(`/staff/${staffId}/custom-forms`),
-  sendCustomFormForSignature: (staffId, templateId) =>
-    fetchApi(`/staff/${staffId}/custom-forms/${templateId}/send-for-signature`, { method: 'POST' }),
+  sendCustomFormForSignature: (staffId, templateId, orgFieldValues) =>
+    fetchApi(`/staff/${staffId}/custom-forms/${templateId}/send-for-signature`, {
+      method: 'POST',
+      body: JSON.stringify({ org_field_values: orgFieldValues || {} })
+    }),
   signatureEnvelopes: (staffId) => fetchApi(`/staff/${staffId}/signature-envelopes`),
   signatureEnvelopeFileUrl: (staffId, envelopeId, kind) =>
     `${API}/staff/${staffId}/signature-envelopes/${envelopeId}/${kind}`

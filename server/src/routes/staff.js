@@ -1214,7 +1214,8 @@ router.post('/:id/custom-forms/:templateId/send-for-signature', requireAdminOrDe
       orgId: profile.organisation_id,
       providerProfileId: profile.id,
       staff: staffFull,
-      templateId: req.params.templateId
+      templateId: req.params.templateId,
+      orgFieldValues: req.body?.org_field_values || {}
     });
     res.status(201).json(result);
   } catch (err) {
@@ -1222,7 +1223,7 @@ router.post('/:id/custom-forms/:templateId/send-for-signature', requireAdminOrDe
     if (['TEMPLATE_NOT_FOUND', 'TEMPLATE_FILE_MISSING'].includes(code)) {
       return res.status(404).json({ error: err.message, code });
     }
-    if (['ORG_SIGNATORY_MISSING', 'SIGNER_EMAIL_MISSING', 'DOCUSEAL_NOT_ENABLED'].includes(code)) {
+    if (['ORG_FIELDS_REQUIRED', 'ORG_SIGNATORY_MISSING', 'SIGNER_EMAIL_MISSING', 'DOCUSEAL_NOT_ENABLED'].includes(code)) {
       return res.status(400).json({ error: err.message, code });
     }
     console.error('[custom-forms send-for-signature]', err);

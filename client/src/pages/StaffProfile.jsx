@@ -72,6 +72,9 @@ export default function StaffProfile() {
   const [customForms, setCustomForms] = useState([]);
   const [sendingFormId, setSendingFormId] = useState(null);
   const [selectedCustomFormId, setSelectedCustomFormId] = useState('');
+  const [orgFields, setOrgFields] = useState([]);
+  const [orgFieldValues, setOrgFieldValues] = useState({});
+  const [loadingOrgFields, setLoadingOrgFields] = useState(false);
   const [downloadingEnvelope, setDownloadingEnvelope] = useState(null);
   const [policyFiles, setPolicyFiles] = useState([]);
   const [policyUploading, setPolicyUploading] = useState(false);
@@ -249,12 +252,35 @@ export default function StaffProfile() {
     }
   };
 
+  useEffect(() => {
+    if (!selectedCustomFormId) {
+      setOrgFields([]);
+      setOrgFieldValues({});
+      return;
+    }
+    setLoadingOrgFields(true);
+    forms
+      .getSigningLayout(selectedCustomFormId)
+      .then((res) => {
+        const fields = (res?.signing_layout?.fields || []).filter((f) => f.signer === 'org');
+        setOrgFields(fields);
+        setOrgFieldValues({});
+      })
+      .catch(() => {
+        setOrgFields([]);
+        setOrgFieldValues({});
+      })
+      .finally(() => setLoadingOrgFields(false));
+  }, [selectedCustomFormId]);
+
   const handleSendCustomFormForSignature = async () => {
     if (!selectedCustomFormId) return;
     setSendingFormId(selectedCustomFormId);
     try {
-      await staff.sendCustomFormForSignature(id, selectedCustomFormId);
+      await staff.sendCustomFormForSignature(id, selectedCustomFormId, orgFieldValues);
       setSelectedCustomFormId('');
+      setOrgFields([]);
+      setOrgFieldValues({});
       load();
     } catch (err) {
       alert(err.message || 'Could not send form for signature');
@@ -979,27 +1005,82 @@ export default function StaffProfile() {
           then the staff member signs), plus onboarding pack documents sent for signature.
         </p>
         {customForms.length > 0 && (
-          <div className="forms-add-row" style={{ marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <select
-              className="form-input"
-              value={selectedCustomFormId}
-              onChange={(e) => setSelectedCustomFormId(e.target.value)}
-              style={{ maxWidth: 260 }}
-            >
-              <option value="">Select a custom form…</option>
-              {customForms.map((t) => (
-                <option key={t.id} value={t.id}>{t.display_name}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={!selectedCustomFormId || !!sendingFormId || !data?.email}
-              onClick={handleSendCustomFormForSignature}
-              title={!data?.email ? 'Staff member needs an email address' : undefined}
-            >
-              {sendingFormId ? 'Sending…' : 'Send for signature'}
-            </button>
+          <div style={{ marginBottom: '1rem' }}>
+            <div className="forms-add-row" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+              <select
+                className="form-input"
+                value={selectedCustomFormId}
+                onChange={(e) => setSelectedCustomFormId(e.target.value)}
+                style={{ maxWidth: 260 }}
+              >
+                <option value="">Select a custom form…</option>
+                {customForms.map((t) => (
+                  <option key={t.id} value={t.id}>{t.display_name}</option>
+                ))}
+              </select>
+              {!orgFields.length && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={!selectedCustomFormId || !!sendingFormId || !data?.email || loadingOrgFields}
+                  onClick={handleSendCustomFormForSignature}
+                  title={!data?.email ? 'Staff member needs an email address' : undefined}
+                >
+                  {sendingFormId ? 'Sending…' : loadingOrgFields ? 'Loading…' : 'Send for signature'}
+                </button>
+              )}
+            </div>
+            {orgFields.length > 0 && (
+              <div style={{ marginTop: '0.75rem', padding: '0.75rem', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem' }}>
+                  This form has organisation fields — fill them in now. The staff member only receives the form
+                  once you&apos;ve done this.
+                </p>
+                {orgFields.map((f) => {
+                  const key = f.api_id || f.id;
+                  const label = `${f.label || key}${f.required ? ' *' : ''}`;
+                  return (
+                    <label key={key} className="forms-label" style={{ display: 'block', marginBottom: '0.5rem' }}>
+                      {label}
+                      {f.type === 'checkbox' ? (
+                        <input
+                          type="checkbox"
+                          checked={!!orgFieldValues[key]}
+                          onChange={(e) => setOrgFieldValues((prev) => ({ ...prev, [key]: e.target.checked }))}
+                        />
+                      ) : f.type === 'signature' ? (
+                        <input
+                          className="form-input"
+                          placeholder="Type your full name to sign"
+                          value={orgFieldValues[key] || ''}
+                          onChange={(e) => setOrgFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                        />
+                      ) : (
+                        <input
+                          type={f.type === 'date' ? 'date' : 'text'}
+                          className="form-input"
+                          value={orgFieldValues[key] || ''}
+                          onChange={(e) => setOrgFieldValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                        />
+                      )}
+                    </label>
+                  );
+                })}
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={
+                    !!sendingFormId ||
+                    !data?.email ||
+                    orgFields.some((f) => f.required && !String(orgFieldValues[f.api_id || f.id] || '').trim())
+                  }
+                  onClick={handleSendCustomFormForSignature}
+                  title={!data?.email ? 'Staff member needs an email address' : undefined}
+                >
+                  {sendingFormId ? 'Sending…' : 'Save & send to staff member'}
+                </button>
+              </div>
+            )}
           </div>
         )}
         {signatureEnvelopes.length === 0 ? (

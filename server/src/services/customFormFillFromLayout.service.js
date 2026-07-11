@@ -1,6 +1,10 @@
 /**
- * Pre-fill custom form PDFs from signing_layout text/date fields (intake merge data).
- * Signature and checkbox fields are left for DocuSeal overlays.
+ * Pre-fill custom form PDFs from signing_layout text/date/signature fields (intake or
+ * admin-supplied merge data). Checkbox fields are left for DocuSeal overlays. Signature fields
+ * are embedded as an image only when the merge value is a data URL; a plain string is drawn as
+ * a typed-name signature (this codebase's existing convention, e.g. staff policy acknowledgement).
+ * Untouched when no merge value exists for a signature field (the normal case for
+ * DocuSeal-collected signatures), so existing participant/library-master flows are unaffected.
  */
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -20,6 +24,17 @@ function toPdfSafeText(str) {
     .replace(/[^\t\n\r\x20-\x7E]/g, '?');
 }
 
+function dataUrlToImageBuffer(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string') return null;
+  const match = dataUrl.match(/^data:image\/(png|jpe?g);base64,(.+)$/);
+  if (!match) return null;
+  try {
+    return { format: match[1].startsWith('jp') ? 'jpg' : 'png', buffer: Buffer.from(match[2], 'base64') };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * @param {Buffer} pdfBytes
  * @param {import('./formTemplateSigningLayout.service.js').SigningLayout} signingLayout
@@ -33,7 +48,7 @@ export async function fillCustomFormFromLayout(pdfBytes, signingLayout, mergeDat
   const fields = signingLayout?.fields || [];
 
   for (const f of fields) {
-    if (!f || f.type === 'signature' || f.type === 'checkbox') continue;
+    if (!f || f.type === 'checkbox') continue;
     const page = pages[(f.page || 1) - 1];
     if (!page) continue;
 
@@ -44,6 +59,22 @@ export async function fillCustomFormFromLayout(pdfBytes, signingLayout, mergeDat
 
     const pageH = page.getHeight();
     const rectY = pageH - f.y - f.height;
+
+    if (f.type === 'signature') {
+      const image = dataUrlToImageBuffer(value);
+      if (image) {
+        try {
+          const embedded = image.format === 'jpg' ? await doc.embedJpg(image.buffer) : await doc.embedPng(image.buffer);
+          page.drawImage(embedded, { x: f.x, y: rectY, width: f.width, height: f.height });
+        } catch (err) {
+          console.warn('[customFormFillFromLayout] could not embed signature image:', err.message);
+        }
+        continue;
+      }
+      if (!String(value).trim()) continue; // no signature supplied — leave for DocuSeal overlay as before
+      // Typed-name signature (falls through to the text-draw below).
+    }
+
     if (fieldCoversUnderlying(f)) {
       page.drawRectangle({
         x: f.x,
