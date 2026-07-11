@@ -235,6 +235,15 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
     envelopeId
   });
 
+  // Staff onboarding envelopes never get a signature_envelopes row (see nativeSignature.service.js's
+  // comment), so track it here instead — this is what makes it visible on Staff Profile.
+  if (workflow === 'staff_onboarding' && staff?.id) {
+    db.prepare(
+      `INSERT INTO staff_signature_envelopes (id, envelope_id, staff_id, org_id, display_name, status, sent_at)
+       VALUES (?, ?, ?, ?, ?, 'sent', datetime('now'))`
+    ).run(uuidv4(), envelopeId, staff.id, orgId, docNames);
+  }
+
   return prepared.map((p) => ({
     master_id: p.master.id,
     envelope_id: envelopeId,

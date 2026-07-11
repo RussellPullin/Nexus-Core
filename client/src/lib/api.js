@@ -814,7 +814,13 @@ export const staff = {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-  }
+  },
+  getCustomForms: (staffId) => fetchApi(`/staff/${staffId}/custom-forms`),
+  sendCustomFormForSignature: (staffId, templateId) =>
+    fetchApi(`/staff/${staffId}/custom-forms/${templateId}/send-for-signature`, { method: 'POST' }),
+  signatureEnvelopes: (staffId) => fetchApi(`/staff/${staffId}/signature-envelopes`),
+  signatureEnvelopeFileUrl: (staffId, envelopeId, kind) =>
+    `${API}/staff/${staffId}/signature-envelopes/${envelopeId}/${kind}`
 };
 
 export const shifts = {

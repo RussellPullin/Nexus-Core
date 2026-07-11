@@ -952,6 +952,34 @@ try {
     if (!e.message?.includes('already exists')) console.warn('signature_envelope_signers migration:', e.message);
   }
 
+  // envelope_id deliberately has no FK to signature_envelopes, for the same reason as
+  // signature_envelope_documents above: staff-only envelopes (library-master sends and the
+  // custom-staff-template send path) never create a signature_envelopes row.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS staff_signature_envelopes (
+        id TEXT PRIMARY KEY,
+        envelope_id TEXT NOT NULL UNIQUE,
+        staff_id TEXT NOT NULL,
+        org_id TEXT,
+        form_template_id TEXT,
+        display_name TEXT,
+        status TEXT DEFAULT 'sent',
+        sent_at TEXT DEFAULT (datetime('now')),
+        completed_at TEXT,
+        signed_document_path TEXT,
+        certificate_document_path TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_staff_signature_envelopes_staff ON staff_signature_envelopes(staff_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_staff_signature_envelopes_envelope ON staff_signature_envelopes(envelope_id)');
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('staff_signature_envelopes migration:', e.message);
+  }
+
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS audit_events (

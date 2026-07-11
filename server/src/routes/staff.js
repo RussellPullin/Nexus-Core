@@ -15,6 +15,7 @@ import { ensureProviderProfile, assertStaffOnboardingReady } from '../services/o
 import { orchestrateStaffOnboarding } from '../services/staffOnboardingOrchestrator.service.js';
 import { generateStaffContractBuffers } from '../services/staffContractFill.service.js';
 import { prepareSplitOnboardingSend } from '../services/onboardingDocumentSend.service.js';
+import { sendStaffCustomTemplateForSignature } from '../services/staffCustomFormSignature.service.js';
 import { VALID_STAFF_ONBOARDING_ROLES } from '../../../shared/onboardingDocumentContext.js';
 import { getStaffIntakeFieldMap, mergeStaffIntakeForProfile } from '../services/staffOnboardingSync.service.js';
 import { STAFF_ONBOARDING_FIELD_DEFS } from '../../../shared/onboardingFieldRegistry.js';
@@ -1175,6 +1176,60 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
   }
 });
 
+// GET /api/staff/:id/custom-forms — active custom staff_onboarding templates available to send
+router.get('/:id/custom-forms', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(req.params.id, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.json({ templates: [] });
+    const rows = db
+      .prepare(
+        `SELECT id, display_name FROM form_templates
+         WHERE provider_profile_id = ? AND workflow = 'staff_onboarding' AND form_type = 'custom' AND is_active = 1
+         ORDER BY display_name ASC`
+      )
+      .all(profile.id);
+    res.json({ templates: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/staff/:id/custom-forms/:templateId/send-for-signature
+router.post('/:id/custom-forms/:templateId/send-for-signature', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const staffId = req.params.id;
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(staffId, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+    if (!s.email?.trim()) return res.status(400).json({ error: 'Staff member has no email address' });
+
+    const { profile } = getProviderProfileForUser(req.session.user.id);
+    if (!profile) return res.status(400).json({ error: 'No organisation set for your account.' });
+
+    const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId);
+    const result = await sendStaffCustomTemplateForSignature({
+      orgId: profile.organisation_id,
+      providerProfileId: profile.id,
+      staff: staffFull,
+      templateId: req.params.templateId
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    const code = err?.code;
+    if (['TEMPLATE_NOT_FOUND', 'TEMPLATE_FILE_MISSING'].includes(code)) {
+      return res.status(404).json({ error: err.message, code });
+    }
+    if (['ORG_SIGNATORY_MISSING', 'SIGNER_EMAIL_MISSING', 'DOCUSEAL_NOT_ENABLED'].includes(code)) {
+      return res.status(400).json({ error: err.message, code });
+    }
+    console.error('[custom-forms send-for-signature]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id/employment-contract', requireAdminOrDelegate, async (req, res) => {
   try {
     const staffId = req.params.id;
@@ -1210,6 +1265,50 @@ router.get('/:id/employment-contract', requireAdminOrDelegate, async (req, res) 
     return res.send(docx);
   } catch (err) {
     console.error('[staff employment-contract]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/staff/:id/signature-envelopes — native e-sign envelopes for this staff member
+// (custom-template sends from Phase 2, and library-master onboarding-pack sends)
+router.get('/:id/signature-envelopes', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(req.params.id, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+    const rows = db
+      .prepare('SELECT * FROM staff_signature_envelopes WHERE staff_id = ? ORDER BY sent_at DESC')
+      .all(req.params.id);
+    const envelopes = rows.map((r) => ({
+      ...r,
+      signers: db
+        .prepare('SELECT name, email, role, sequence, status FROM signature_envelope_signers WHERE envelope_id = ? ORDER BY sequence ASC')
+        .all(r.envelope_id)
+    }));
+    res.json({ envelopes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const envelopesRootDir = resolve(projectRoot, 'data', 'onboarding', 'envelopes');
+
+// GET /api/staff/:id/signature-envelopes/:envelopeId/:kind(signed|certificate) — download signed PDF / certificate
+router.get('/:id/signature-envelopes/:envelopeId/:kind(signed|certificate)', requireAdminOrDelegate, (req, res) => {
+  try {
+    const row = db
+      .prepare('SELECT * FROM staff_signature_envelopes WHERE envelope_id = ? AND staff_id = ?')
+      .get(req.params.envelopeId, req.params.id);
+    if (!row) return res.status(404).json({ error: 'Envelope not found' });
+    const filePath = req.params.kind === 'signed' ? row.signed_document_path : row.certificate_document_path;
+    if (!filePath) return res.status(404).json({ error: 'Document not ready yet.' });
+    const absPath = resolve(filePath);
+    if (!absPath.startsWith(envelopesRootDir)) return res.status(403).json({ error: 'Invalid path' });
+    if (!existsSync(absPath)) return res.status(404).json({ error: 'File not found' });
+    const safeName = `${req.params.kind}-${(row.display_name || 'document').replace(/[^a-zA-Z0-9-_]+/g, '_')}.pdf`;
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.sendFile(absPath);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

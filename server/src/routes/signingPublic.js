@@ -426,11 +426,15 @@ router.post('/:token/submit', async (req, res) => {
     const allSigners = db.prepare('SELECT * FROM signature_envelope_signers WHERE envelope_id = ? ORDER BY sequence ASC').all(signer.envelope_id);
     const certificateBuffer = await buildCertificatePdf({ envelopeId: signer.envelope_id, signers: allSigners, documentHash });
 
+    let signedDocPath = null;
+    let certificateDocPath = null;
     try {
       if (documents[0]?.document_path) {
         const dir = dirname(documents[0].document_path);
-        writeFileSync(join(dir, 'signed.pdf'), signedBuffer);
-        writeFileSync(join(dir, 'certificate.pdf'), certificateBuffer);
+        signedDocPath = join(dir, 'signed.pdf');
+        certificateDocPath = join(dir, 'certificate.pdf');
+        writeFileSync(signedDocPath, signedBuffer);
+        writeFileSync(certificateDocPath, certificateBuffer);
       }
     } catch (err) {
       console.warn('[signingPublic] failed to persist a durable copy of signed/certificate PDFs:', err?.message);
@@ -452,8 +456,17 @@ router.post('/:token/submit', async (req, res) => {
         providerName: 'native'
       });
     } else {
-      // Library-master onboarding-pack path — no signature_envelopes row to update; the signed
-      // PDF/certificate are already persisted above and every signer row is already 'signed'.
+      // Library-master / custom-staff-template onboarding-pack path — no signature_envelopes row
+      // to update. If this envelope has a staff-only tracking row (see staff_signature_envelopes),
+      // record completion there so it shows up on Staff Profile.
+      const staffLink = db.prepare('SELECT id FROM staff_signature_envelopes WHERE envelope_id = ?').get(signer.envelope_id);
+      if (staffLink) {
+        db.prepare(
+          `UPDATE staff_signature_envelopes
+           SET status = 'signed', completed_at = datetime('now'), signed_document_path = ?, certificate_document_path = ?, updated_at = datetime('now')
+           WHERE envelope_id = ?`
+        ).run(signedDocPath, certificateDocPath, signer.envelope_id);
+      }
       createAuditEvent({
         actorType: 'external_signer',
         actorId: signer.id,
@@ -497,6 +510,12 @@ router.post('/:token/decline', (req, res) => {
         `INSERT INTO signature_events (id, envelope_id, provider_name, event_type, event_timestamp, payload_json)
          VALUES (?, ?, 'native', 'agreement_declined', datetime('now'), ?)`
       ).run(randomUUID(), signer.envelope_id, JSON.stringify({ signer_id: signer.id, email: signer.email, reason }));
+    }
+
+    const staffLink = db.prepare('SELECT id FROM staff_signature_envelopes WHERE envelope_id = ?').get(signer.envelope_id);
+    if (staffLink) {
+      db.prepare(`UPDATE staff_signature_envelopes SET status = 'declined', updated_at = datetime('now') WHERE envelope_id = ?`)
+        .run(signer.envelope_id);
     }
 
     createAuditEvent({

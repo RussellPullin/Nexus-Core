@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import ServiceAgreementTemplateEditor from '../components/ServiceAgreementTemplateEditor';
 import ActivityRiskAssessmentsPanel from '../components/ActivityRiskAssessmentsPanel';
+import CustomFormTemplatesPanel from '../components/CustomFormTemplatesPanel';
 
 const CATEGORY_LABELS = {
   policy:    'Policy',
@@ -208,6 +209,12 @@ export default function FormsPage() {
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
         <h2 className="forms-section-heading">Activity risk assessments</h2>
         <ActivityRiskAssessmentsPanel onMessage={(msg) => setMessage(msg)} />
+      </section>
+
+      {/* ── 3. Custom forms ───────────────────────────────────────────────── */}
+      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
+        <h2 className="forms-section-heading">Custom forms</h2>
+        <CustomFormTemplatesPanel onMessage={(msg, isError) => setMessage(isError ? `Error: ${msg}` : msg)} />
       </section>
 
       {/* ── 4. NDIS Document Library ─────────────────────────────────────── */}

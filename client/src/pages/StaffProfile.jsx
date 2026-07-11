@@ -20,7 +20,6 @@ import {
   payRateFormFieldsFromRow,
   payRateOverridesFromFormFields,
 } from '../lib/payrollRates.js';
-import { NEXUS_CORE_SIGN_COMING_SOON_TITLE } from '../lib/featureFlags.js';
 
 const PAYROLL_SHIFT_STATUSES = ['completed', 'completed_by_admin'];
 
@@ -69,6 +68,11 @@ export default function StaffProfile() {
   const [staffReadiness, setStaffReadiness] = useState(null);
   const [contractDownloading, setContractDownloading] = useState(false);
   const [complianceDocs, setComplianceDocs] = useState([]);
+  const [signatureEnvelopes, setSignatureEnvelopes] = useState([]);
+  const [customForms, setCustomForms] = useState([]);
+  const [sendingFormId, setSendingFormId] = useState(null);
+  const [selectedCustomFormId, setSelectedCustomFormId] = useState('');
+  const [downloadingEnvelope, setDownloadingEnvelope] = useState(null);
   const [policyFiles, setPolicyFiles] = useState([]);
   const [policyUploading, setPolicyUploading] = useState(false);
   const [renewalSending, setRenewalSending] = useState(false);
@@ -107,12 +111,16 @@ export default function StaffProfile() {
       setAssignments(assignList || []);
       setParticipantsList(partList || []);
       setStaffShifts(shiftsList || []);
-      const [compList, policyList] = await Promise.all([
+      const [compList, policyList, envelopesRes, customFormsRes] = await Promise.all([
         staff.getComplianceDocuments(id).catch(() => []),
-        forms.policyFilesList().catch(() => [])
+        forms.policyFilesList().catch(() => []),
+        staff.signatureEnvelopes(id).catch(() => null),
+        staff.getCustomForms(id).catch(() => null)
       ]);
       setComplianceDocs(Array.isArray(compList) ? compList : []);
       setPolicyFiles(Array.isArray(policyList) ? policyList : []);
+      setSignatureEnvelopes(envelopesRes?.envelopes || []);
+      setCustomForms(customFormsRes?.templates || []);
       setEditForm(staffEditFormFromRow(staffData));
       // Phase 3: pull readiness so the run-onboarding button can show why it's disabled.
       staff
@@ -238,6 +246,30 @@ export default function StaffProfile() {
       alert(err.message || 'Could not download contract');
     } finally {
       setContractDownloading(false);
+    }
+  };
+
+  const handleSendCustomFormForSignature = async () => {
+    if (!selectedCustomFormId) return;
+    setSendingFormId(selectedCustomFormId);
+    try {
+      await staff.sendCustomFormForSignature(id, selectedCustomFormId);
+      setSelectedCustomFormId('');
+      load();
+    } catch (err) {
+      alert(err.message || 'Could not send form for signature');
+    } finally {
+      setSendingFormId(null);
+    }
+  };
+
+  const handleDownloadSignatureEnvelope = async (envelopeId, kind) => {
+    setDownloadingEnvelope(`${envelopeId}:${kind}`);
+    try {
+      const url = staff.signatureEnvelopeFileUrl(id, envelopeId, kind);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } finally {
+      setDownloadingEnvelope(null);
     }
   };
 
@@ -658,9 +690,9 @@ export default function StaffProfile() {
             >
               {intakeViewing ? 'Loading…' : 'View intake form'}
             </button>
-            <button type="button" className="btn btn-primary" disabled title={NEXUS_CORE_SIGN_COMING_SOON_TITLE}>
-              Sign with Nexus Core
-            </button>
+            <a href="#forms-agreements" className="btn btn-primary">
+              Forms &amp; agreements{signatureEnvelopes.length ? ` (${signatureEnvelopes.length})` : ''}
+            </a>
           </div>
         </div>
 
@@ -937,6 +969,92 @@ export default function StaffProfile() {
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      <div className="card" id="forms-agreements" style={{ marginBottom: '1.5rem' }}>
+        <h3>Forms &amp; agreements</h3>
+        <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+          Custom forms sent to this staff member for native e-signature (organisation fields are filled in first,
+          then the staff member signs), plus onboarding pack documents sent for signature.
+        </p>
+        {customForms.length > 0 && (
+          <div className="forms-add-row" style={{ marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <select
+              className="form-input"
+              value={selectedCustomFormId}
+              onChange={(e) => setSelectedCustomFormId(e.target.value)}
+              style={{ maxWidth: 260 }}
+            >
+              <option value="">Select a custom form…</option>
+              {customForms.map((t) => (
+                <option key={t.id} value={t.id}>{t.display_name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={!selectedCustomFormId || !!sendingFormId || !data?.email}
+              onClick={handleSendCustomFormForSignature}
+              title={!data?.email ? 'Staff member needs an email address' : undefined}
+            >
+              {sendingFormId ? 'Sending…' : 'Send for signature'}
+            </button>
+          </div>
+        )}
+        {signatureEnvelopes.length === 0 ? (
+          <p>No forms sent for signature yet.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Form</th>
+                  <th>Status</th>
+                  <th>Waiting on</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {signatureEnvelopes.map((env) => {
+                  const waitingOn = (env.signers || []).find((s) => s.status !== 'signed');
+                  return (
+                    <tr key={env.id}>
+                      <td>{env.display_name || env.form_template_id || 'Form'}</td>
+                      <td style={{ textTransform: 'capitalize' }}>{env.status}</td>
+                      <td>
+                        {env.status === 'signed' ? '—' : waitingOn ? `${waitingOn.name || waitingOn.email} (${waitingOn.role})` : '—'}
+                      </td>
+                      <td>
+                        {env.status === 'signed' ? (
+                          <span style={{ display: 'flex', gap: '0.4rem' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={downloadingEnvelope === `${env.envelope_id}:signed`}
+                              onClick={() => handleDownloadSignatureEnvelope(env.envelope_id, 'signed')}
+                            >
+                              View signed
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={downloadingEnvelope === `${env.envelope_id}:certificate`}
+                              onClick={() => handleDownloadSignatureEnvelope(env.envelope_id, 'certificate')}
+                            >
+                              Certificate
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="forms-muted" style={{ fontSize: '0.8rem' }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

@@ -572,6 +572,25 @@ CREATE TABLE IF NOT EXISTS signature_envelope_signers (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Staff-only envelope tracking (envelope_id has no FK to signature_envelopes for the same reason
+-- as signature_envelope_documents above: staff-only sends never create a signature_envelopes row).
+CREATE TABLE IF NOT EXISTS staff_signature_envelopes (
+  id TEXT PRIMARY KEY,
+  envelope_id TEXT NOT NULL UNIQUE,
+  staff_id TEXT NOT NULL,
+  org_id TEXT,
+  form_template_id TEXT,
+  display_name TEXT,
+  status TEXT DEFAULT 'sent', -- sent | signed | declined
+  sent_at TEXT DEFAULT (datetime('now')),
+  completed_at TEXT,
+  signed_document_path TEXT,
+  certificate_document_path TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+);
+
 -- Immutable audit events for onboarding/compliance
 CREATE TABLE IF NOT EXISTS audit_events (
   id TEXT PRIMARY KEY,
