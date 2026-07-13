@@ -184,12 +184,18 @@ export default function ShiftsPage() {
   );
 
   const handleCleanupDuplicates = async () => {
-    if (!confirm('Delete past empty ($0 / no-notes) shifts that have a completed, noted shift for the same worker and client at the same time? This permanently removes the empty duplicates and cannot be undone.')) return;
+    if (!confirm('Remove duplicate shifts?\n\n• Extra copies of the same client + worker + date + time (keeps one scheduled shift)\n• Past empty shifts when a completed shift already exists for that slot\n\nThis permanently deletes the extras.')) return;
     setCleaningDuplicates(true);
     try {
       const r = await shifts.cleanupDuplicates();
       const n = r?.deleted ?? 0;
-      alert(n === 0 ? 'No empty duplicate shifts found.' : `Removed ${n} empty duplicate shift${n !== 1 ? 's' : ''}.`);
+      const sameSlot = r?.same_slot_removed ?? 0;
+      const unworked = r?.unworked_removed ?? 0;
+      alert(
+        n === 0
+          ? 'No duplicate shifts found.'
+          : `Removed ${n} duplicate shift${n !== 1 ? 's' : ''} (${sameSlot} same-slot, ${unworked} empty past).`
+      );
       if (n > 0) load({ silent: true });
     } catch (e) {
       alert(e.message || 'Failed to clean up duplicates');
@@ -767,8 +773,8 @@ export default function ShiftsPage() {
           <button type="button" className="btn btn-secondary" onClick={handleRepairInvoiceLinks} disabled={repairingInvoiceLinks} title="Remove invoice badges from shifts linked to the wrong invoice (e.g. after Shifter re-import changed participant or date)">
             {repairingInvoiceLinks ? 'Repairing…' : 'Fix stale invoice links'}
           </button>
-          <button type="button" className="btn btn-secondary" onClick={handleCleanupDuplicates} disabled={cleaningDuplicates} title="Delete past, empty ($0 / no notes) shifts when a completed shift with notes exists for the same worker and client at the same time">
-            {cleaningDuplicates ? 'Cleaning…' : 'Clean up empty duplicates'}
+          <button type="button" className="btn btn-secondary" onClick={handleCleanupDuplicates} disabled={cleaningDuplicates} title="Remove extra copies of the same client + worker + date + time, and past empty shifts when a completed shift exists">
+            {cleaningDuplicates ? 'Cleaning…' : 'Clean up duplicate shifts'}
           </button>
         </div>
       </div>

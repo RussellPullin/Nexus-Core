@@ -13,7 +13,7 @@ import {
 } from '../lib/onedriveExcelSyncHint.js';
 import { pullShiftsFromExcel } from '../services/excelPull.service.js';
 import { processShifts } from '../services/webhookProcessor.js';
-import { cleanupDuplicateUnworkedShifts } from '../services/shiftDuplicateCleanup.service.js';
+import { cleanupAllDuplicateShifts } from '../services/shiftDuplicateCleanup.service.js';
 import { repairInvalidShiftInvoiceLinks } from '../services/shiftInvoiceLink.service.js';
 import { mirrorAllShiftsToNexusSupabase } from '../services/nexusPublicShiftsSync.service.js';
 import { pullShiftsFromShifterSupabase, debugShifterShiftsByOrg } from '../services/shifterPull.service.js';
@@ -165,7 +165,7 @@ router.post('/from-excel', async (req, res) => {
 
     // Remove empty, past-date duplicate shifts left over when a worker logged a separate
     // (noted) shift for the same client+time instead of completing the scheduled one.
-    const cleanup = cleanupDuplicateUnworkedShifts({
+    const cleanup = cleanupAllDuplicateShifts({
       orgId,
       log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
     });
@@ -273,7 +273,7 @@ router.post('/from-shifter', async (req, res) => {
 
     // Remove empty, past-date duplicate shifts left over when a worker logged a separate
     // (noted) shift for the same client+time instead of completing the scheduled one.
-    const cleanup = cleanupDuplicateUnworkedShifts({
+    const cleanup = cleanupAllDuplicateShifts({
       orgId,
       log: (msg, data) => console.log('[sync-from-shifter]', msg, data || ''),
     });

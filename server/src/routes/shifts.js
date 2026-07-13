@@ -25,7 +25,8 @@ import {
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 import { recordSuppressedShifterShiftId } from '../services/shiftImportSuppression.service.js';
 import { hardDeleteShiftRow } from '../services/shiftHardDelete.service.js';
-import { cleanupDuplicateUnworkedShifts } from '../services/shiftDuplicateCleanup.service.js';
+import { cleanupAllDuplicateShifts } from '../services/shiftDuplicateCleanup.service.js';
+import { findShiftBySameSlot, normalizeShiftDateTimePrefix } from '../services/progressNoteMatcher.js';
 import { SHIFT_INVOICE_RESOLVE_SQL, findInvalidShiftInvoiceLinks, repairInvalidShiftInvoiceLinks, shiftImportIdentityMatches } from '../services/shiftInvoiceLink.service.js';
 
 const router = Router();
@@ -308,7 +309,8 @@ router.get('/duplicates', (req, res) => {
     `).all(...params);
 
     const normalize = (str) => (str || '').trim().toLowerCase();
-    const slotKey = (s) => `${normalize(s.participant_name)}|${normalize(s.staff_name)}|${(s.start_time || '').slice(0, 19)}`;
+    const slotKey = (s) =>
+      `${normalize(s.participant_name)}|${normalize(s.staff_name)}|${normalizeShiftDateTimePrefix(s.start_time)}`;
     const bySlot = {};
     for (const s of allShifts) {
       const key = slotKey(s);
@@ -480,6 +482,15 @@ router.post('/', async (req, res) => {
     } else {
       resolvedStaffId = null;
     }
+
+    if (!isOpen && resolvedStaffId && start_time && end_time) {
+      const existingSlot = findShiftBySameSlot(participant_id, resolvedStaffId, start_time, end_time);
+      if (existingSlot) {
+        const shift = getShiftByIdForUser(existingSlot.id, userId);
+        return res.status(200).json(shift || existingSlot);
+      }
+    }
+
     const id = uuidv4();
     db.prepare(`
       INSERT INTO shifts (id, participant_id, staff_id, start_time, end_time, notes, status, recurring_group_id)
@@ -696,7 +707,7 @@ router.post('/:id/hard-delete', requireAdminOrDelegate, (req, res) => {
 router.post('/cleanup-duplicates', requireAdminOrDelegate, (req, res) => {
   try {
     const orgId = getProviderOrgIdForUser(req.session?.user?.id) || null;
-    const result = cleanupDuplicateUnworkedShifts({
+    const result = cleanupAllDuplicateShifts({
       orgId,
       log: (msg, data) => console.log('[shifts cleanup-duplicates]', msg, data || ''),
     });

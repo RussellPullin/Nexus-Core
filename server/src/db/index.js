@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
 import { seedNexusFormTemplateMastersIfNeeded } from '../services/nexusFormTemplateSeed.service.js';
 import { repairInvalidShiftInvoiceLinks } from '../services/shiftInvoiceLink.service.js';
+import { cleanupAllDuplicateShifts } from '../services/shiftDuplicateCleanup.service.js';
 import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
@@ -2581,6 +2582,21 @@ try {
     }
   } catch (e) {
     console.warn('shift invoice link repair:', e.message);
+  }
+
+  try {
+    const dupes = cleanupAllDuplicateShifts({
+      log: (msg, data) => {
+        if (data?.count > 0) console.log(`[migration] ${msg}`, data);
+      },
+    });
+    if (dupes.deleted > 0) {
+      console.log(
+        `[migration] removed ${dupes.deleted} duplicate shift(s) on startup (${dupes.same_slot_removed || 0} same-slot, ${dupes.unworked_removed || 0} unworked)`,
+      );
+    }
+  } catch (e) {
+    console.warn('duplicate shift cleanup:', e.message);
   }
 } catch (err) {
   console.warn('Migration error:', err.message);

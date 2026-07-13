@@ -161,6 +161,16 @@ function getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime, dayType) {
 }
 
 /**
+ * Normalise shift datetime for slot matching (handles 'YYYY-MM-DD HH:MM' vs 'YYYY-MM-DDTHH:MM').
+ * @param {string | null | undefined} t
+ * @returns {string}
+ */
+export function normalizeShiftDateTimePrefix(t) {
+  if (t == null) return '';
+  return String(t).trim().replace(' ', 'T').slice(0, 16);
+}
+
+/**
  * Find an existing shift by its external (Shifter/Progress Notes App) shift ID.
  * Used to avoid creating duplicates when the same import is run twice.
  * @param {string} shifterShiftId - shift_id from the app/Excel
@@ -204,15 +214,32 @@ export function findShiftByShifterShiftIdForParticipant(shifterShiftId, particip
  */
 export function findShiftByParticipantStaffAndStartTime(participantId, staffId, startDateTime) {
   if (!participantId || !staffId || !startDateTime || typeof startDateTime !== 'string') return null;
-  const s = String(startDateTime).trim().slice(0, 16);
-  if (s.length < 16) return null;
-  const pattern = `${s}%`;
+  const prefix = normalizeShiftDateTimePrefix(startDateTime);
+  if (prefix.length < 16) return null;
+  const pattern = `${prefix}%`;
   return db.prepare(`
     SELECT * FROM shifts
     WHERE participant_id = ? AND staff_id = ?
-      AND start_time LIKE ?
+      AND REPLACE(start_time, ' ', 'T') LIKE ?
     ORDER BY start_time LIMIT 1
   `).get(participantId, staffId, pattern) || null;
+}
+
+/**
+ * Same participant, staff, start, and end (wall clock to the minute).
+ * @param {string} participantId
+ * @param {string} staffId
+ * @param {string} startDateTime
+ * @param {string} endDateTime
+ * @returns {object | null}
+ */
+export function findShiftBySameSlot(participantId, staffId, startDateTime, endDateTime) {
+  const byStart = findShiftByParticipantStaffAndStartTime(participantId, staffId, startDateTime);
+  if (!byStart) return null;
+  if (normalizeShiftDateTimePrefix(byStart.end_time) !== normalizeShiftDateTimePrefix(endDateTime)) {
+    return null;
+  }
+  return byStart;
 }
 
 /**
@@ -245,21 +272,23 @@ export function findMatchingShift({ participantId, staffId, supportDate, startTi
     // merges into the existing (usually scheduled) shift instead of creating a double-up.
   }
 
-  const dayStart = `${supportDate}T00:00:00`;
-  const dayEnd = `${supportDate}T23:59:59`;
   const shifts = db.prepare(`
     SELECT * FROM shifts
     WHERE participant_id = ? AND staff_id = ?
-      AND start_time >= ? AND start_time <= ?
+      AND substr(REPLACE(start_time, ' ', 'T'), 1, 10) = ?
       AND status IN ('scheduled', 'completed', 'completed_by_admin')
-  `).all(participantId, staffId, dayStart, dayEnd);
+  `).all(participantId, staffId, supportDate);
 
   const noteStartMins = parseTimeToMinutes(startTime);
   const noteEndMins = parseTimeToMinutes(endTime);
 
   for (const shift of shifts) {
-    const shiftStart = shift.start_time ? parseTimeToMinutes(shift.start_time.slice(11, 16)) : null;
-    const shiftEnd = shift.end_time ? parseTimeToMinutes(shift.end_time.slice(11, 16)) : null;
+    const shiftStart = shift.start_time
+      ? parseTimeToMinutes(String(shift.start_time).replace(' ', 'T').slice(11, 16))
+      : null;
+    const shiftEnd = shift.end_time
+      ? parseTimeToMinutes(String(shift.end_time).replace(' ', 'T').slice(11, 16))
+      : null;
     if (shiftStart == null || shiftEnd == null) continue;
     if (noteStartMins != null && noteEndMins != null) {
       const overlap = Math.min(shiftEnd, noteEndMins) - Math.max(shiftStart, noteStartMins);
