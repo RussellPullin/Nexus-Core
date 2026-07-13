@@ -173,6 +173,28 @@ export function findShiftByShifterShiftId(shifterShiftId) {
 }
 
 /**
+ * Find a shift by Shifter id scoped to the same participant and staff (avoids cross-client reuse).
+ * @param {string} shifterShiftId
+ * @param {string} participantId
+ * @param {string} staffId
+ * @returns {object | null}
+ */
+export function findShiftByShifterShiftIdForParticipant(shifterShiftId, participantId, staffId) {
+  if (!shifterShiftId || !participantId || !staffId) return null;
+  const id = String(shifterShiftId).trim();
+  return (
+    db
+      .prepare(
+        `
+      SELECT * FROM shifts
+      WHERE shifter_shift_id = ? AND participant_id = ? AND staff_id = ?
+    `,
+      )
+      .get(id, participantId, staffId) || null
+  );
+}
+
+/**
  * Find a shift by same participant, staff, and start date+time (to the minute).
  * Used on import to prevent duplicates when Excel has no stable ID or same shift appears twice.
  * @param {string} participantId

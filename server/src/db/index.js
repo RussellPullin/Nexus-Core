@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
 import { seedNexusFormTemplateMastersIfNeeded } from '../services/nexusFormTemplateSeed.service.js';
+import { repairInvalidShiftInvoiceLinks } from '../services/shiftInvoiceLink.service.js';
 import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
@@ -950,6 +951,34 @@ try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_signature_envelope_signers_token ON signature_envelope_signers(token_hash)');
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('signature_envelope_signers migration:', e.message);
+  }
+
+  // envelope_id deliberately has no FK to signature_envelopes, for the same reason as
+  // signature_envelope_documents above: staff-only envelopes (library-master sends and the
+  // custom-staff-template send path) never create a signature_envelopes row.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS staff_signature_envelopes (
+        id TEXT PRIMARY KEY,
+        envelope_id TEXT NOT NULL UNIQUE,
+        staff_id TEXT NOT NULL,
+        org_id TEXT,
+        form_template_id TEXT,
+        display_name TEXT,
+        status TEXT DEFAULT 'sent',
+        sent_at TEXT DEFAULT (datetime('now')),
+        completed_at TEXT,
+        signed_document_path TEXT,
+        certificate_document_path TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_staff_signature_envelopes_staff ON staff_signature_envelopes(staff_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_staff_signature_envelopes_envelope ON staff_signature_envelopes(envelope_id)');
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('staff_signature_envelopes migration:', e.message);
   }
 
   try {
@@ -2539,6 +2568,19 @@ try {
     }
   } catch (e) {
     console.warn('future-completed shift correction:', e.message);
+  }
+
+  try {
+    const repaired = repairInvalidShiftInvoiceLinks({
+      log: (msg, data) => {
+        if (data?.count > 0) console.log(`[migration] ${msg}`, data);
+      },
+    });
+    if (repaired.cleared > 0) {
+      console.log(`[migration] cleared ${repaired.cleared} stale shift invoice link(s) on startup`);
+    }
+  } catch (e) {
+    console.warn('shift invoice link repair:', e.message);
   }
 } catch (err) {
   console.warn('Migration error:', err.message);

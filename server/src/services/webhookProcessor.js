@@ -10,9 +10,10 @@ import {
   parseSupportDate,
   buildDateTime,
   findMatchingShift,
-  findShiftByShifterShiftId,
+  findShiftByShifterShiftIdForParticipant,
   findShiftByParticipantStaffAndStartTime
 } from './progressNoteMatcher.js';
+import { canImportMergeIntoShift } from './shiftInvoiceLink.service.js';
 import { recordEvent } from './learningEvent.service.js';
 import { updateAggregatesForShift } from './featureStore.service.js';
 import { scheduleMirrorShiftToNexusSupabase } from './nexusPublicShiftsSync.service.js';
@@ -272,8 +273,8 @@ export function processShifts(shiftsArray, options = {}) {
 
         const expensesVal = Number.isFinite(expenses) ? expenses : 0;
         if (skipUnchanged && shiftId) {
-          const byShifter = findShiftByShifterShiftId(shiftId);
-          if (byShifter && byShifter.participant_id === participant.id && byShifter.staff_id === staff.id) {
+          const byShifter = findShiftByShifterShiftIdForParticipant(shiftId, participant.id, staff.id);
+          if (byShifter) {
             const byTime = findShiftByParticipantStaffAndStartTime(participant.id, staff.id, startDateTime);
             if (!byTime || byTime.id === byShifter.id) {
               const latestPn = db
@@ -312,7 +313,7 @@ export function processShifts(shiftsArray, options = {}) {
         // Prevent duplicate shifts: 1) same participant + staff + date + time (primary), 2) same import ID, 3) scheduled shift overlap.
         let matchingShift = findShiftByParticipantStaffAndStartTime(participant.id, staff.id, startDateTime);
         if (!matchingShift && shiftId) {
-          matchingShift = findShiftByShifterShiftId(shiftId);
+          matchingShift = findShiftByShifterShiftIdForParticipant(shiftId, participant.id, staff.id);
         }
         if (!matchingShift) {
           matchingShift = findMatchingShift({
@@ -323,6 +324,18 @@ export function processShifts(shiftsArray, options = {}) {
             endTime: finishTime,
             shiftId: shiftId || undefined
           });
+        }
+        if (matchingShift && !canImportMergeIntoShift(matchingShift, {
+          participantId: participant.id,
+          staffId: staff.id,
+          startDateTime,
+        })) {
+          log('Import would overwrite billed shift with different participant/day — creating new shift', {
+            shiftId,
+            existing_shift_id: matchingShift.id,
+            billing_invoice_id: matchingShift.billing_invoice_id,
+          });
+          matchingShift = null;
         }
 
         // Completion gate (pull sources only): never turn a scheduled-but-unworked shift into a
@@ -387,11 +400,20 @@ export function processShifts(shiftsArray, options = {}) {
               );
             }
           } else {
+            const participantChanged = String(matchingShift.participant_id) !== String(participant.id);
+            const staffChanged = String(matchingShift.staff_id) !== String(staff.id);
+            const existingDay = String(matchingShift.start_time || '').slice(0, 10);
+            const incomingDay = String(startDateTime || '').slice(0, 10);
+            const dateChanged = existingDay && incomingDay && existingDay !== incomingDay;
+            const clearBilling =
+              matchingShift.billing_invoice_id &&
+              (participantChanged || staffChanged || dateChanged);
             // Update existing shift (full refresh when re-imported so participant/staff/times stay in sync)
             db.prepare(`
               UPDATE shifts SET
                 participant_id = ?, staff_id = ?, start_time = ?, end_time = ?,
                 status = ?, notes = ?, expenses = ?, shifter_shift_id = ?,
+                billing_invoice_id = CASE WHEN ? THEN NULL ELSE billing_invoice_id END,
                 updated_at = datetime('now')
               WHERE id = ?
             `).run(
@@ -403,6 +425,7 @@ export function processShifts(shiftsArray, options = {}) {
               sessionDetails || null,
               expensesVal,
               shifterShiftId,
+              clearBilling ? 1 : 0,
               resolvedShiftId
             );
           }

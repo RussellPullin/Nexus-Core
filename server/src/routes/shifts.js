@@ -26,6 +26,7 @@ import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 import { recordSuppressedShifterShiftId } from '../services/shiftImportSuppression.service.js';
 import { hardDeleteShiftRow } from '../services/shiftHardDelete.service.js';
 import { cleanupDuplicateUnworkedShifts } from '../services/shiftDuplicateCleanup.service.js';
+import { SHIFT_INVOICE_RESOLVE_SQL, findInvalidShiftInvoiceLinks, repairInvalidShiftInvoiceLinks, shiftImportIdentityMatches } from '../services/shiftInvoiceLink.service.js';
 
 const router = Router();
 
@@ -72,11 +73,8 @@ function normalizeShiftTimeForCompare(t) {
   return String(t).replace(/^(\d{4}-\d{2}-\d{2}) /, '$1T');
 }
 
-/** Financial batch (billing_invoices) or legacy one-row-per-shift `invoices` table. */
-const SHIFT_INVOICE_RESOLVE = `
-  COALESCE(bi_inv.invoice_number, (SELECT inv_r.invoice_number FROM invoices inv_r WHERE inv_r.shift_id = s.id LIMIT 1)) AS invoice_number,
-  COALESCE(bi_inv.status, (SELECT inv_r.status FROM invoices inv_r WHERE inv_r.shift_id = s.id LIMIT 1)) AS invoice_status
-`;
+/** Financial batch (valid link only) or legacy one-row-per-shift `invoices` table. */
+const SHIFT_INVOICE_RESOLVE = SHIFT_INVOICE_RESOLVE_SQL;
 
 /** Shift row for API (incl. Financial + legacy resolved invoice), or undefined if not in tenant. */
 function getShiftByIdForUser(shiftId, userId) {
@@ -361,6 +359,37 @@ router.post('/suppress-shifter-id', requireAdminOrDelegate, (req, res) => {
   }
 });
 
+/**
+ * Find shifts showing a stale/wrong invoice link (e.g. after Shifter re-import reused a billed row).
+ * GET /api/shifts/invalid-invoice-links
+ */
+router.get('/invalid-invoice-links', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = getProviderOrgIdForUser(req.session?.user?.id) || null;
+    const items = findInvalidShiftInvoiceLinks({ orgId });
+    return res.json({ count: items.length, items });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Clear billing_invoice_id on shifts whose invoice link is invalid (wrong participant, date, etc.).
+ * POST /api/shifts/repair-invoice-links
+ */
+router.post('/repair-invoice-links', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = getProviderOrgIdForUser(req.session?.user?.id) || null;
+    const result = repairInvalidShiftInvoiceLinks({
+      orgId,
+      log: (msg, data) => console.log('[shifts repair-invoice-links]', msg, data || ''),
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id', (req, res) => {
   try {
     const userId = req.session?.user?.id;
@@ -520,22 +549,33 @@ router.put('/:id', async (req, res) => {
 
     const rgId = recurring_group_id !== undefined ? recurring_group_id : existing.recurring_group_id;
     const assigningFromOpen = wasOpen && nextStaffId && nextStaffId !== existing.staff_id;
+    const nextStart = start_time ?? existing.start_time;
+    const nextEnd = end_time ?? existing.end_time;
+    const clearBilling =
+      existing.billing_invoice_id &&
+      !shiftImportIdentityMatches(existing, {
+        participantId: nextParticipantId,
+        staffId: nextStaffId,
+        startDateTime: nextStart,
+      });
 
     db.prepare(`
       UPDATE shifts SET
         participant_id = ?, staff_id = ?, start_time = ?, end_time = ?, status = ?, notes = ?,
         recurring_group_id = ?,
+        billing_invoice_id = CASE WHEN ? THEN NULL ELSE billing_invoice_id END,
         updated_at = datetime('now'),
         roster_sent_at = NULL
       WHERE id = ?
     `).run(
       nextParticipantId,
       nextStaffId,
-      start_time ?? existing.start_time,
-      end_time ?? existing.end_time,
+      nextStart,
+      nextEnd,
       nextStatus,
       notes ?? existing.notes,
       rgId,
+      clearBilling ? 1 : 0,
       req.params.id
     );
 

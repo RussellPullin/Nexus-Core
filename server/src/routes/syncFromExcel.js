@@ -14,6 +14,7 @@ import {
 import { pullShiftsFromExcel } from '../services/excelPull.service.js';
 import { processShifts } from '../services/webhookProcessor.js';
 import { cleanupDuplicateUnworkedShifts } from '../services/shiftDuplicateCleanup.service.js';
+import { repairInvalidShiftInvoiceLinks } from '../services/shiftInvoiceLink.service.js';
 import { mirrorAllShiftsToNexusSupabase } from '../services/nexusPublicShiftsSync.service.js';
 import { pullShiftsFromShifterSupabase, debugShifterShiftsByOrg } from '../services/shifterPull.service.js';
 import { isShifterRemoteConfigured } from '../services/supabaseStaffShifter.service.js';
@@ -168,8 +169,12 @@ router.post('/from-excel', async (req, res) => {
       orgId,
       log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
     });
+    const invoiceRepair = repairInvalidShiftInvoiceLinks({
+      orgId,
+      log: (msg, data) => console.log('[sync-from-excel]', msg, data || ''),
+    });
 
-    log('Done', { ...result, duplicates_removed: cleanup.deleted });
+    log('Done', { ...result, duplicates_removed: cleanup.deleted, invoice_links_cleared: invoiceRepair.cleared });
 
     res.json({
       ok: true,
@@ -178,6 +183,7 @@ router.post('/from-excel', async (req, res) => {
       llm_used: !!llmUsed,
       ...result,
       duplicates_removed: cleanup.deleted,
+      invoice_links_cleared: invoiceRepair.cleared,
     });
   } catch (err) {
     console.error('[sync-from-excel]', err);
@@ -271,6 +277,10 @@ router.post('/from-shifter', async (req, res) => {
       orgId,
       log: (msg, data) => console.log('[sync-from-shifter]', msg, data || ''),
     });
+    const invoiceRepair = repairInvalidShiftInvoiceLinks({
+      orgId,
+      log: (msg, data) => console.log('[sync-from-shifter]', msg, data || ''),
+    });
 
     res.json({
       ok: true,
@@ -285,6 +295,7 @@ router.post('/from-shifter', async (req, res) => {
       skip_unchanged: skipUnchanged,
       ...result,
       duplicates_removed: cleanup.deleted,
+      invoice_links_cleared: invoiceRepair.cleared,
     });
   } catch (err) {
     console.error('[sync-from-shifter]', err);
