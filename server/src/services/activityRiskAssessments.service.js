@@ -11,18 +11,50 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { getDataRoot } from './formTemplatePath.service.js';
 import { tryPushParticipantDocument } from './orgOnedriveSync.service.js';
-import { bundledMasterPath, GENERIC_MASTER_FILENAME, fillActivityRiskPdfFields, listActivityRiskPdfFieldSchema, embedAdminSignatureInActivityRiskPdf, isActivityRiskAdminSignField } from './activityRiskAssessmentPdf.service.js';
+import {
+  bundledMasterPath,
+  GENERIC_MASTER_FILENAME,
+  fillActivityRiskPdfFields,
+  listActivityRiskPdfFieldSchema,
+  embedAdminSignatureInActivityRiskPdf,
+  isActivityRiskAdminSignField,
+  writeGenericActivityRiskMaster
+} from './activityRiskAssessmentPdf.service.js';
 
 const DEFAULT_ACTIVITY_NAME = 'Health & Safety Risk Assessment (blank)';
 
 export const RISK_ASSESSMENT_DOC_CATEGORY = 'Risk assessment';
 
-function masterPdfPath() {
+function activityRiskMasterPdfCandidates() {
   const bundled = bundledMasterPath();
   const dataRoot = join(getDataRoot(), 'forms', 'templates', 'activity-risk-assessment', 'master', GENERIC_MASTER_FILENAME);
+  return { bundled, dataRoot };
+}
+
+function masterPdfPath() {
+  const { bundled, dataRoot } = activityRiskMasterPdfCandidates();
   if (existsSync(bundled)) return bundled;
   if (existsSync(dataRoot)) return dataRoot;
   return null;
+}
+
+/** Generate the bundled master PDF (and copy to DATA_DIR) when missing — e.g. after deploy. */
+export async function ensureActivityRiskMasterPdf() {
+  const { bundled, dataRoot } = activityRiskMasterPdfCandidates();
+
+  if (!existsSync(bundled)) {
+    await writeGenericActivityRiskMaster(bundled);
+    console.log('[activity-risk] Generated master PDF at', bundled);
+  }
+
+  if (!existsSync(dataRoot) && existsSync(bundled)) {
+    mkdirSync(dirname(dataRoot), { recursive: true });
+    copyFileSync(bundled, dataRoot);
+    console.log('[activity-risk] Copied master PDF to', dataRoot);
+  }
+
+  clearActivityRiskFieldSchemaCache();
+  return masterPdfPath();
 }
 
 /** Re-copy the generic master onto all org activity templates (blank + named activities). */
@@ -275,7 +307,11 @@ function serializeFieldValues(fieldValues) {
 }
 
 async function masterPdfBuffer() {
-  const master = masterPdfPath();
+  let master = masterPdfPath();
+  if (!master) {
+    await ensureActivityRiskMasterPdf();
+    master = masterPdfPath();
+  }
   if (!master) throw new Error('Activity risk assessment master PDF is missing on the server.');
   return readFileSync(master);
 }

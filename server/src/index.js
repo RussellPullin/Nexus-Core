@@ -310,7 +310,14 @@ if (process.env.NODE_ENV === 'production') {
 
 // Start server on configured port only. In dev, auto-shifting ports can route
 // auth callbacks through a stale backend and cause token validation failures.
-function startServer(port) {
+async function startServer(port) {
+  try {
+    const { ensureActivityRiskMasterPdf } = await import('./services/activityRiskAssessments.service.js');
+    await ensureActivityRiskMasterPdf();
+  } catch (e) {
+    console.warn('[activity-risk] master PDF ensure failed:', e?.message);
+  }
+
   const server = app.listen(port, '0.0.0.0');
   server.on('listening', async () => {
     console.log(`[nexus] Server listening on port ${port}`);
@@ -370,7 +377,10 @@ function startServer(port) {
   });
 }
 
-startServer(PORT);
+startServer(PORT).catch((err) => {
+  console.error('[nexus] Server failed to start:', err?.message || err);
+  process.exit(1);
+});
 startLearningJobs();
 
 // SaaS billing jobs (only run if Supabase env is configured)
