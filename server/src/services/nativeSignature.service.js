@@ -23,7 +23,11 @@ import { sendEmailViaRelay } from './notification.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
-const envelopesDir = join(projectRoot, 'data', 'onboarding', 'envelopes');
+// Must respect DATA_DIR (the persistent Fly volume mount) like staff.js does — signed
+// documents/certificates written under projectRoot alone live in the container's ephemeral
+// image layer and are silently lost on every deploy.
+const dataDir = process.env.DATA_DIR || join(projectRoot, 'data');
+const envelopesDir = join(dataDir, 'onboarding', 'envelopes');
 
 function ensureEnvelopeDir(envelopeId) {
   const dir = join(envelopesDir, envelopeId);

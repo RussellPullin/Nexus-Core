@@ -1292,7 +1292,7 @@ router.get('/:id/signature-envelopes', requireAdminOrDelegate, (req, res) => {
   }
 });
 
-const envelopesRootDir = resolve(projectRoot, 'data', 'onboarding', 'envelopes');
+const envelopesRootDir = resolve(dataDir, 'onboarding', 'envelopes');
 
 // GET /api/staff/:id/signature-envelopes/:envelopeId/:kind(signed|certificate) — download signed PDF / certificate
 router.get('/:id/signature-envelopes/:envelopeId/:kind(signed|certificate)', requireAdminOrDelegate, (req, res) => {
