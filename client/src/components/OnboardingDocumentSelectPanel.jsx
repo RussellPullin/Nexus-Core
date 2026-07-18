@@ -66,6 +66,67 @@ function DocumentChecklist({ docs, selectedIds, toggleDoc, sending, contextLabel
   );
 }
 
+function AdminFieldInput({ field, value, onChange }) {
+  if (field.type === 'select') {
+    return (
+      <select className="form-input" value={value || ''} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Select…</option>
+        {(field.options || []).map((opt) => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <input
+      type={field.type === 'date' ? 'date' : 'text'}
+      className="form-input"
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
+/**
+ * One-document-at-a-time wizard for filling admin_fields declared on a document's manifest
+ * before it's sent for signature (e.g. remuneration rate, governing state).
+ */
+function AdminFieldsWizard({ docs, index, values, onChange, onBack, onNext, sending }) {
+  const doc = docs[index];
+  if (!doc) return null;
+  const missingRequired = (doc.admin_fields || []).some(
+    (f) => f.required && !String(values[doc.id]?.[f.key] || '').trim()
+  );
+  return (
+    <div>
+      <p className="forms-muted" style={{ marginTop: 0 }}>
+        Prepare document {index + 1} of {docs.length} before it's sent to the staff member.
+      </p>
+      <div style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: '0.75rem 1rem', marginBottom: '1rem' }}>
+        <h4 style={{ marginTop: 0 }}>{doc.display_name}</h4>
+        {(doc.admin_fields || []).map((f) => (
+          <label key={f.key} className="forms-label" style={{ display: 'block', marginBottom: '0.5rem' }}>
+            {f.label}{f.required ? ' *' : ''}
+            <AdminFieldInput
+              field={f}
+              value={values[doc.id]?.[f.key]}
+              onChange={(v) => onChange(doc.id, f.key, v)}
+            />
+          </label>
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+        <button type="button" className="btn btn-secondary" onClick={onBack} disabled={sending}>
+          Back
+        </button>
+        <button type="button" className="btn btn-primary" onClick={onNext} disabled={sending || missingRequired}>
+          {sending ? 'Sending…' : index === docs.length - 1 ? 'Send onboarding email' : 'Next'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Inline panel for choosing service type / staff role and onboarding pack documents.
  * Used on StaffProfile (inline) and wrapped by OnboardingDocumentSelectModal.
@@ -92,6 +153,9 @@ export default function OnboardingDocumentSelectPanel({
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [wizardDocs, setWizardDocs] = useState(null);
+  const [wizardIndex, setWizardIndex] = useState(0);
+  const [adminFieldValues, setAdminFieldValues] = useState({});
 
   const workflow = isParticipant ? 'participant_onboarding' : 'staff_onboarding';
   const busy = sending || externalSending;
@@ -153,19 +217,14 @@ export default function OnboardingDocumentSelectPanel({
     ? participantServiceTypeLabel(contextValue)
     : staffOnboardingRoleLabel(contextValue);
 
-  const handleSend = async () => {
-    if (selectedIds.size === 0 && !(includeExtraPdfs && showExtraPdfs && (extraPdfCount == null || extraPdfCount > 0))) {
-      const proceed = window.confirm(
-        'No documents selected. Send the onboarding email with just the form link and no attachments?'
-      );
-      if (!proceed) return;
-    }
+  const performSend = async (adminValues) => {
     setSending(true);
     setError('');
     try {
       const payload = {
         master_ids: [...selectedIds],
-        include_extra_pdfs: includeExtraPdfs
+        include_extra_pdfs: includeExtraPdfs,
+        admin_field_values: adminValues || {}
       };
       if (isParticipant) {
         payload.participant_service_type = contextValue;
@@ -173,11 +232,50 @@ export default function OnboardingDocumentSelectPanel({
         payload.staff_role = contextValue;
       }
       await onSend(payload);
+      setWizardDocs(null);
+      setWizardIndex(0);
+      setAdminFieldValues({});
     } catch (err) {
       setError(err.message || 'Could not send');
     } finally {
       setSending(false);
     }
+  };
+
+  const handleSend = async () => {
+    if (selectedIds.size === 0 && !(includeExtraPdfs && showExtraPdfs && (extraPdfCount == null || extraPdfCount > 0))) {
+      const proceed = window.confirm(
+        'No documents selected. Send the onboarding email with just the form link and no attachments?'
+      );
+      if (!proceed) return;
+    }
+    const docsNeedingInput = documents.filter((d) => selectedIds.has(d.id) && d.admin_fields?.length);
+    if (docsNeedingInput.length) {
+      setWizardDocs(docsNeedingInput);
+      setWizardIndex(0);
+      return;
+    }
+    await performSend({});
+  };
+
+  const handleWizardFieldChange = (docId, key, value) => {
+    setAdminFieldValues((prev) => ({ ...prev, [docId]: { ...(prev[docId] || {}), [key]: value } }));
+  };
+
+  const handleWizardNext = async () => {
+    if (wizardIndex < wizardDocs.length - 1) {
+      setWizardIndex((i) => i + 1);
+      return;
+    }
+    await performSend(adminFieldValues);
+  };
+
+  const handleWizardBack = () => {
+    if (wizardIndex === 0) {
+      setWizardDocs(null);
+      return;
+    }
+    setWizardIndex((i) => i - 1);
   };
 
   const sortedDocs = useMemo(
@@ -195,6 +293,20 @@ export default function OnboardingDocumentSelectPanel({
   );
 
   if (!active) return null;
+
+  if (wizardDocs) {
+    return (
+      <AdminFieldsWizard
+        docs={wizardDocs}
+        index={wizardIndex}
+        values={adminFieldValues}
+        onChange={handleWizardFieldChange}
+        onBack={handleWizardBack}
+        onNext={handleWizardNext}
+        sending={busy}
+      />
+    );
+  }
 
   return (
     <div>

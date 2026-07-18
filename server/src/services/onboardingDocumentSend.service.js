@@ -62,7 +62,8 @@ export async function sendOnboardingSignatureForms({
   staff = null,
   participant = null,
   signatureMode = null,
-  orgName = null
+  orgName = null,
+  adminFieldValuesByMasterId = {}
 }) {
   if (!formMasters?.length) return [];
   assertNativeSignatureReady(orgId);
@@ -74,7 +75,8 @@ export async function sendOnboardingSignatureForms({
     staff,
     participant,
     signatureMode: mode,
-    orgName
+    orgName,
+    adminFieldValuesByMasterId
   });
 }
 
@@ -91,7 +93,8 @@ export async function prepareSplitOnboardingSend({
   participant = null,
   includeExtraPdfs = true,
   signatureMode = null,
-  orgName = null
+  orgName = null,
+  adminFieldValuesByMasterId = {}
 }) {
   const split = resolveOnboardingSendSplit(orgId, workflow, masterIds);
   if (split.formMasters.length) {
@@ -113,7 +116,8 @@ export async function prepareSplitOnboardingSend({
     staff,
     participant,
     signatureMode,
-    orgName
+    orgName,
+    adminFieldValuesByMasterId
   });
 
   return {

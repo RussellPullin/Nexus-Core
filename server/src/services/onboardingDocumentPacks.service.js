@@ -102,7 +102,8 @@ export function listOnboardingPackDocumentsForSelection(orgId, workflow, { parti
       requires_signature: signatureCount > 0,
       participant_service_types: master.manifest.participant_service_types || ['all'],
       staff_roles: master.manifest.staff_roles || ['all'],
-      suggested: manifestMatchesOnboardingContext(master.manifest, ctx)
+      suggested: manifestMatchesOnboardingContext(master.manifest, ctx),
+      admin_fields: master.manifest.admin_fields || []
     };
   });
 }
@@ -130,8 +131,8 @@ export function validateOnboardingMasterIds(orgId, workflow, masterIds) {
  * Render a single branded library master to an email attachment.
  * @returns {Promise<{ filename: string, content: Buffer, contentType: string }|null>}
  */
-export async function renderLibraryMasterAttachment(master, orgId, { participant = null, staff = null } = {}) {
-  const rendered = renderLibraryDocument({ masterId: master.id, orgId, participant, staff });
+export async function renderLibraryMasterAttachment(master, orgId, { participant = null, staff = null, extra = {} } = {}) {
+  const rendered = renderLibraryDocument({ masterId: master.id, orgId, participant, staff, extra });
   let buf = rendered?.buffer;
   if (rendered?.needsAcroFormFill && buf) {
     buf = await fillAcroFormWithTokens(buf, rendered.tokens);

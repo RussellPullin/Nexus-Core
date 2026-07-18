@@ -1105,6 +1105,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
       return res.status(400).json({ error: 'invalid staff_role' });
     }
     const includeExtraPdfs = req.body?.include_extra_pdfs !== false;
+    const adminFieldValuesByMasterId = req.body?.admin_field_values || {};
 
     let allAttachments = [];
     let signatureRequests = [];
@@ -1116,7 +1117,8 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
         masterIds: Array.isArray(masterIds) ? masterIds : undefined,
         staff: staffFull,
         includeExtraPdfs,
-        orgName
+        orgName,
+        adminFieldValuesByMasterId
       });
       allAttachments = splitSend.policyAttachments;
       signatureRequests = splitSend.signatureRequests;

@@ -150,8 +150,9 @@ function resolvePrimaryRecipient({ workflow, staff, participant }) {
   };
 }
 
-async function prepareMasterDocument(master, orgId, workflow, { staff, participant }) {
-  const att = await renderLibraryMasterAttachment(master, orgId, { staff, participant });
+async function prepareMasterDocument(master, orgId, workflow, { staff, participant, adminFieldValuesByMasterId = {} }) {
+  const extra = adminFieldValuesByMasterId[master.id] || {};
+  const att = await renderLibraryMasterAttachment(master, orgId, { staff, participant, extra });
   if (!att?.content || att.contentType !== 'application/pdf') {
     throw new Error(`Could not render ${master.display_name || master.slug} as PDF for signature.`);
   }
@@ -172,11 +173,11 @@ async function prepareMasterDocument(master, orgId, workflow, { staff, participa
   };
 }
 
-async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, participant, orgName }) {
+async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, participant, orgName, adminFieldValuesByMasterId = {} }) {
   const recipient = resolvePrimaryRecipient({ workflow, staff, participant });
   const prepared = [];
   for (const master of packetMasters) {
-    prepared.push(await prepareMasterDocument(master, orgId, workflow, { staff, participant }));
+    prepared.push(await prepareMasterDocument(master, orgId, workflow, { staff, participant, adminFieldValuesByMasterId }));
   }
 
   let signers = prepared.find((p) => p.signers?.length)?.signers || null;
@@ -222,7 +223,7 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
       ? `${prepared[0].master.display_name || 'Form'} – ${recipient.name}`
       : `${orgName || 'Onboarding'} forms – ${recipient.name}`;
 
-  const externalEnvelopeId = await sendMultiDocumentAgreement(orgId, {
+  const sendResult = await sendMultiDocumentAgreement(orgId, {
     signers,
     title,
     subject: `Please sign: ${docNames}`,
@@ -234,6 +235,7 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
     })),
     envelopeId
   });
+  const externalEnvelopeId = sendResult?.envelopeId || envelopeId;
 
   // Staff onboarding envelopes never get a signature_envelopes row (see nativeSignature.service.js's
   // comment), so track it here instead — this is what makes it visible on Staff Profile.
@@ -264,7 +266,8 @@ export async function sendLibraryMastersForSignature({
   staff = null,
   participant = null,
   signatureMode = 'hybrid',
-  orgName = null
+  orgName = null,
+  adminFieldValuesByMasterId = {}
 }) {
   if (!formMasters?.length) return [];
   assertNativeSignatureReady(orgId);
@@ -272,7 +275,7 @@ export async function sendLibraryMastersForSignature({
   const packets = computeLibrarySignaturePackets(formMasters, signatureMode);
   const signatureRequests = [];
   for (const packet of packets) {
-    const results = await sendSignaturePacket(orgId, workflow, packet, { staff, participant, orgName });
+    const results = await sendSignaturePacket(orgId, workflow, packet, { staff, participant, orgName, adminFieldValuesByMasterId });
     signatureRequests.push(...results);
   }
   return signatureRequests;

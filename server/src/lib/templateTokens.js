@@ -67,6 +67,7 @@ export const STAFF_TOKEN_REGISTRY = Object.freeze([
   { key: 'staff.full_name', type: 'string' },
   { key: 'staff.email', type: 'string' },
   { key: 'staff.phone', type: 'string' },
+  { key: 'staff.address', type: 'string' },
   { key: 'staff.role', type: 'string' },
   { key: 'staff.employment_type', type: 'string' },
   { key: 'staff.hourly_rate', type: 'string' },

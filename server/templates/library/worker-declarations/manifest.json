@@ -10,8 +10,18 @@
   "placeholders": [
     "org.abn",
     "org.branding.logo_path",
-    "org.name"
+    "org.name",
+    "staff.full_name"
   ],
+  "signing_layout": {
+    "page_width": 595,
+    "page_height": 842,
+    "page_count": 4,
+    "fields": [
+      { "id": "staff-signature", "page": 3, "x": 36, "y": 590, "width": 230, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
+      { "id": "staff-date", "page": 3, "x": 315, "y": 590, "width": 150, "height": 20, "type": "date", "merge_key": "signature_date", "signer": "staff", "required": true }
+    ]
+  },
   "required_signer_role": "worker",
   "signature_count": 1,
   "renewal_days": 365,
