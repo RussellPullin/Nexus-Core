@@ -18,7 +18,7 @@
     "page_height": 842,
     "page_count": 1,
     "fields": [
-      { "id": "staff-signature", "page": 1, "x": 36, "y": 640, "width": 250, "height": 18, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true }
+      { "id": "staff-signature", "page": 1, "x": 36, "y": 629, "width": 250, "height": 18, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true }
     ]
   },
   "required_signer_role": "worker",

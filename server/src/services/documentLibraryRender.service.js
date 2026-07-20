@@ -80,6 +80,7 @@ function flattenStaff(s) {
     'staff.email': s.email || '',
     'staff.phone': s.phone || '',
     'staff.address': s.address || '',
+    'staff.supervisor_name': s.supervisor_name || '',
     'staff.role': s.role || '',
     'staff.employment_type': s.employment_type || '',
     'staff.hourly_rate': s.hourly_rate || '',
