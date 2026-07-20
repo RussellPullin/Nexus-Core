@@ -2510,6 +2510,12 @@ try {
     if (!riskRecordCols.some((c) => c.name === 'admin_signature_data')) {
       db.exec('ALTER TABLE activity_risk_assessment_records ADD COLUMN admin_signature_data TEXT');
     }
+    if (!riskRecordCols.some((c) => c.name === 'signature_envelope_id')) {
+      db.exec('ALTER TABLE activity_risk_assessment_records ADD COLUMN signature_envelope_id TEXT');
+    }
+    if (!riskRecordCols.some((c) => c.name === 'signed_document_path')) {
+      db.exec('ALTER TABLE activity_risk_assessment_records ADD COLUMN signed_document_path TEXT');
+    }
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('activity_risk_records admin sign migration:', e.message);
   }

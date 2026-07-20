@@ -311,8 +311,8 @@ export default function ActivityRiskAssessmentEditor({ recordId, onClose, onSave
             <h3 style={{ margin: 0 }}>Complete risk assessment</h3>
             <p className="forms-muted" style={{ margin: '0.35rem 0 0', fontSize: '0.9rem' }}>
               Fill in the form on the PDF layout below. Hazards ticked in Step 1 are copied into Step 3
-              automatically so you can add control measures. Pre-activity sign-off is completed by an admin via{' '}
-              <strong>Sign with Nexus Core</strong> after saving — not on this form.
+              automatically so you can add control measures. After saving, use{' '}
+              <strong>Sign with Nexus Core</strong> to open the built-in signing page for pre-activity sign-off.
             </p>
           </div>
           <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>

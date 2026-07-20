@@ -159,18 +159,18 @@ router.get('/records/:recordId/file', async (req, res) => {
   }
 });
 
-/** POST /api/activity-risk-assessments/records/:recordId/sign-admin — admin sign-off via Nexus Core */
+/** POST /api/activity-risk-assessments/records/:recordId/sign-admin — open native Nexus Core signing session */
 router.post('/records/:recordId/sign-admin', async (req, res) => {
   try {
     if (!req.session?.user) return res.status(401).json({ error: 'Not authenticated' });
     const orgId = orgIdForUser(req.session.user.id);
     if (!orgId) return res.status(400).json({ error: 'No organisation set for your account.' });
-    const signed = await signActivityRiskRecordByAdmin(orgId, req.params.recordId, {
+    const result = await signActivityRiskRecordByAdmin(orgId, req.params.recordId, {
       userId: req.session.user.id
     });
-    res.json(signed);
+    res.json(result);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: err.message, code: err.code });
   }
 });
 

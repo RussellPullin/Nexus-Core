@@ -20,6 +20,8 @@ import {
   isActivityRiskAdminSignField,
   writeGenericActivityRiskMaster
 } from './activityRiskAssessmentPdf.service.js';
+import { assertNativeSignatureReady } from './libraryDocumentSignature.service.js';
+import { sendMultiDocumentAgreement } from './nativeSignature.service.js';
 
 const DEFAULT_ACTIVITY_NAME = 'Health & Safety Risk Assessment (blank)';
 
@@ -368,6 +370,7 @@ export function listActivityRiskRecords(orgId) {
     .prepare(
       `SELECT r.id, r.organisation_id, r.template_id, r.title, r.field_values_json,
               r.created_by_user_id, r.updated_by_user_id, r.created_at, r.updated_at,
+              r.admin_signed_at, r.admin_signed_by_user_id, r.signature_envelope_id, r.signed_document_path,
               t.activity_name AS template_activity_name
        FROM activity_risk_assessment_records r
        JOIN activity_risk_assessment_templates t ON t.id = r.template_id
@@ -383,6 +386,7 @@ export function listActivityRiskRecords(orgId) {
       field_values,
       is_complete: recordHasFilledContent(stripAdminSignFieldsFromValues(field_values)),
       is_admin_signed: Boolean(row.admin_signed_at),
+      is_awaiting_signature: Boolean(row.signature_envelope_id) && !row.admin_signed_at,
       assignments,
       assignment_count: assignments.length
     };
@@ -482,6 +486,9 @@ export function deleteActivityRiskRecord(orgId, recordId) {
 export async function generateActivityRiskRecordPdfBuffer(orgId, recordId) {
   const record = getActivityRiskRecord(orgId, recordId);
   if (!record) throw new Error('Risk assessment not found.');
+  if (record.signed_document_path && existsSync(record.signed_document_path)) {
+    return readFileSync(record.signed_document_path);
+  }
   const blank = await masterPdfBuffer();
   let buffer = await fillActivityRiskPdfFields(blank, record.field_values);
   if (record.admin_signature_data) {
@@ -499,12 +506,78 @@ function stripAdminSignFieldsFromValues(fieldValues) {
   return next;
 }
 
+/** Build DocuSeal-shaped fields for pre-activity native sign-off from the master PDF schema. */
+async function buildActivityRiskPreActivitySignFields() {
+  const schema = await getActivityRiskFieldSchema();
+  const byName = new Map((schema || []).map((f) => [f.name, f]));
+  const ROLE = 'Organisation admin';
+  const fields = [];
+
+  const signature = byName.get('pre_activity_signature');
+  if (signature) {
+    fields.push({
+      name: 'pre_activity_signature',
+      type: 'signature',
+      role: ROLE,
+      required: true,
+      areas: [
+        {
+          x: signature.x,
+          y: signature.y,
+          w: signature.width,
+          h: signature.height,
+          page: (signature.pageIndex || 0) + 1
+        }
+      ]
+    });
+  }
+
+  const dateField = byName.get('pre_activity_date_prepared');
+  if (dateField) {
+    fields.push({
+      name: 'pre_activity_date_prepared',
+      type: 'date',
+      role: ROLE,
+      required: true,
+      areas: [
+        {
+          x: dateField.x,
+          y: dateField.y,
+          w: dateField.width,
+          h: dateField.height,
+          page: (dateField.pageIndex || 0) + 1
+        }
+      ]
+    });
+  }
+
+  for (const name of ['consent_yes', 'consent_na']) {
+    const cb = byName.get(name);
+    if (!cb) continue;
+    fields.push({
+      name,
+      type: 'checkbox',
+      role: ROLE,
+      required: false,
+      areas: [{ x: cb.x, y: cb.y, w: cb.width, h: cb.height, page: (cb.pageIndex || 0) + 1 }]
+    });
+  }
+
+  return fields;
+}
+
 /**
- * Apply organisation admin sign-off to the pre-activity section using Settings default signatory + user signature.
+ * Open a native Nexus Core signing session for the pre-activity sign-off.
+ * Returns a /sign/:token URL so the admin can sign in-app (no auto-stamp).
  */
-export async function signActivityRiskRecordByAdmin(orgId, recordId, { userId = null } = {}) {
+export async function sendActivityRiskRecordForNativeSignature(orgId, recordId, { userId = null } = {}) {
+  assertNativeSignatureReady(orgId);
+
   const record = getActivityRiskRecord(orgId, recordId);
   if (!record) throw new Error('Risk assessment not found.');
+  if (record.admin_signed_at) {
+    throw new Error('This assessment is already signed.');
+  }
 
   const contentValues = stripAdminSignFieldsFromValues(record.field_values);
   if (!recordHasFilledContent(contentValues)) {
@@ -513,52 +586,121 @@ export async function signActivityRiskRecordByAdmin(orgId, recordId, { userId = 
 
   const org = db
     .prepare(
-      `SELECT default_signatory_name, default_signatory_role
+      `SELECT default_signatory_name, default_signatory_role, default_signatory_email
        FROM organisations WHERE id = ?`
     )
     .get(orgId);
   const user = userId
-    ? db.prepare('SELECT name, signature_data FROM users WHERE id = ?').get(userId)
+    ? db.prepare('SELECT name, email FROM users WHERE id = ?').get(userId)
     : null;
 
   const signatoryName = String(org?.default_signatory_name || user?.name || '').trim();
   if (!signatoryName) {
     throw new Error('Set the default signatory name in Settings → Business before signing.');
   }
-
-  const signatureData = user?.signature_data || null;
-  if (!signatureData) {
-    throw new Error('Save your signature under Settings → Your signature before signing with Nexus Core.');
+  const signerEmail = String(org?.default_signatory_email || user?.email || '').trim();
+  if (!signerEmail) {
+    throw new Error('Set the default signatory email in Settings → Business, or sign in with an account that has an email.');
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const nextValues = {
+  const prefilled = {
     ...contentValues,
     pre_activity_prepared_by: signatoryName,
-    pre_activity_prepared_role: String(org?.default_signatory_role || '').trim(),
-    pre_activity_date_prepared: today,
-    pre_activity_signature: ''
+    pre_activity_prepared_role: String(org?.default_signatory_role || '').trim()
+  };
+
+  const blank = await masterPdfBuffer();
+  const pdfBuffer = await fillActivityRiskPdfFields(blank, prefilled);
+  const formFields = await buildActivityRiskPreActivitySignFields();
+  if (!formFields.some((f) => f.type === 'signature')) {
+    throw new Error('Could not locate the signature field on the risk assessment PDF. Regenerate the master PDF and try again.');
+  }
+
+  const envelopeId = uuidv4();
+  const filename = `activity-risk-${slugifyActivity(record.template_activity_name || record.title)}.pdf`;
+  const sendResult = await sendMultiDocumentAgreement(orgId, {
+    envelopeId,
+    notify: false,
+    title: `Activity risk assessment – ${record.template_activity_name || record.title}`,
+    signers: [
+      {
+        name: signatoryName,
+        email: signerEmail,
+        order: 0,
+        role: 'Organisation admin'
+      }
+    ],
+    documents: [
+      {
+        buffer: pdfBuffer,
+        filename,
+        formFields
+      }
+    ]
+  });
+
+  const rawToken = sendResult?.signers?.[0]?.raw_token;
+  if (!rawToken) throw new Error('Could not create a signing session.');
+
+  db.prepare(
+    `UPDATE activity_risk_assessment_records
+     SET field_values_json = ?,
+         signature_envelope_id = ?,
+         signed_document_path = NULL,
+         admin_signed_at = NULL,
+         admin_signed_by_user_id = NULL,
+         admin_signature_data = NULL,
+         updated_by_user_id = ?,
+         updated_at = datetime('now')
+     WHERE id = ? AND organisation_id = ?`
+  ).run(serializeFieldValues(prefilled), envelopeId, userId || null, recordId, orgId);
+
+  const baseUrl = (process.env.FRONTEND_BASE_URL || process.env.BASE_URL || '').replace(/\/$/, '');
+  const signingPath = `/sign/${rawToken}`;
+
+  return {
+    ...getActivityRiskRecord(orgId, recordId),
+    envelope_id: envelopeId,
+    signing_path: signingPath,
+    signing_url: baseUrl ? `${baseUrl}${signingPath}` : signingPath
+  };
+}
+
+/** @deprecated Use sendActivityRiskRecordForNativeSignature — kept as alias for the route. */
+export async function signActivityRiskRecordByAdmin(orgId, recordId, opts = {}) {
+  return sendActivityRiskRecordForNativeSignature(orgId, recordId, opts);
+}
+
+/**
+ * Called when the native /sign/:token flow completes for an activity risk envelope.
+ */
+export function markActivityRiskRecordSignedFromEnvelope(envelopeId, { signedDocumentPath = null, signedByUserId = null } = {}) {
+  if (!envelopeId) return false;
+  const row = db
+    .prepare(
+      `SELECT id, organisation_id, field_values_json FROM activity_risk_assessment_records WHERE signature_envelope_id = ?`
+    )
+    .get(envelopeId);
+  if (!row) return false;
+
+  const fieldValues = parseFieldValuesJson(row.field_values_json);
+  const today = new Date().toISOString().slice(0, 10);
+  const nextValues = {
+    ...fieldValues,
+    pre_activity_date_prepared: fieldValues.pre_activity_date_prepared || today
   };
 
   db.prepare(
     `UPDATE activity_risk_assessment_records
      SET field_values_json = ?,
          admin_signed_at = datetime('now'),
-         admin_signed_by_user_id = ?,
-         admin_signature_data = ?,
-         updated_by_user_id = ?,
+         admin_signed_by_user_id = COALESCE(?, admin_signed_by_user_id),
+         signed_document_path = COALESCE(?, signed_document_path),
          updated_at = datetime('now')
-     WHERE id = ? AND organisation_id = ?`
-  ).run(
-    serializeFieldValues(nextValues),
-    userId || null,
-    signatureData,
-    userId || null,
-    recordId,
-    orgId
-  );
+     WHERE id = ?`
+  ).run(serializeFieldValues(nextValues), signedByUserId || null, signedDocumentPath || null, row.id);
 
-  return getActivityRiskRecord(orgId, recordId);
+  return true;
 }
 
 /**

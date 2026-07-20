@@ -46,6 +46,15 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
     reload();
   }, [reload]);
 
+  // After signing in a new tab, refresh status when the user returns to this page.
+  useEffect(() => {
+    const awaiting = records.some((r) => r.is_awaiting_signature && !r.is_admin_signed);
+    if (!awaiting) return undefined;
+    const onFocus = () => reload();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [records, reload]);
+
   const recordsByTemplateId = useMemo(() => {
     const map = new Map();
     for (const record of records) {
@@ -163,11 +172,17 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
   const handleSignAsAdmin = async (record) => {
     setBusy(true);
     try {
-      await activityRiskAssessments.signRecordAsAdmin(record.id);
-      notify(`“${record.template_activity_name || record.title}” signed by admin.`);
+      const result = await activityRiskAssessments.signRecordAsAdmin(record.id);
+      const path = result?.signing_path || (result?.signing_url ? new URL(result.signing_url).pathname : null);
+      if (path) {
+        window.open(path, '_blank', 'noopener,noreferrer');
+        notify(`Signing opened for “${record.template_activity_name || record.title}”. Complete the signature, then return here.`);
+      } else {
+        notify('Signing session created, but no signing link was returned.', true);
+      }
       reload();
     } catch (err) {
-      notify(err.message || 'Could not sign assessment', true);
+      notify(err.message || 'Could not start signing', true);
     } finally {
       setBusy(false);
     }
@@ -229,6 +244,7 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
   const renderStatus = (record) => {
     if (!record) return <span className="forms-muted">Not started</span>;
     if (record.is_admin_signed) return <span style={{ color: '#166534' }}>Signed — ready to assign</span>;
+    if (record.is_awaiting_signature) return <span style={{ color: '#b45309' }}>Signature in progress</span>;
     if (record.is_complete) return <span style={{ color: '#b45309' }}>Awaiting admin signature</span>;
     return <span style={{ color: '#b45309' }}>In progress</span>;
   };
@@ -236,10 +252,10 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
   return (
     <div className="activity-risk-assessments-panel">
       <p className="forms-lede">
-        Complete a risk assessment <strong>once per activity</strong>, then have an admin sign it with Nexus Core
-        (using your saved signature and default signatory in{' '}
-        <Link to={`${prefix}/settings`}>Settings</Link>). After signing, assign the assessment to as many
-        participants as you need. Each participant gets their own copy in their file.
+        Complete a risk assessment <strong>once per activity</strong>, then click{' '}
+        <strong>Sign with Nexus Core</strong> to open the built-in signing page (default signatory from{' '}
+        <Link to={`${prefix}/settings`}>Settings → Business</Link>). After you sign and submit, assign the
+        assessment to as many participants as you need. Each participant gets their own copy in their file.
       </p>
 
       <form onSubmit={handleCreateTemplate} className="forms-add-row" style={{ marginBottom: '1rem', flexWrap: 'wrap' }}>
@@ -320,12 +336,12 @@ export default function ActivityRiskAssessmentsPanel({ onMessage }) {
                             disabled={busy || !record.is_complete}
                             title={
                               record.is_complete
-                                ? 'Sign pre-activity sign-off as admin via Nexus Core'
+                                ? 'Open Nexus Core signing to complete pre-activity sign-off'
                                 : 'Save the assessment before signing'
                             }
                             onClick={() => handleSignAsAdmin(record)}
                           >
-                            Sign with Nexus Core
+                            {record.is_awaiting_signature ? 'Open signing again' : 'Sign with Nexus Core'}
                           </button>
                         ) : null}
                         <button

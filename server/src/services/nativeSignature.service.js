@@ -276,7 +276,9 @@ export async function sendMultiDocumentAgreement(orgId, {
   signerEmail,
   title,
   documents,
-  envelopeId
+  envelopeId,
+  /** When false, create the session but do not email links (caller opens /sign/:token in-app). */
+  notify = true
 }) {
   if (!envelopeId) throw new Error('sendMultiDocumentAgreement requires options.envelopeId for the native signature service.');
 
@@ -293,7 +295,9 @@ export async function sendMultiDocumentAgreement(orgId, {
   });
 
   const signerRows = createSigners(envelopeId, signers, { name: signerName, email: signerEmail });
-  await notifySignersWithTokens(envelopeId, orgId, title || 'your documents', signerRows);
+  if (notify !== false) {
+    await notifySignersWithTokens(envelopeId, orgId, title || 'your documents', signerRows);
+  }
 
-  return envelopeId;
+  return { envelopeId, signers: signerRows };
 }

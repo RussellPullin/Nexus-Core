@@ -17,6 +17,7 @@ import { db } from '../db/index.js';
 import { getOrgRenderContext } from '../services/orgContext.service.js';
 import { sendEmailViaRelay } from '../services/notification.service.js';
 import { markEnvelopeCompleted, createAuditEvent } from '../services/onboarding.service.js';
+import { markActivityRiskRecordSignedFromEnvelope } from '../services/activityRiskAssessments.service.js';
 
 const router = Router();
 
@@ -467,6 +468,9 @@ router.post('/:token/submit', async (req, res) => {
            WHERE envelope_id = ?`
         ).run(signedDocPath, certificateDocPath, signer.envelope_id);
       }
+      markActivityRiskRecordSignedFromEnvelope(signer.envelope_id, {
+        signedDocumentPath: signedDocPath
+      });
       createAuditEvent({
         actorType: 'external_signer',
         actorId: signer.id,
