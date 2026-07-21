@@ -21,18 +21,77 @@
     "today_long"
   ],
   "admin_fields": [
-    { "key": "remuneration_rate", "label": "Hourly rate ($)", "type": "text", "required": true },
-    { "key": "pay_frequency", "label": "Pay frequency", "type": "select", "options": ["weekly", "fortnightly", "monthly"], "required": true },
-    { "key": "governing_state", "label": "Governing state", "type": "text", "required": true }
+    {
+      "key": "remuneration_rate",
+      "label": "Hourly rate ($)",
+      "type": "text",
+      "required": true
+    },
+    {
+      "key": "pay_frequency",
+      "label": "Pay frequency",
+      "type": "select",
+      "options": [
+        "weekly",
+        "fortnightly",
+        "monthly"
+      ],
+      "required": true
+    },
+    {
+      "key": "governing_state",
+      "label": "Governing state",
+      "type": "text",
+      "required": true
+    },
+    {
+      "key": "org_signature",
+      "label": "Organisation signature (type full name to sign)",
+      "type": "text",
+      "required": true
+    }
   ],
   "signing_layout": {
     "page_width": 595,
     "page_height": 842,
     "page_count": 3,
     "fields": [
-      { "id": "org-signature", "page": 3, "x": 71, "y": 178, "width": 180, "height": 20, "type": "signature", "merge_key": "org_signature", "signer": "org", "required": true },
-      { "id": "staff-signature", "page": 3, "x": 110, "y": 350, "width": 260, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
-      { "id": "staff-date", "page": 3, "x": 410, "y": 350, "width": 140, "height": 20, "type": "date", "merge_key": "signature_date", "signer": "staff", "required": true }
+      {
+        "id": "org-signature",
+        "page": 3,
+        "x": 71,
+        "y": 214,
+        "width": 180,
+        "height": 13,
+        "type": "signature",
+        "merge_key": "org_signature",
+        "signer": "org",
+        "required": true
+      },
+      {
+        "id": "staff-signature",
+        "page": 3,
+        "x": 110,
+        "y": 380,
+        "width": 260,
+        "height": 20,
+        "type": "signature",
+        "merge_key": "signature",
+        "signer": "staff",
+        "required": true
+      },
+      {
+        "id": "staff-date",
+        "page": 3,
+        "x": 410,
+        "y": 380,
+        "width": 140,
+        "height": 20,
+        "type": "date",
+        "merge_key": "signature_date",
+        "signer": "staff",
+        "required": true
+      }
     ]
   },
   "required_signer_role": "worker",
