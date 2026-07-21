@@ -54,6 +54,7 @@
       { "id": "medical-reason-no", "page": 2, "x": 72, "y": 512.6, "width": 16, "height": 18, "type": "checkbox", "merge_key": "medical_reason_no", "label": "Medical reason: No", "signer": "staff" },
       { "id": "medical-reason-details", "page": 2, "x": 36, "y": 545, "width": 520, "height": 25, "type": "text", "merge_key": "medical_reason_details", "label": "If yes, please give details", "signer": "staff", "fillable": true },
       { "id": "reasonable-actions-requested", "page": 2, "x": 36, "y": 595, "width": 520, "height": 50, "type": "text", "merge_key": "reasonable_actions_requested", "label": "Reasonable actions the organisation could take", "signer": "staff", "fillable": true },
+      { "id": "printed-name", "page": 4, "x": 36, "y": 504, "width": 300, "height": 16, "type": "text", "merge_key": "printed_name", "label": "Full name (please print)", "signer": "staff", "fillable": true, "required": true },
       { "id": "staff-signature", "page": 4, "x": 120, "y": 620, "width": 340, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
       { "id": "staff-date", "page": 4, "x": 498, "y": 620, "width": 80, "height": 20, "type": "date", "merge_key": "signature_date", "signer": "staff", "required": true }
     ]

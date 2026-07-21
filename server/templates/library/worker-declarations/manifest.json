@@ -17,17 +17,20 @@
   "signing_layout": {
     "page_width": 595,
     "page_height": 842,
-    "page_count": 4,
+    "page_count": 3,
     "fields": [
-      { "id": "staff-signature", "page": 3, "x": 36, "y": 557, "width": 230, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
-      { "id": "staff-date", "page": 3, "x": 315, "y": 557, "width": 150, "height": 20, "type": "date", "merge_key": "signature_date", "signer": "staff", "required": true },
-      { "id": "supervisor-signature", "page": 3, "x": 36, "y": 749, "width": 230, "height": 20, "type": "signature", "merge_key": "supervisor_signature", "label": "Supervisor signature", "signer": "org", "required": true },
-      { "id": "supervisor-date", "page": 3, "x": 315, "y": 749, "width": 150, "height": 20, "type": "date", "merge_key": "supervisor_signature_date", "label": "Supervisor signature date", "signer": "org", "required": true }
+      { "id": "staff-signature", "page": 2, "x": 36, "y": 555, "width": 230, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
+      { "id": "staff-date", "page": 2, "x": 315, "y": 555, "width": 150, "height": 20, "type": "date", "merge_key": "signature_date", "signer": "staff", "required": true },
+      { "id": "supervisor-signature", "page": 2, "x": 36, "y": 747, "width": 230, "height": 20, "type": "signature", "merge_key": "supervisor_signature", "label": "Supervisor signature", "signer": "org", "required": true },
+      { "id": "supervisor-date", "page": 2, "x": 315, "y": 747, "width": 150, "height": 20, "type": "date", "merge_key": "supervisor_signature_date", "label": "Supervisor signature date", "signer": "org", "required": true },
+      { "id": "worker-printed-name", "page": 2, "x": 36, "y": 595, "width": 230, "height": 16, "type": "text", "merge_key": "worker_printed_name", "label": "Worker's printed name", "signer": "staff", "fillable": true, "required": true },
+      { "id": "supervisor-printed-name", "page": 3, "x": 36, "y": 70, "width": 230, "height": 16, "type": "text", "merge_key": "supervisor_printed_name", "label": "Supervisor's printed name", "signer": "org", "required": true }
     ]
   },
   "admin_fields": [
     { "key": "supervisor_signature", "label": "Supervisor signature (type full name to sign)", "type": "text", "required": true },
-    { "key": "supervisor_signature_date", "label": "Date", "type": "date", "required": true }
+    { "key": "supervisor_signature_date", "label": "Date", "type": "date", "required": true },
+    { "key": "supervisor_printed_name", "label": "Supervisor's printed name", "type": "text", "required": true }
   ],
   "required_signer_role": "worker",
   "signature_count": 2,
