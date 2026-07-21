@@ -2,6 +2,7 @@
  * Split onboarding pack send: policy PDFs via email, signature forms via native e-signature.
  */
 
+import { db } from '../db/index.js';
 import {
   buildOnboardingAttachments,
   splitOnboardingMasters,
@@ -33,13 +34,23 @@ export function resolveOnboardingSendSplit(orgId, workflow, masterIds) {
 
 /**
  * Worker Declarations' body text lists the org's policies by name via a docxtemplater loop
- * (`{#policies}`) rather than a static hardcoded list, so it always matches what's actually
- * being sent alongside it in this send — not a generic pack-wide list.
+ * (`{#policies}`) rather than a static hardcoded list. The org's actual named policies
+ * (Privacy and Dignity Policy, Governance Policy, etc.) live in the separate `policy_library`
+ * pack, which is mutually exclusive with `staff_onboarding` — they're never selectable as pack
+ * documents. The only real mechanism that attaches policies to a staff send is the org's
+ * `company_policy_files` uploads (the same ones `buildOnboardingAttachments` emails as PDFs),
+ * so the declaration's list mirrors those rather than the onboarding-pack document selection.
  */
-function withWorkerDeclarationsPolicyList(split, adminFieldValuesByMasterId) {
+function withWorkerDeclarationsPolicyList(split, adminFieldValuesByMasterId, providerProfileId, includeExtraPdfs) {
   const workerDeclarations = split.formMasters.find((m) => m.slug === 'worker-declarations');
   if (!workerDeclarations) return adminFieldValuesByMasterId;
-  const policies = split.policyMasters.map((m) => m.display_name);
+  const policies =
+    includeExtraPdfs !== false && providerProfileId
+      ? db
+          .prepare(`SELECT display_name FROM company_policy_files WHERE provider_profile_id = ? ORDER BY display_name COLLATE NOCASE`)
+          .all(providerProfileId)
+          .map((row) => row.display_name)
+      : [];
   return {
     ...adminFieldValuesByMasterId,
     [workerDeclarations.id]: {
@@ -135,7 +146,7 @@ export async function prepareSplitOnboardingSend({
     participant,
     signatureMode,
     orgName,
-    adminFieldValuesByMasterId: withWorkerDeclarationsPolicyList(split, adminFieldValuesByMasterId)
+    adminFieldValuesByMasterId: withWorkerDeclarationsPolicyList(split, adminFieldValuesByMasterId, providerProfileId, includeExtraPdfs)
   });
 
   return {
