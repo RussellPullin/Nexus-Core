@@ -18,6 +18,7 @@
     "page_height": 842,
     "page_count": 1,
     "fields": [
+      { "id": "conflict-details", "page": 1, "x": 36, "y": 190, "width": 520, "height": 300, "type": "text", "merge_key": "conflict_details", "label": "Conflicts, interests, or matters (state NIL if none)", "signer": "staff", "fillable": true, "required": true },
       { "id": "staff-signature", "page": 1, "x": 36, "y": 635, "width": 250, "height": 18, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
       { "id": "printed-name", "page": 1, "x": 36, "y": 670, "width": 250, "height": 16, "type": "text", "merge_key": "printed_name", "label": "Full name (please print)", "signer": "staff", "fillable": true, "required": true }
     ]
