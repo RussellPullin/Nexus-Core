@@ -823,7 +823,9 @@ export const staff = {
     }),
   signatureEnvelopes: (staffId) => fetchApi(`/staff/${staffId}/signature-envelopes`),
   signatureEnvelopeFileUrl: (staffId, envelopeId, kind) =>
-    `${API}/staff/${staffId}/signature-envelopes/${envelopeId}/${kind}`
+    `${API}/staff/${staffId}/signature-envelopes/${envelopeId}/${kind}`,
+  deleteSignatureEnvelope: (staffId, envelopeId) =>
+    fetchApi(`/staff/${staffId}/signature-envelopes/${envelopeId}`, { method: 'DELETE' })
 };
 
 export const shifts = {

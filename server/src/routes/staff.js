@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
-import { readFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, unlinkSync, rmSync } from 'fs';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
@@ -1311,6 +1311,34 @@ router.get('/:id/signature-envelopes/:envelopeId/:kind(signed|certificate)', req
     const safeName = `${req.params.kind}-${(row.display_name || 'document').replace(/[^a-zA-Z0-9-_]+/g, '_')}.pdf`;
     res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
     res.sendFile(absPath);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/staff/:id/signature-envelopes/:envelopeId — remove a sent/completed envelope
+// (e.g. test sends) so it stops showing on the staff profile. Removes the DB rows and the
+// envelope's files on the persistent volume; does not touch a signer's in-progress turn beyond that.
+router.delete('/:id/signature-envelopes/:envelopeId', requireAdminOrDelegate, (req, res) => {
+  try {
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(req.params.id, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+    const row = db
+      .prepare('SELECT * FROM staff_signature_envelopes WHERE envelope_id = ? AND staff_id = ?')
+      .get(req.params.envelopeId, req.params.id);
+    if (!row) return res.status(404).json({ error: 'Envelope not found' });
+
+    db.prepare('DELETE FROM signature_envelope_signers WHERE envelope_id = ?').run(req.params.envelopeId);
+    db.prepare('DELETE FROM signature_envelope_documents WHERE envelope_id = ?').run(req.params.envelopeId);
+    db.prepare('DELETE FROM staff_signature_envelopes WHERE envelope_id = ? AND staff_id = ?').run(req.params.envelopeId, req.params.id);
+
+    const envelopeDir = resolve(envelopesRootDir, req.params.envelopeId);
+    if (envelopeDir.startsWith(envelopesRootDir) && existsSync(envelopeDir)) {
+      rmSync(envelopeDir, { recursive: true, force: true });
+    }
+
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

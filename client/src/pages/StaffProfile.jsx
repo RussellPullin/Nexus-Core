@@ -76,6 +76,7 @@ export default function StaffProfile() {
   const [orgFieldValues, setOrgFieldValues] = useState({});
   const [loadingOrgFields, setLoadingOrgFields] = useState(false);
   const [downloadingEnvelope, setDownloadingEnvelope] = useState(null);
+  const [deletingEnvelope, setDeletingEnvelope] = useState(null);
   const [policyFiles, setPolicyFiles] = useState([]);
   const [policyUploading, setPolicyUploading] = useState(false);
   const [renewalSending, setRenewalSending] = useState(false);
@@ -296,6 +297,19 @@ export default function StaffProfile() {
       window.open(url, '_blank', 'noopener,noreferrer');
     } finally {
       setDownloadingEnvelope(null);
+    }
+  };
+
+  const handleDeleteSignatureEnvelope = async (envelopeId, displayName) => {
+    if (!window.confirm(`Delete "${displayName || 'this form'}"? This removes it and its signed copy permanently.`)) return;
+    setDeletingEnvelope(envelopeId);
+    try {
+      await staff.deleteSignatureEnvelope(id, envelopeId);
+      load();
+    } catch (err) {
+      alert(err.message || 'Could not delete this form.');
+    } finally {
+      setDeletingEnvelope(null);
     }
   };
 
@@ -1107,28 +1121,38 @@ export default function StaffProfile() {
                         {env.status === 'signed' ? '—' : waitingOn ? `${waitingOn.name || waitingOn.email} (${waitingOn.role})` : '—'}
                       </td>
                       <td>
-                        {env.status === 'signed' ? (
-                          <span style={{ display: 'flex', gap: '0.4rem' }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              disabled={downloadingEnvelope === `${env.envelope_id}:signed`}
-                              onClick={() => handleDownloadSignatureEnvelope(env.envelope_id, 'signed')}
-                            >
-                              View signed
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              disabled={downloadingEnvelope === `${env.envelope_id}:certificate`}
-                              onClick={() => handleDownloadSignatureEnvelope(env.envelope_id, 'certificate')}
-                            >
-                              Certificate
-                            </button>
-                          </span>
-                        ) : (
-                          <span className="forms-muted" style={{ fontSize: '0.8rem' }}>—</span>
-                        )}
+                        <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                          {env.status === 'signed' ? (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                disabled={downloadingEnvelope === `${env.envelope_id}:signed`}
+                                onClick={() => handleDownloadSignatureEnvelope(env.envelope_id, 'signed')}
+                              >
+                                View signed
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                disabled={downloadingEnvelope === `${env.envelope_id}:certificate`}
+                                onClick={() => handleDownloadSignatureEnvelope(env.envelope_id, 'certificate')}
+                              >
+                                Certificate
+                              </button>
+                            </>
+                          ) : (
+                            <span className="forms-muted" style={{ fontSize: '0.8rem' }}>—</span>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={deletingEnvelope === env.envelope_id}
+                            onClick={() => handleDeleteSignatureEnvelope(env.envelope_id, env.display_name)}
+                          >
+                            {deletingEnvelope === env.envelope_id ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </span>
                       </td>
                     </tr>
                   );
