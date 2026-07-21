@@ -18,7 +18,8 @@
     "page_height": 842,
     "page_count": 1,
     "fields": [
-      { "id": "staff-signature", "page": 1, "x": 36, "y": 629, "width": 250, "height": 18, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true }
+      { "id": "staff-signature", "page": 1, "x": 36, "y": 635, "width": 250, "height": 18, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
+      { "id": "printed-name", "page": 1, "x": 36, "y": 670, "width": 250, "height": 16, "type": "text", "merge_key": "printed_name", "label": "Full name (please print)", "signer": "staff", "fillable": true, "required": true }
     ]
   },
   "required_signer_role": "worker",

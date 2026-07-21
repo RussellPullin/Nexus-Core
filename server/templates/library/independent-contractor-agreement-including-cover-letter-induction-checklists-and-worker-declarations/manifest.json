@@ -19,18 +19,20 @@
   ],
   "admin_fields": [
     { "key": "commencement_date", "label": "Commencement date", "type": "date", "required": true },
-    { "key": "end_date", "label": "End date (or 'Ongoing')", "type": "text", "required": true }
+    { "key": "end_date", "label": "End date (or 'Ongoing')", "type": "text", "required": true },
+    { "key": "org_signature", "label": "Organisation signature (type full name to sign)", "type": "text", "required": true }
   ],
   "signing_layout": {
     "page_width": 595,
     "page_height": 842,
     "page_count": 10,
     "fields": [
-      { "id": "staff-signature", "page": 1, "x": 200, "y": 538, "width": 200, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true }
+      { "id": "staff-signature", "page": 1, "x": 72, "y": 586, "width": 250, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
+      { "id": "org-signature", "page": 1, "x": 107, "y": 691, "width": 250, "height": 20, "type": "signature", "merge_key": "org_signature", "label": "Organisation signature", "signer": "org", "required": true }
     ]
   },
   "required_signer_role": "worker",
-  "signature_count": 1,
+  "signature_count": 2,
   "renewal_days": 365,
   "is_active": true,
   "staff_roles": [
