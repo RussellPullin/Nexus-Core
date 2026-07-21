@@ -49,7 +49,7 @@ export function getOrgRenderContext(orgId) {
   return {
     org: {
       id: row.id,
-      name: row.name || NOT_PROVIDED,
+      name: row.trading_name || row.legal_name || row.name || NOT_PROVIDED,
       legalName: row.legal_name || row.name || NOT_PROVIDED,
       tradingName: row.trading_name || row.name || NOT_PROVIDED,
       abn: row.abn || NOT_PROVIDED,
