@@ -271,7 +271,7 @@ async function flattenEnvelopeDocuments(envelopeId) {
       layout = { fields: [] };
     }
     for (const field of layout.fields || []) {
-      if (field.type === 'text') continue; // already pre-filled server-side before send
+      if (field.type === 'text' && !field.fillable) continue; // already pre-filled server-side before send
       const roleEntry = [...valuesBySigner.entries()].find(([role]) => ROLE_TO_LAYOUT_SIGNER[role] === field.signer);
       if (!roleEntry) continue;
       const [, signerData] = roleEntry;
@@ -354,7 +354,7 @@ router.post('/:token/submit', async (req, res) => {
         layout = { fields: [] };
       }
       for (const field of layout.fields || []) {
-        if (!field.required || field.type === 'text' || (layoutSignerKey && field.signer !== layoutSignerKey)) continue;
+        if (!field.required || (field.type === 'text' && !field.fillable) || (layoutSignerKey && field.signer !== layoutSignerKey)) continue;
         const key = field.merge_key || field.api_id || field.name;
         const value = field.type === 'signature' ? signatureData : mergedValues[key];
         if (value == null || value === '') {

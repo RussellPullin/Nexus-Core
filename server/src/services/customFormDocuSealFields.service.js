@@ -34,14 +34,17 @@ export function buildCustomFormDocuSealFields(signingLayout, ctx = {}) {
   const fields = [];
   for (const f of layout.fields) {
     const dbType = docuSealTypeForLayoutField(f);
-    // Text fields are pre-filled on the PDF; only interactive types go to DocuSeal.
-    if (dbType === 'text') continue;
+    // Text fields are pre-filled on the PDF and excluded, unless explicitly marked `fillable` —
+    // those are real interactive text boxes the signer types into (e.g. a collection form).
+    if (dbType === 'text' && !f.fillable) continue;
 
     fields.push({
       name: f.merge_key || f.api_id || f.id || dbType,
       type: dbType,
       role: roleFor(f),
       required: f.required === true || dbType === 'signature',
+      label: f.label || null,
+      fillable: dbType === 'text' && f.fillable === true,
       areas: [{ x: f.x, y: f.y, w: f.width, h: f.height, page: f.page || 1 }]
     });
   }

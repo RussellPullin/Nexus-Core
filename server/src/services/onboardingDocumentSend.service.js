@@ -32,6 +32,24 @@ export function resolveOnboardingSendSplit(orgId, workflow, masterIds) {
 }
 
 /**
+ * Worker Declarations' body text lists the org's policies by name via a docxtemplater loop
+ * (`{#policies}`) rather than a static hardcoded list, so it always matches what's actually
+ * being sent alongside it in this send — not a generic pack-wide list.
+ */
+function withWorkerDeclarationsPolicyList(split, adminFieldValuesByMasterId) {
+  const workerDeclarations = split.formMasters.find((m) => m.slug === 'worker-declarations');
+  if (!workerDeclarations) return adminFieldValuesByMasterId;
+  const policies = split.policyMasters.map((m) => m.display_name);
+  return {
+    ...adminFieldValuesByMasterId,
+    [workerDeclarations.id]: {
+      ...(adminFieldValuesByMasterId[workerDeclarations.id] || {}),
+      policies
+    }
+  };
+}
+
+/**
  * Build email PDF attachments (policies + optional extra org PDFs only).
  */
 export async function buildPolicyEmailAttachments(
@@ -117,7 +135,7 @@ export async function prepareSplitOnboardingSend({
     participant,
     signatureMode,
     orgName,
-    adminFieldValuesByMasterId
+    adminFieldValuesByMasterId: withWorkerDeclarationsPolicyList(split, adminFieldValuesByMasterId)
   });
 
   return {

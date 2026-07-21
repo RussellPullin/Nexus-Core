@@ -64,6 +64,18 @@ function FieldOverlay({ field, scale, value, signatureDataUrl, onChange }) {
     );
   }
 
+  if (field.type === 'text') {
+    return (
+      <input
+        type="text"
+        value={value || ''}
+        placeholder={field.label || ''}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...style, margin: 0, border: '1px solid #1d4ed8', borderRadius: 2, fontSize: '0.75rem', padding: '0 2px' }}
+      />
+    );
+  }
+
   // date
   return (
     <input

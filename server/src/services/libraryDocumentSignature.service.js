@@ -10,9 +10,11 @@ import {
 } from './nativeSignature.service.js';
 import {
   renderLibraryMasterAttachment,
-  splitOnboardingMasters
+  splitOnboardingMasters,
+  listOnboardingLibraryMasters
 } from './onboardingDocumentPacks.service.js';
 import { suggestSigningLayoutFromPdf } from './formTemplateSigningLayout.service.js';
+import { fillCustomFormFromLayout } from './customFormFillFromLayout.service.js';
 import {
   buildCustomFormDocuSealFields,
   resolveOrgSignatoryForDocuSeal
@@ -150,13 +152,45 @@ function resolvePrimaryRecipient({ workflow, staff, participant }) {
   };
 }
 
+/**
+ * Fields the organisation/supervisor must fill in (including an inline typed-name signature)
+ * before this library master can be sent to a staff member — mirrors
+ * staffCustomFormSignature.service.js's getStaffCustomTemplateOrgFields for the custom
+ * form_templates pipeline, so the client can render the same "fill your part" wizard step.
+ * @param {{ masterId: string, orgId: string, workflow: string }} params
+ */
+export async function getLibraryMasterOrgFields({ masterId, orgId, workflow }) {
+  const master = listOnboardingLibraryMasters(orgId, workflow).find((m) => m.id === masterId);
+  if (!master) return [];
+  const fromManifest = parseManifestSigningLayout(master.manifest);
+  if (!fromManifest) return [];
+  const layout = ensureMultiSignerLayout(fromManifest, master, workflow);
+  return layout.fields.filter((f) => f.signer === 'org');
+}
+
 async function prepareMasterDocument(master, orgId, workflow, { staff, participant, adminFieldValuesByMasterId = {} }) {
   const extra = adminFieldValuesByMasterId[master.id] || {};
   const att = await renderLibraryMasterAttachment(master, orgId, { staff, participant, extra });
   if (!att?.content || att.contentType !== 'application/pdf') {
     throw new Error(`Could not render ${master.display_name || master.slug} as PDF for signature.`);
   }
-  const layout = await resolveSigningLayout(master, att.content, workflow);
+  let layout = await resolveSigningLayout(master, att.content, workflow);
+  let buffer = att.content;
+
+  const orgFields = layout.fields.filter((f) => f.signer === 'org');
+  if (orgFields.length) {
+    const missingRequired = orgFields.filter((f) => f.required && !String(extra[f.merge_key] || '').trim());
+    if (missingRequired.length) {
+      const err = new Error(
+        `Fill in the organisation's required field(s) first: ${missingRequired.map((f) => f.label || f.merge_key).join(', ')}.`
+      );
+      err.code = 'ORG_FIELDS_REQUIRED';
+      throw err;
+    }
+    buffer = await fillCustomFormFromLayout(buffer, layout, extra, { workflow });
+    layout = { ...layout, fields: layout.fields.filter((f) => f.signer !== 'org') };
+  }
+
   const orgSignatory = resolveOrgSignatoryForDocuSeal(orgId);
   const docuSealFields = buildCustomFormDocuSealFields(layout, {
     workflow,
@@ -166,7 +200,7 @@ async function prepareMasterDocument(master, orgId, workflow, { staff, participa
   });
   return {
     master,
-    buffer: att.content,
+    buffer,
     filename: att.filename,
     formFields: docuSealFields.formFieldsPerDocument?.[0] || [],
     signers: docuSealFields.signers

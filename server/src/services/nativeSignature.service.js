@@ -61,6 +61,8 @@ function fieldsToLayout(fields) {
       height: a.h,
       type: f.type === 'date' ? 'date' : f.type === 'checkbox' ? 'checkbox' : f.type === 'signature' ? 'signature' : 'text',
       merge_key: f.name,
+      label: f.label || null,
+      fillable: f.fillable === true,
       signer: ROLE_TO_SIGNER[f.role] || 'participant',
       required: f.required === true
     }))
