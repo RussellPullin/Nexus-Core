@@ -1,11 +1,12 @@
 /**
- * DocuSeal e-signature feature flag.
+ * Native Nexus Core e-signature feature flag.
  *
- * Per-org runtime flag stored in provider_profiles.config_json.docuseal_enabled
- * and surfaced via GET /api/onboarding/providers/:orgId/settings.
+ * Per-org runtime flag stored in provider_profiles.config_json.esignature_enabled
+ * (legacy keys: docuseal_enabled, dropbox_sign_enabled) and surfaced via
+ * GET /api/onboarding/providers/:orgId/settings.
  *
- * The legacy VITE_NEXUS_CORE_DROPBOX_SIGN_ENABLED env var still acts as a global
- * fallback for development so existing .env files keep working.
+ * The legacy VITE_NEXUS_CORE_DROPBOX_SIGN_ENABLED / VITE_NEXUS_CORE_SIGN_ENABLED
+ * env vars still act as a global fallback for development so existing .env files keep working.
  */
 import { useEffect, useState } from 'react';
 import { onboarding } from './api';
@@ -45,7 +46,9 @@ export function useSignEnabled() {
       .then((data) => {
         if (cancelled) return;
         const config = data?.config || {};
-        const next = Boolean(config.docuseal_enabled ?? config.dropbox_sign_enabled) || NEXUS_CORE_SIGN_ENV_FALLBACK;
+        const next =
+          Boolean(config.esignature_enabled ?? config.docuseal_enabled ?? config.dropbox_sign_enabled) ||
+          NEXUS_CORE_SIGN_ENV_FALLBACK;
         cachedSignEnabled = next;
         setEnabled(next);
       })

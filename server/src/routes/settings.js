@@ -86,7 +86,8 @@ function mergeWithEnv(row, options = {}) {
     xero_linked: noOrgRowYet ? false : !!(row?.xero_refresh_token && row?.xero_tenant_id),
     /** When true, Settings shows one-click Xero connect (credentials from server env). */
     xero_oauth_via_env: xeroOauthConfiguredViaEnv(),
-    docuseal_configured: !!process.env.DOCUSEAL_API_KEY?.trim()
+    /** Native e-signature is built into Nexus Core — no external provider required. */
+    esignature_configured: true
   };
 }
 

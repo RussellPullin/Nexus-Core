@@ -50,7 +50,7 @@ export default function FormsPage() {
     onboarding_pilot: false,
     signature_mode: 'hybrid',
     default_renewal_days: 365,
-    docuseal_enabled: false
+    esignature_enabled: false
   });
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
@@ -84,7 +84,9 @@ export default function FormsPage() {
           onboarding_pilot: Boolean(profile.onboarding_pilot),
           signature_mode: profile.signature_mode || 'hybrid',
           default_renewal_days: Number(profile.default_renewal_days || 365),
-          docuseal_enabled: Boolean(data?.config?.docuseal_enabled ?? data?.config?.dropbox_sign_enabled)
+          esignature_enabled: Boolean(
+            data?.config?.esignature_enabled ?? data?.config?.docuseal_enabled ?? data?.config?.dropbox_sign_enabled
+          )
         });
       })
       .catch(() => setSettingsState(null));
@@ -140,7 +142,12 @@ export default function FormsPage() {
     setSettingsMessage('');
     try {
       const existingConfig = settingsState?.config || {};
-      const nextConfig = { ...existingConfig, docuseal_enabled: Boolean(settingsForm.docuseal_enabled) };
+      const nextConfig = {
+        ...existingConfig,
+        esignature_enabled: Boolean(settingsForm.esignature_enabled),
+        // Keep legacy key in sync so older clients/readers still work during transition.
+        docuseal_enabled: Boolean(settingsForm.esignature_enabled)
+      };
       await onboarding.providerSettings(orgId, {
         onboarding_enabled: settingsForm.onboarding_enabled,
         onboarding_pilot: settingsForm.onboarding_pilot,
@@ -441,10 +448,10 @@ export default function FormsPage() {
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <input
                 type="checkbox"
-                checked={settingsForm.docuseal_enabled}
-                onChange={(e) => setSettingsForm((s) => ({ ...s, docuseal_enabled: e.target.checked }))}
+                checked={settingsForm.esignature_enabled}
+                onChange={(e) => setSettingsForm((s) => ({ ...s, esignature_enabled: e.target.checked }))}
               />
-              Enable Sign with Nexus Core (DocuSeal)
+              Enable Sign with Nexus Core
             </label>
 
             <div className="form-group" style={{ marginBottom: 0 }}>

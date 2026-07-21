@@ -1,17 +1,16 @@
 /**
- * DocuSeal fields[] + submitters for Nexus Service Agreements.
+ * Signing fields[] + submitters for Nexus Service Agreements.
  *
  * Two-signer sequential flow:
  *   Signer 0 = ORG ADMIN (default signatory) — reviews "Confirm participant details" and signs Provider box.
  *   Signer 1 = PARTICIPANT — receives the request after admin signs, signs Client box.
  *
  * Returns:
- *   formFieldsPerDocument : object[][]   - DocuSeal payload of all interactive fields (one array per document).
+ *   formFieldsPerDocument : object[][]   - interactive fields (one array per document).
  *   signers               : { org, participant } - default signer info derived from snapshot (caller can override).
  *
  * Coordinates use top-left origin in the source PDF's native point space (same convention as the
- * signing_layout system) and are passed to DocuSeal unscaled — unlike Dropbox Sign, DocuSeal does not
- * force a fixed Letter canvas, so no A4→Letter rescale is needed here.
+ * signing_layout system). Consumed by nativeSignature.service.js (legacy filename kept for stable imports).
  */
 
 const ROLE_ORG = 'Organisation admin';
@@ -85,8 +84,8 @@ function deriveSigners(snapshot) {
   const participantName = snapshot?.participant?.name || '';
   const participantEmail = snapshot?.participant?.email || '';
 
-  // `role` must match the field-builder's ROLE_ORG/ROLE_PARTICIPANT exactly — DocuSeal
-  // matches submitters to fields by this string, not by position.
+  // `role` must match the field-builder's ROLE_ORG/ROLE_PARTICIPANT exactly — native
+  // signing matches signers to fields by this string, not by position.
   return {
     org: { order: 0, name: orgName, email: orgEmail, role: ROLE_ORG },
     participant: { order: 1, name: participantName, email: participantEmail, role: ROLE_PARTICIPANT }

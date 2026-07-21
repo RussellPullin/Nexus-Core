@@ -313,7 +313,7 @@ export default function OnboardingDocumentSelectPanel({
       <p className="forms-muted" style={{ marginTop: 0 }}>
         Choose {isParticipant ? 'service type' : 'role'} and which documents to send for{' '}
         <strong>{recipientName || recipientEmail}</strong>
-        {recipientEmail ? ` (${recipientEmail})` : ''}. Forms requiring signature are sent via DocuSeal;
+        {recipientEmail ? ` (${recipientEmail})` : ''}. Forms requiring signature are sent via Nexus Core e-signature;
         policies and information documents are attached as PDFs in the email.
       </p>
 
@@ -386,7 +386,7 @@ export default function OnboardingDocumentSelectPanel({
                     Requires signature ({signatureDocs.length})
                   </div>
                   <p className="forms-muted" style={{ fontSize: '0.82rem', margin: '0 0 0.35rem' }}>
-                    Forms are sent via DocuSeal for e-signature — not as PDF attachments.
+                    Forms are sent via Nexus Core for e-signature — not as PDF attachments.
                     {isParticipant
                       ? ' Participant or guardian receives a separate signing request.'
                       : ' The staff member receives a separate signing request.'}

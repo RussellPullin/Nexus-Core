@@ -301,7 +301,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
       attachments = splitSend.policyAttachments;
       signatureRequests = splitSend.signatureRequests;
     } catch (err) {
-      if (err.code === 'DOCUSEAL_NOT_CONFIGURED' || err.code === 'DOCUSEAL_NOT_ENABLED') {
+      if (err.code === 'ESIGNATURE_NOT_ENABLED' || err.code === 'DOCUSEAL_NOT_ENABLED') {
         return res.status(400).json({ error: err.message, code: err.code });
       }
       if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING') {
@@ -330,7 +330,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
       text += `${orgName} has sent you onboarding forms to complete.\n\n`;
     }
     if (signatureRequests.length) {
-      text += `${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately via DocuSeal for e-signature. Check your inbox for signing requests.\n\n`;
+      text += `${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately for e-signature via Nexus Core. Check your inbox for signing requests.\n\n`;
     }
     text += `Your coordinator will guide you through the rest of onboarding in Nexus Core.\n\n`;
     text += `If you have questions, reply to this email.\n`;

@@ -506,7 +506,7 @@ function stripAdminSignFieldsFromValues(fieldValues) {
   return next;
 }
 
-/** Build DocuSeal-shaped fields for pre-activity native sign-off from the master PDF schema. */
+/** Build signing fields for pre-activity native sign-off from the master PDF schema. */
 async function buildActivityRiskPreActivitySignFields() {
   const schema = await getActivityRiskFieldSchema();
   const byName = new Map((schema || []).map((f) => [f.name, f]));

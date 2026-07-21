@@ -40,7 +40,7 @@ export function isNativeSignatureEnabledForOrg(orgId) {
 export function assertNativeSignatureReady(orgId) {
   if (!isNativeSignatureEnabledForOrg(orgId)) {
     const err = new Error(`E-signing is not enabled for this organisation. ${ESIGNATURE_SETTINGS_HINT}`);
-    err.code = 'DOCUSEAL_NOT_ENABLED';
+    err.code = 'ESIGNATURE_NOT_ENABLED';
     throw err;
   }
 }
@@ -51,7 +51,7 @@ export function getProviderSignatureMode(orgId) {
 }
 
 /**
- * Group library form masters into DocuSeal packets (hybrid / packet / separate).
+ * Group library form masters into signature packets (hybrid / packet / separate).
  * @param {object[]} formMasters
  * @param {'hybrid'|'packet'|'separate'} signatureMode
  */
@@ -290,7 +290,7 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
 }
 
 /**
- * Send library form masters via DocuSeal.
+ * Send library form masters via native Nexus Core e-signature.
  * @returns {Promise<Array<{ master_id: string, envelope_id: string, external_envelope_id: string, status: string, display_name: string }>>}
  */
 export async function sendLibraryMastersForSignature({

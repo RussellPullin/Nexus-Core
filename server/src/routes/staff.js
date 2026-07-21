@@ -1139,7 +1139,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
         }
       }
     } catch (err) {
-      if (err.code === 'DOCUSEAL_NOT_CONFIGURED' || err.code === 'DOCUSEAL_NOT_ENABLED') {
+      if (err.code === 'ESIGNATURE_NOT_ENABLED' || err.code === 'DOCUSEAL_NOT_ENABLED') {
         return res.status(400).json({ error: err.message, code: err.code });
       }
       if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING') {
@@ -1150,7 +1150,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     }
 
     if (signatureRequests.length) {
-      text += `\n\n${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately via DocuSeal for e-signature. Check your inbox for signing requests.\n`;
+      text += `\n\n${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately for e-signature via Nexus Core. Check your inbox for signing requests.\n`;
     }
     if (allAttachments.length) {
       text += `\nPolicy and information documents are attached to this email.\n`;
@@ -1225,7 +1225,7 @@ router.post('/:id/custom-forms/:templateId/send-for-signature', requireAdminOrDe
     if (['TEMPLATE_NOT_FOUND', 'TEMPLATE_FILE_MISSING'].includes(code)) {
       return res.status(404).json({ error: err.message, code });
     }
-    if (['ORG_FIELDS_REQUIRED', 'ORG_SIGNATORY_MISSING', 'SIGNER_EMAIL_MISSING', 'DOCUSEAL_NOT_ENABLED'].includes(code)) {
+    if (['ORG_FIELDS_REQUIRED', 'ORG_SIGNATORY_MISSING', 'SIGNER_EMAIL_MISSING', 'ESIGNATURE_NOT_ENABLED', 'DOCUSEAL_NOT_ENABLED'].includes(code)) {
       return res.status(400).json({ error: err.message, code });
     }
     console.error('[custom-forms send-for-signature]', err);

@@ -1,6 +1,7 @@
 /**
- * DocuSeal fields[] for Privacy Consent PDF.
+ * Signing fields[] for Privacy Consent PDF.
  * Single signer (participant) with signature + printed name + date.
+ * Consumed by nativeSignature.service.js (legacy filename kept for stable imports).
  */
 
 const ROLE_PARTICIPANT = 'Participant';

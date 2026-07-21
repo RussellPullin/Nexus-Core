@@ -1,6 +1,6 @@
 /**
  * Send an org-uploaded custom staff_onboarding form_templates row via the native e-signature
- * service, reusing the same signing_layout / DocuSeal-field-building / envelope machinery the
+ * service, reusing the same signing_layout / field-building / envelope machinery the
  * participant custom-template flow and the library-master staff flow already use.
  */
 

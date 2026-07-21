@@ -1,10 +1,10 @@
 /**
  * Pre-fill custom form PDFs from signing_layout text/date/signature fields (intake or
- * admin-supplied merge data). Checkbox fields are left for DocuSeal overlays. Signature fields
+ * admin-supplied merge data). Checkbox fields are left for signer overlays. Signature fields
  * are embedded as an image only when the merge value is a data URL; a plain string is drawn as
  * a typed-name signature (this codebase's existing convention, e.g. staff policy acknowledgement).
  * Untouched when no merge value exists for a signature field (the normal case for
- * DocuSeal-collected signatures), so existing participant/library-master flows are unaffected.
+ * native e-signature-collected signatures), so existing participant/library-master flows are unaffected.
  */
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -71,7 +71,7 @@ export async function fillCustomFormFromLayout(pdfBytes, signingLayout, mergeDat
         }
         continue;
       }
-      if (!String(value).trim()) continue; // no signature supplied — leave for DocuSeal overlay as before
+      if (!String(value).trim()) continue; // no signature supplied — leave for signer overlay as before
       // Typed-name signature (falls through to the text-draw below).
     }
 

@@ -940,7 +940,7 @@ export function archiveSignedEnvelopeDocument({ envelopeId, signedBuffer, certif
         buffer: signedBuffer,
         originalFilename: safeFilename,
         mimeType: 'application/pdf',
-        notes: `Signed via DocuSeal envelope ${envelopeId}`
+        notes: `Signed via Nexus Core envelope ${envelopeId}`
       }).catch((e) => console.warn('[onboarding] OneDrive push signed PDF failed:', e?.message));
 
       try {
@@ -986,7 +986,7 @@ export function markEnvelopeCompleted({
   certificateBuffer = null,
   sourceIp = null,
   userAgent = null,
-  providerName = 'docuseal'
+  providerName = 'native'
 }) {
   const envelope = db.prepare('SELECT * FROM signature_envelopes WHERE id = ?').get(envelopeId);
   if (!envelope) throw new Error('Envelope not found');
@@ -1072,7 +1072,7 @@ export function markEnvelopeCompleted({
  * Today nexus_generated_form_documents is parallel to participant_form_instances, so the
  * "complete onboarding when all forms signed" rule never sees the Nexus SA. This helper
  * ensures the same SA also exists as a participant_form_instances row of form_type='service_agreement'
- * so that DocuSeal + completion criteria apply uniformly.
+ * so that native e-signature + completion criteria apply uniformly.
  *
  * Idempotent: if a non-superseded SA form instance already exists for this onboarding it is
  * updated to point at the new PDF and bumped in version; otherwise a new row is inserted.

@@ -902,7 +902,7 @@ function BusinessSetup() {
       <summary className="settings-collapsible-summary">
         <span className="settings-collapsible-summary-main">
           <span className="settings-collapsible-title">Business setup</span>
-          <span className="settings-collapsible-hint">Company details, logo, bank details, Xero, DocuSeal</span>
+          <span className="settings-collapsible-hint">Company details, logo, bank details, Xero, e-signatures</span>
         </span>
       </summary>
       <div className="settings-collapsible-body">
@@ -1163,29 +1163,26 @@ function BusinessSetup() {
         </div>
       )}
 
-      <h4 className="settings-subsection-title">Signatures – DocuSeal</h4>
+      <h4 className="settings-subsection-title">Signatures – Nexus Core</h4>
       <p className="settings-desc">
-        Participant onboarding agreements are sent for e-signature via Nexus Core's shared DocuSeal instance —
-        no per-organisation connection needed.
+        Participant and staff agreements are signed with Nexus Core&apos;s built-in e-signature —
+        no third-party signing service required. Enable it per organisation under Forms → Onboarding settings.
       </p>
       <div
         style={{
           padding: '1rem',
-          background: biz.docuseal_configured ? '#f0fdf4' : '#fffbeb',
-          border: `1px solid ${biz.docuseal_configured ? '#86efac' : '#fcd34d'}`,
+          background: '#f0fdf4',
+          border: '1px solid #86efac',
           borderRadius: 8,
           marginBottom: '1rem'
         }}
       >
-        <strong style={{ color: biz.docuseal_configured ? '#166534' : '#b45309' }}>
-          {biz.docuseal_configured ? 'DocuSeal is connected' : 'DocuSeal is not configured on this server'}
+        <strong style={{ color: '#166534' }}>
+          Native e-signature is available
         </strong>
-        {!biz.docuseal_configured && (
-          <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', color: '#b45309' }}>
-            Set <code style={{ background: '#f1f5f9', padding: '0 4px', borderRadius: 4, fontSize: '0.9em' }}>DOCUSEAL_API_KEY</code> in the
-            server environment.
-          </p>
-        )}
+        <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', color: '#166534' }}>
+          Signers receive a secure Nexus Core link by email and sign in the browser.
+        </p>
       </div>
 
       {msg && (

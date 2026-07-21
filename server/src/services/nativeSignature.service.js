@@ -1,17 +1,12 @@
 /**
- * Native e-signature integration — replaces docuSeal.service.js (DocuSeal Community has no
- * API access; Pro is $20/user/month + $0.20/doc, so we built this in-house instead).
+ * Native Nexus Core e-signature integration.
  *
- * Implements the same exported surface as docuSeal.service.js so callers only need to swap
- * their import line: uploadTransientDocument, createAgreementWithDocument,
- * createAgreementPacket, sendMultiDocumentAgreement. The existing *DocuSealFields.service.js
- * field-builder services are reused unchanged — this file converts their uniform DocuSeal-shaped
- * output ({name,type,role,required,areas:[{x,y,w,h,page}]}) into this app's own
- * SigningLayout-like shape (see formTemplateSigningLayout.service.js), rather than each caller
- * threading a separate raw layout through (the three form types store their raw layout in three
- * different ad-hoc shapes, but all three builders already normalize to the one DocuSeal shape).
+ * Exports: uploadTransientDocument, createAgreementWithDocument, createAgreementPacket,
+ * sendMultiDocumentAgreement. The existing *DocuSealFields.service.js field-builder services
+ * produce a uniform field shape ({name,type,role,required,areas:[{x,y,w,h,page}]}) which this
+ * file converts into SigningLayout (see formTemplateSigningLayout.service.js).
  *
- * No external service, no webhook — signing happens on this app's own /sign/:token page, and
+ * No external signing provider — signing happens on this app's own /sign/:token page, and
  * completion is reported by calling onboarding.service.js's markEnvelopeCompleted() directly.
  */
 import { randomUUID, randomBytes, createHash } from 'crypto';
@@ -46,8 +41,8 @@ const ROLE_TO_SIGNER = {
 };
 
 /**
- * Convert the DocuSeal-shaped fields[] (already produced by the existing
- * *DocuSealFields.service.js builders) into this app's SigningLayout shape.
+ * Convert the field-builder fields[] (from *DocuSealFields.service.js builders)
+ * into this app's SigningLayout shape.
  * @param {Array<{name:string,type:string,role:string,required?:boolean,areas:Array<{x:number,y:number,w:number,h:number,page:number}>}>} fields
  */
 function fieldsToLayout(fields) {
@@ -86,7 +81,7 @@ function singleSignatureLayout() {
 }
 
 // Temp store for file buffers between uploadTransientDocument and createAgreementWithDocument.
-// Keys expire after 5 minutes to prevent memory leaks — same pattern as docuSeal.service.js.
+// Keys expire after 5 minutes to prevent memory leaks.
 const pendingBuffers = new Map();
 
 /**
@@ -225,8 +220,7 @@ export async function createAgreementWithDocument({
 
 /**
  * Bundle multiple already-generated forms into one envelope (the hybrid/packet bundling path).
- * The original DocuSeal integration never passed field layouts here either — it just sent flat
- * documents — so each document gets one generic signature field rather than a precise layout.
+ * This path does not receive precise field layouts, so each document gets one generic signature field.
  */
 export async function createAgreementPacket({
   participantName,
@@ -265,12 +259,11 @@ export async function createAgreementPacket({
 
 /**
  * Send one or more PDFs as a single envelope (used for branded library documents, each carrying
- * its own field layout via documents[].formFields, DocuSeal-shaped — same conversion as above).
- * Unlike docuSeal.service.js's version, this needs an envelopeId — the caller
- * (libraryDocumentSignature.service.js) already generates one before calling this, so it must be
- * passed in via options.envelopeId. No signature_envelopes row is required for this path (the
- * library-master send flow — including staff onboarding, which has no participant_id — never
- * creates one); completion is handled entirely via signature_envelope_documents/_signers.
+ * its own field layout via documents[].formFields — converted via fieldsToLayout above).
+ * Requires options.envelopeId — the caller (libraryDocumentSignature.service.js) already generates
+ * one before calling this. No signature_envelopes row is required for this path (the library-master
+ * send flow — including staff onboarding, which has no participant_id — never creates one);
+ * completion is handled entirely via signature_envelope_documents/_signers.
  */
 export async function sendMultiDocumentAgreement(orgId, {
   signers,

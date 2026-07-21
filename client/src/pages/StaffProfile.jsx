@@ -371,11 +371,11 @@ export default function StaffProfile() {
       const sigCount = result?.signature_request_count ?? result?.signature_requests?.length ?? 0;
       let message;
       if (policyCount > 0 && sigCount > 0) {
-        message = `Email sent with ${policyCount} policy PDF${policyCount === 1 ? '' : 's'}. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via DocuSeal.`;
+        message = `Email sent with ${policyCount} policy PDF${policyCount === 1 ? '' : 's'}. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Nexus Core.`;
       } else if (policyCount > 0) {
         message = `Onboarding email sent with ${policyCount} policy PDF attachment${policyCount === 1 ? '' : 's'}.`;
       } else if (sigCount > 0) {
-        message = `Onboarding email sent. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via DocuSeal.`;
+        message = `Onboarding email sent. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Nexus Core.`;
       } else {
         message = 'Onboarding email sent (form link only, no attachments).';
       }

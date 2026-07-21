@@ -3349,7 +3349,7 @@ export default function ParticipantProfile() {
               <h4 style={{ marginTop: '1.5rem' }}>Generated agreements</h4>
               <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem' }}>
                 Download to review the full pre-filled agreement, or click <strong>Sign with Nexus Core</strong> to send it for signatures.
-                The Sign button is enabled only once the pre-send checklist above is complete. The PDF goes first to the organisation default signatory, then to the participant — both only sign, no editing in DocuSeal.
+                The Sign button is enabled only once the pre-send checklist above is complete. The PDF goes first to the organisation default signatory, then to the participant — both only sign.
                 Set the default signatory under <Link to="/settings">Settings → Business</Link> and enable signing under Forms → Onboarding settings.
               </p>
               {saAgreements.length === 0 ? (
@@ -3394,7 +3394,7 @@ export default function ParticipantProfile() {
                                     ? 'Add participant email in Edit (use your email for a self-test)'
                                     : !saReadyToSend
                                       ? `Complete the pre-send checklist first: ${saChecklistMissing.map((m) => m.label).join(', ')}`
-                                      : 'Send this agreement for signature via DocuSeal'
+                                      : 'Send this agreement for signature via Nexus Core'
                             }
                             onClick={async () => {
                               if (!g.form_instance_id) return;
@@ -3404,7 +3404,7 @@ export default function ParticipantProfile() {
                               }
                               if (
                                 !confirm(
-                                  `Send the service agreement to ${data.email.trim()} for signature via DocuSeal?`
+                                  `Send the service agreement to ${data.email.trim()} for signature via Nexus Core?`
                                 )
                               ) {
                                 return;

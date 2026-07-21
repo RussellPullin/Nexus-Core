@@ -485,14 +485,14 @@ CREATE TABLE IF NOT EXISTS participant_form_instances (
   FOREIGN KEY (form_template_id) REFERENCES form_templates(id) ON DELETE CASCADE
 );
 
--- Signature packets / envelopes (DocuSeal agreements)
+-- Signature packets / envelopes (native Nexus Core e-signature)
 CREATE TABLE IF NOT EXISTS signature_envelopes (
   id TEXT PRIMARY KEY,
   participant_onboarding_id TEXT NOT NULL,
   participant_id TEXT NOT NULL,
   packet_mode TEXT DEFAULT 'hybrid', -- hybrid | packet | separate
-  provider_name TEXT DEFAULT 'docuseal',
-  external_envelope_id TEXT, -- DocuSeal submission id
+  provider_name TEXT DEFAULT 'native',
+  external_envelope_id TEXT, -- native envelope id (or legacy external provider id)
   status TEXT DEFAULT 'draft', -- draft | sent | viewed | signed | declined | cancelled | expired | error
   packet_reasoning TEXT, -- why bundled/split for compliance
   sent_at TEXT,
@@ -519,7 +519,7 @@ CREATE TABLE IF NOT EXISTS signature_events (
   id TEXT PRIMARY KEY,
   envelope_id TEXT NOT NULL,
   form_instance_id TEXT,
-  provider_name TEXT DEFAULT 'docuseal',
+  provider_name TEXT DEFAULT 'native',
   external_event_id TEXT,
   event_type TEXT NOT NULL, -- agreement_sent | agreement_viewed | agreement_signed | agreement_declined | webhook_error
   event_timestamp TEXT NOT NULL,

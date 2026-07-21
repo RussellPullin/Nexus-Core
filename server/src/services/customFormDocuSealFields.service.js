@@ -1,5 +1,6 @@
 /**
- * DocuSeal fields[] for custom uploaded form templates (signing_layout).
+ * Signing fields[] for custom uploaded form templates (signing_layout).
+ * Consumed by nativeSignature.service.js (legacy filename kept for stable imports).
  */
 
 import { db } from '../db/index.js';
