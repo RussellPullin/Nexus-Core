@@ -22,6 +22,7 @@ import AdminPage from './pages/AdminPage';
 import RegistersPage from './pages/RegistersPage';
 import FeatureFlagsAdminPage from './pages/FeatureFlagsAdminPage';
 import DocumentLibraryAdminPage from './pages/DocumentLibraryAdminPage';
+import PolicyLibraryPage from './pages/PolicyLibraryPage';
 import IntakePage from './pages/IntakePage';
 import SignDocumentPage from './pages/SignDocumentPage';
 import CompliancePage from './pages/CompliancePage';
@@ -164,6 +165,11 @@ function Layout({ productSurface, children }) {
           {canManageUsers && (
             <NavLink to={`${prefix}/registers`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               Registers
+            </NavLink>
+          )}
+          {canManageUsers && (
+            <NavLink to={`${prefix}/policies`} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              Policies
             </NavLink>
           )}
           {canManageUsers && (
@@ -353,6 +359,7 @@ export default function App() {
               <Route path="admin" element={<AdminPage />} />
               <Route path="admin/feature-flags" element={<FeatureFlagsAdminPage />} />
               <Route path="admin/document-library" element={<DocumentLibraryAdminPage />} />
+              <Route path="policies" element={<PolicyLibraryPage />} />
               <Route path="compliance" element={<CompliancePage />} />
             </Route>
           </Route>

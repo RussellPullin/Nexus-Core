@@ -12,9 +12,11 @@
  * docxtemplater's default parser looks up, so we reuse `buildOrgTokenMap` directly. The org logo
  * is embedded from `organisations.logo_path` via the docxtemplater image module.
  */
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, resolve, isAbsolute, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
+import { spawnSync } from 'child_process';
 import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
 import ImageModule from 'docxtemplater-image-module-free';
@@ -22,12 +24,14 @@ import { db } from '../db/index.js';
 import { buildOrgTokenMap } from './orgContext.service.js';
 import { buildGlobalTokenMap } from '../lib/templateTokens.js';
 import { convertDocxToPdf } from './consentForm.service.js';
+import { getOrgFullUploadDocument, listOrgSectionOverrides } from './documentLibrary.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const projectRoot = resolve(__dirname, '../../..');
+const projectRoot = resolve(__dirname, '../..');
 const dataUploadsDir = process.env.DATA_DIR
   ? join(process.env.DATA_DIR, 'uploads')
   : join(projectRoot, 'data', 'uploads');
+const dataDir = process.env.DATA_DIR || join(projectRoot, 'data');
 
 const LOGO_TAG = '{%org_logo}';
 const LOGO_MAX_HEIGHT = 60;
@@ -219,7 +223,129 @@ function buildDocxInstance(zip, logoPath) {
 }
 
 /**
- * Render a library master to a Buffer, branded for the org (logo + name + ABN etc.).
+ * Resolve a path stored on `org_company_documents.file_path` (same relative-path convention as
+ * `company_policy_files.file_path`) to an absolute path on the persistent DATA_DIR volume.
+ */
+function resolveOrgDocumentPath(filePath) {
+  if (!filePath) return null;
+  if (isAbsolute(filePath)) return filePath;
+  return join(dataDir, filePath.replace(/^data\//, ''));
+}
+
+/**
+ * Substitute flat `{token.key}` placeholders (docxtemplater-style, single braces — matching the
+ * tokens used inside the policy .docx templates themselves) in an HTML string, HTML-escaping
+ * values. This is deliberately separate from `renderMustacheLite`, which uses double-brace
+ * `{{token}}` syntax for the unrelated `html` engine templates.
+ */
+export function renderFlatTokens(html, tokens) {
+  return String(html || '').replace(/\{([\w.]+)\}/g, (full, key) => {
+    if (!(key in tokens)) return full;
+    const v = tokens[key];
+    if (v === undefined || v === null) return '';
+    return String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  });
+}
+
+/**
+ * Convert an HTML string to PDF via LibreOffice (soffice), mirroring `convertDocxToPdf`.
+ * @param {string} html
+ * @returns {Buffer|null}
+ */
+function convertHtmlToPdf(html) {
+  const tmpDir = join(tmpdir(), `doclib-html-${Date.now()}`);
+  mkdirSync(tmpDir, { recursive: true });
+  const htmlPath = join(tmpDir, 'document.html');
+  try {
+    writeFileSync(htmlPath, html, 'utf8');
+    const result = spawnSync('soffice', [
+      '--headless',
+      '--convert-to', 'pdf',
+      '--outdir', tmpDir,
+      htmlPath
+    ], { encoding: 'utf8', timeout: 60000 });
+    if (result.status !== 0) return null;
+    const pdfPath = join(tmpDir, 'document.pdf');
+    if (!existsSync(pdfPath)) return null;
+    return readFileSync(pdfPath);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Render a policy master whose org clone has `override_mode = 'sections'` and at least one saved
+ * section override: stitch the master's sections together, substituting the org's override HTML
+ * for any matching `section_key`, run the flat-token pass over the result, and convert via
+ * LibreOffice. Sections without an override render exactly as the master (and pick up future
+ * master edits automatically, since they aren't copied — only the key is referenced).
+ */
+export function mergeSectionsWithOverrides(sections, overrides) {
+  const overrideByKey = new Map((overrides || []).map((o) => [o.section_key, o.content_html]));
+  return (sections || [])
+    .map((s) => overrideByKey.get(s.key) ?? s.content_html)
+    .join('\n');
+}
+
+function renderStitchedSections(master, overrides, tokens, baseName) {
+  const sections = JSON.parse(master.sections_json || '[]');
+  const bodyHtml = mergeSectionsWithOverrides(sections, overrides);
+  const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${renderFlatTokens(bodyHtml, tokens)}</body></html>`;
+
+  const pdfBuffer = convertHtmlToPdf(fullHtml);
+  if (pdfBuffer) {
+    return { buffer: pdfBuffer, html: null, mime: 'application/pdf', suggestedFilename: `${baseName}.pdf` };
+  }
+  // LibreOffice unavailable — fall back to raw HTML so the caller still gets something.
+  return { buffer: null, html: fullHtml, mime: 'text/html', suggestedFilename: `${baseName}.html` };
+}
+
+/**
+ * Serve an org's fully-uploaded replacement document instead of the master. `.docx` uploads
+ * still go through the normal docxtemplater token pipeline (so `{org.name}` etc. resolve if the
+ * org copied a template and only edited wording); other file types are served as-is.
+ */
+function renderOrgFullUpload(uploaded, tokens, baseName) {
+  const absPath = resolveOrgDocumentPath(uploaded.file_path);
+  if (!absPath || !existsSync(absPath)) {
+    throw new Error(`Uploaded document for ${uploaded.slug} is missing on disk: ${uploaded.file_path}`);
+  }
+  const fileBuffer = readFileSync(absPath);
+
+  if (uploaded.engine === 'docxtemplater') {
+    let doc;
+    try {
+      doc = buildDocxInstance(new PizZip(fileBuffer), null);
+      doc.render(tokens);
+    } catch (renderErr) {
+      const cleanZip = new PizZip(fileBuffer);
+      sanitizeMalformedTags(cleanZip, Object.keys(tokens));
+      doc = buildDocxInstance(cleanZip, null);
+      doc.render(tokens);
+      console.warn(`[document-library] rendered org upload "${uploaded.slug}" after sanitising malformed tags:`, renderErr?.message);
+    }
+    const docxBuffer = doc.getZip().generate({ type: 'nodebuffer' });
+    const pdfBuffer = convertDocxToPdf(docxBuffer);
+    if (pdfBuffer) {
+      return { buffer: pdfBuffer, html: null, mime: 'application/pdf', suggestedFilename: `${baseName}.pdf` };
+    }
+    return {
+      buffer: docxBuffer,
+      html: null,
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      suggestedFilename: `${baseName}.docx`
+    };
+  }
+
+  // static-pdf (or anything else) — pass through as uploaded.
+  return { buffer: fileBuffer, html: null, mime: 'application/pdf', suggestedFilename: `${baseName}.pdf` };
+}
+
+/**
+ * Render a library master to a Buffer, branded for the org (logo + name + ABN etc.). If the org
+ * has switched a policy to `full_upload` mode, their own document is served instead; if switched
+ * to `sections` mode with at least one saved override, the master is re-assembled with those
+ * overrides applied. Otherwise renders the master exactly as before.
  * @param {object} params
  * @param {string} params.masterId - document_library_masters.id
  * @param {string} params.orgId
@@ -228,6 +354,22 @@ function buildDocxInstance(zip, logoPath) {
  * @param {object} [params.extra] - additional token overrides
  * @returns {{ buffer: Buffer | null, html: string | null, mime: string, suggestedFilename: string, needsAcroFormFill?: boolean, tokens?: object }}
  */
+/**
+ * Decide which render path applies, given the org's chosen mode and what they've actually
+ * saved. `full_upload` wins outright once a file exists; `sections` only kicks in once at least
+ * one override is saved (zero overrides renders identically to `inherit`); anything else (or no
+ * org context at all, e.g. a master-library preview with no orgId) uses the plain master render.
+ * Pure decision table — kept separate from the DB/soffice-touching render functions so it's
+ * cheaply unit-testable.
+ * @param {{overrideMode: string, hasSectionsJson: boolean, hasFullUpload: boolean, hasSectionOverrides: boolean}} params
+ * @returns {'full_upload'|'sections'|'default'}
+ */
+export function resolveOverrideStrategy({ overrideMode, hasSectionsJson, hasFullUpload, hasSectionOverrides }) {
+  if (overrideMode === 'full_upload' && hasFullUpload) return 'full_upload';
+  if (overrideMode === 'sections' && hasSectionsJson && hasSectionOverrides) return 'sections';
+  return 'default';
+}
+
 export function renderLibraryDocument({ masterId, orgId, participant = null, staff = null, extra = {} }) {
   const master = db.prepare('SELECT * FROM document_library_masters WHERE id = ?').get(masterId);
   if (!master) throw new Error(`Document library master ${masterId} not found`);
@@ -235,6 +377,27 @@ export function renderLibraryDocument({ masterId, orgId, participant = null, sta
 
   const tokens = buildRenderTokenMap({ orgId, participant, staff, extra });
   const baseName = `${master.slug}-${(participant?.id || staff?.id || orgId || 'org')}`;
+
+  const clone = orgId
+    ? db.prepare('SELECT override_mode FROM document_library_org_clones WHERE org_id = ? AND master_id = ?').get(orgId, masterId)
+    : null;
+  const overrideMode = clone?.override_mode || 'inherit';
+  const uploaded = orgId && overrideMode === 'full_upload' ? getOrgFullUploadDocument(orgId, masterId) : null;
+  const overrides = orgId && overrideMode === 'sections' ? listOrgSectionOverrides(orgId, masterId) : [];
+
+  const strategy = resolveOverrideStrategy({
+    overrideMode,
+    hasSectionsJson: Boolean(master.sections_json),
+    hasFullUpload: Boolean(uploaded),
+    hasSectionOverrides: overrides.length > 0
+  });
+
+  if (strategy === 'full_upload') {
+    return renderOrgFullUpload(uploaded, tokens, baseName);
+  }
+  if (strategy === 'sections') {
+    return renderStitchedSections(master, overrides, tokens, baseName);
+  }
 
   switch (master.engine) {
     case 'docxtemplater': {

@@ -718,6 +718,37 @@ export const documentLibrary = {
     if (participantServiceType) q.set('participant_service_type', participantServiceType);
     if (staffRole) q.set('staff_role', staffRole);
     return fetchApi(`/document-library/onboarding-pack?${q.toString()}`);
+  },
+  // Per-org policy content overrides.
+  masterSections: (masterId) => fetchApi(`/document-library/masters/${masterId}/sections`),
+  orgOverrides: (masterId) => fetchApi(`/document-library/org/masters/${masterId}/overrides`),
+  setOverrideMode: (masterId, mode) => fetchApi(`/document-library/org/masters/${masterId}/mode`, {
+    method: 'PUT',
+    body: JSON.stringify({ mode })
+  }),
+  saveSectionOverride: (masterId, sectionKey, contentHtml) =>
+    fetchApi(`/document-library/org/masters/${masterId}/sections/${encodeURIComponent(sectionKey)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content_html: contentHtml })
+    }),
+  deleteSectionOverride: (masterId, sectionKey) =>
+    fetchApi(`/document-library/org/masters/${masterId}/sections/${encodeURIComponent(sectionKey)}`, {
+      method: 'DELETE'
+    }),
+  uploadFullDocument: async (masterId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API}/document-library/org/masters/${masterId}/upload`, {
+      method: 'POST',
+      credentials: 'include',
+      body: form
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Upload failed');
+    }
+    return text ? JSON.parse(text) : null;
   }
 };
 

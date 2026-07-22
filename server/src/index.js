@@ -331,7 +331,7 @@ async function startServer(port) {
 
     try {
       const { syncDocumentLibraryFromDisk } = await import('./services/documentLibrary.service.js');
-      const sync = syncDocumentLibraryFromDisk();
+      const sync = await syncDocumentLibraryFromDisk();
       if (sync.registered || sync.skipped.length || sync.warnings.length) {
         console.log(`[document-library] sync: registered=${sync.registered} scanned=${sync.scanned}` +
           (sync.skipped.length ? `, skipped=${sync.skipped.length}` : '') +

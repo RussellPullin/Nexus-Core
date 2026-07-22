@@ -31,6 +31,7 @@ import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from '
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
+import mammoth from 'mammoth';
 import { db } from '../db/index.js';
 import { unknownPlaceholders } from '../lib/templateTokens.js';
 import {
@@ -110,11 +111,131 @@ function applyPacksToManifest(manifest, packs) {
   return manifest;
 }
 
+function slugifyHeading(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'section';
+}
+
+function stripHtmlTags(html) {
+  return String(html || '').replace(/<[^>]*>/g, '').trim();
+}
+
+/**
+ * Find [start, end) character ranges covering every `<table>...</table>` block, so headings
+ * nested inside table cells (e.g. a Procedure table's row headers) aren't mistaken for
+ * top-level document sections. Handles nested tables via a depth counter.
+ */
+function findTableRanges(html) {
+  const ranges = [];
+  const tagRegex = /<(table)\b[^>]*>|<\/(table)>/gi;
+  let depth = 0;
+  let start = -1;
+  let match;
+  while ((match = tagRegex.exec(html))) {
+    if (match[1]) {
+      if (depth === 0) start = match.index;
+      depth += 1;
+    } else {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0 && start !== -1) {
+        ranges.push([start, match.index + match[0].length]);
+        start = -1;
+      }
+    }
+  }
+  return ranges;
+}
+
+function isWithinRanges(index, ranges) {
+  return ranges.some(([start, end]) => index >= start && index < end);
+}
+
+/**
+ * Split a docx into top-level-heading sections for policy-category masters, so an org can later
+ * override individual named blocks (Policy Statement, Definitions, etc.) while still inheriting
+ * everything else — including future master edits — from the shared template.
+ *
+ * These NDIS policy templates are inconsistent about which heading level marks a named block
+ * (e.g. "Policy Statement" is H1 with H3 children directly, while "Introduction" is H1 wrapping
+ * H2 sub-clauses like "Purpose"/"Policy Aims") — so both H1 and H2 are treated as section
+ * boundaries; H3+ stays embedded within whichever section it falls under. Headings nested inside
+ * a table (e.g. Procedure table row headers) are NOT treated as boundaries — the whole table
+ * stays part of its enclosing section, since row-level override granularity is out of scope for
+ * v1.
+ *
+ * Section keys are matched against `previousSections` by heading text first so an org's stored
+ * overrides don't orphan when the master is re-synced with only minor wording changes elsewhere.
+ *
+ * @param {string} templateFilePath
+ * @param {Array<{key:string, heading:string}>} [previousSections]
+ * @returns {Promise<Array<{key:string, heading:string, level:number, content_html:string}>>}
+ */
+export async function extractPolicySections(templateFilePath, previousSections = []) {
+  const { value: html } = await mammoth.convertToHtml({ path: templateFilePath });
+
+  const tableRanges = findTableRanges(html);
+  const headingRegex = /<h([12])[^>]*>(.*?)<\/h\1>/gis;
+  const matches = [...html.matchAll(headingRegex)].filter((m) => !isWithinRanges(m.index, tableRanges));
+
+  const previousKeyByHeading = new Map(
+    (previousSections || []).map((s) => [s.heading, s.key])
+  );
+
+  const sections = [];
+  const usedKeys = new Set();
+
+  const mintKey = (headingText) => {
+    const reused = previousKeyByHeading.get(headingText);
+    if (reused && !usedKeys.has(reused)) {
+      usedKeys.add(reused);
+      return reused;
+    }
+    let base = slugifyHeading(headingText);
+    let key = base;
+    let n = 2;
+    while (usedKeys.has(key)) {
+      key = `${base}-${n}`;
+      n += 1;
+    }
+    usedKeys.add(key);
+    return key;
+  };
+
+  if (matches.length === 0) {
+    // No top-level headings found at all — treat the whole document as one section.
+    return [{ key: mintKey('document'), heading: null, level: 0, content_html: html }];
+  }
+
+  // Content before the first top-level heading (e.g. a title with no body).
+  const preambleHtml = html.slice(0, matches[0].index).trim();
+  if (preambleHtml && stripHtmlTags(preambleHtml)) {
+    sections.push({ key: mintKey('preamble'), heading: null, level: 0, content_html: preambleHtml });
+  }
+
+  for (let i = 0; i < matches.length; i += 1) {
+    const match = matches[i];
+    const level = Number(match[1]);
+    const headingText = stripHtmlTags(match[2]);
+    const start = match.index;
+    const end = i + 1 < matches.length ? matches[i + 1].index : html.length;
+    sections.push({
+      key: mintKey(headingText),
+      heading: headingText,
+      level,
+      content_html: html.slice(start, end).trim()
+    });
+  }
+
+  return sections;
+}
+
 /**
  * @param {string} [rootDir]
- * @returns {{ scanned: number, registered: number, skipped: {slug:string, reason:string}[], warnings: string[] }}
+ * @returns {Promise<{ scanned: number, registered: number, skipped: {slug:string, reason:string}[], warnings: string[] }>}
  */
-export function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) {
+export async function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) {
   const result = { scanned: 0, registered: 0, skipped: [], warnings: [] };
   if (!existsSync(rootDir)) {
     result.warnings.push(`Library directory does not exist: ${rootDir}`);
@@ -133,9 +254,9 @@ export function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) {
     INSERT INTO document_library_masters (
       id, slug, display_name, category, form_type, engine, version,
       template_file_path, placeholders_json, manifest_json,
-      required_signer_role, renewal_days, is_active, last_synced_at,
+      required_signer_role, renewal_days, sections_json, is_active, last_synced_at,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'), datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'), datetime('now'))
     ON CONFLICT(slug) DO UPDATE SET
       display_name = excluded.display_name,
       category = excluded.category,
@@ -147,10 +268,12 @@ export function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) {
       manifest_json = excluded.manifest_json,
       required_signer_role = excluded.required_signer_role,
       renewal_days = excluded.renewal_days,
+      sections_json = excluded.sections_json,
       is_active = 1,
       last_synced_at = datetime('now'),
       updated_at = datetime('now')
   `);
+  const previousSectionsStmt = db.prepare('SELECT sections_json FROM document_library_masters WHERE slug = ?');
 
   for (const dirName of entries) {
     result.scanned += 1;
@@ -192,6 +315,25 @@ export function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) {
       result.warnings.push(`[${manifest.slug}] unknown placeholders ignored: ${unknown.join(', ')}`);
     }
 
+    let sectionsJson = null;
+    if (manifest.category === 'policy' && manifest.engine === 'docxtemplater') {
+      try {
+        const previousRow = previousSectionsStmt.get(manifest.slug);
+        let previousSections = [];
+        if (previousRow?.sections_json) {
+          try {
+            previousSections = JSON.parse(previousRow.sections_json);
+          } catch {
+            previousSections = [];
+          }
+        }
+        const sections = await extractPolicySections(templateFilePath, previousSections);
+        sectionsJson = JSON.stringify(sections);
+      } catch (err) {
+        result.warnings.push(`[${manifest.slug}] section extraction failed: ${err.message}`);
+      }
+    }
+
     upsertStmt.run(
       uuidv4(),
       manifest.slug,
@@ -204,7 +346,8 @@ export function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) {
       JSON.stringify(manifest.placeholders || []),
       JSON.stringify(manifest),
       manifest.required_signer_role || null,
-      Number.isFinite(manifest.renewal_days) ? manifest.renewal_days : null
+      Number.isFinite(manifest.renewal_days) ? manifest.renewal_days : null,
+      sectionsJson
     );
     result.registered += 1;
   }
@@ -299,6 +442,140 @@ export function cloneAllLibraryMastersForOrg(orgId) {
   return { cloned };
 }
 
+const VALID_OVERRIDE_MODES = new Set(['inherit', 'sections', 'full_upload']);
+
+/**
+ * A policy master's section list (from `sections_json`), or `[]` if the master hasn't been
+ * through section extraction (non-policy category, non-docxtemplater engine, or not yet synced).
+ * @param {string} masterId
+ * @returns {Array<{key:string, heading:string|null, level:number, content_html:string}>}
+ */
+export function getMasterSections(masterId) {
+  const master = db.prepare('SELECT sections_json FROM document_library_masters WHERE id = ?').get(masterId);
+  if (!master?.sections_json) return [];
+  try {
+    return JSON.parse(master.sections_json);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * @param {string} orgId
+ * @param {string} masterId
+ * @returns {Array<{section_key:string, content_html:string, updated_at:string, updated_by:string|null}>}
+ */
+export function listOrgSectionOverrides(orgId, masterId) {
+  return db
+    .prepare(
+      'SELECT section_key, content_html, updated_at, updated_by FROM document_library_org_section_overrides WHERE org_id = ? AND master_id = ?'
+    )
+    .all(orgId, masterId);
+}
+
+/**
+ * Save (or update) one org's override for a single section. The section key must exist on the
+ * master's current section list — this is what stops a stale/typo'd key from silently never
+ * being applied at render time.
+ * @param {string} orgId
+ * @param {string} masterId
+ * @param {string} sectionKey
+ * @param {string} contentHtml
+ * @param {string|null} [updatedBy]
+ */
+export function upsertOrgSectionOverride(orgId, masterId, sectionKey, contentHtml, updatedBy = null) {
+  const sections = getMasterSections(masterId);
+  if (!sections.some((s) => s.key === sectionKey)) {
+    throw new Error(`Unknown section_key "${sectionKey}" for master ${masterId}`);
+  }
+  if (typeof contentHtml !== 'string' || !contentHtml.trim()) {
+    throw new Error('content_html is required');
+  }
+  db.prepare(`
+    INSERT INTO document_library_org_section_overrides (id, org_id, master_id, section_key, content_html, updated_at, updated_by)
+    VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
+    ON CONFLICT(org_id, master_id, section_key) DO UPDATE SET
+      content_html = excluded.content_html,
+      updated_at = datetime('now'),
+      updated_by = excluded.updated_by
+  `).run(uuidv4(), orgId, masterId, sectionKey, contentHtml, updatedBy);
+}
+
+/**
+ * Revert one section back to the master's own content.
+ * @param {string} orgId
+ * @param {string} masterId
+ * @param {string} sectionKey
+ */
+export function deleteOrgSectionOverride(orgId, masterId, sectionKey) {
+  db.prepare(
+    'DELETE FROM document_library_org_section_overrides WHERE org_id = ? AND master_id = ? AND section_key = ?'
+  ).run(orgId, masterId, sectionKey);
+}
+
+/**
+ * Switch an org's clone between inheriting the master as-is, overriding individual sections, or
+ * fully replacing the document with their own upload. Creates the clone row if it doesn't exist
+ * yet (mirrors `cloneLibraryMasterToOrg`).
+ * @param {string} orgId
+ * @param {string} masterId
+ * @param {'inherit'|'sections'|'full_upload'} mode
+ */
+export function setOrgCloneOverrideMode(orgId, masterId, mode) {
+  if (!VALID_OVERRIDE_MODES.has(mode)) {
+    throw new Error(`mode must be one of: ${[...VALID_OVERRIDE_MODES].join(', ')}`);
+  }
+  cloneLibraryMasterToOrg(masterId, orgId);
+  db.prepare(`
+    UPDATE document_library_org_clones
+    SET override_mode = ?, updated_at = datetime('now')
+    WHERE master_id = ? AND org_id = ?
+  `).run(mode, masterId, orgId);
+}
+
+/**
+ * The org's fully-uploaded replacement document for a master, if `override_mode` is
+ * `full_upload`. Repurposes the (previously unused) `org_company_documents` table.
+ * @param {string} orgId
+ * @param {string} masterId
+ * @returns {object|null}
+ */
+export function getOrgFullUploadDocument(orgId, masterId) {
+  return db
+    .prepare('SELECT * FROM org_company_documents WHERE org_id = ? AND library_master_id = ?')
+    .get(orgId, masterId) || null;
+}
+
+/**
+ * Store an org's fully-uploaded replacement document for a master.
+ * @param {object} params
+ * @param {string} params.orgId
+ * @param {string} params.masterId
+ * @param {string} params.filePath - relative path, same convention as `company_policy_files.file_path`
+ * @param {string} params.originalFilename
+ * @param {string} params.mime
+ */
+export function upsertOrgFullUploadDocument({ orgId, masterId, filePath, originalFilename, mime }) {
+  const master = db.prepare('SELECT slug, display_name, category FROM document_library_masters WHERE id = ?').get(masterId);
+  if (!master) throw new Error('Master not found');
+  const engine = mime === 'application/pdf' ? 'static-pdf' : 'docxtemplater';
+  const existing = db.prepare('SELECT id FROM org_company_documents WHERE org_id = ? AND slug = ?').get(orgId, master.slug);
+  if (existing) {
+    db.prepare(`
+      UPDATE org_company_documents
+      SET engine = ?, template_filename = ?, file_path = ?, source = 'upload', library_master_id = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(engine, originalFilename, filePath, masterId, existing.id);
+    return existing.id;
+  }
+  const id = uuidv4();
+  db.prepare(`
+    INSERT INTO org_company_documents (id, org_id, slug, display_name, category, engine, template_filename, file_path, source, library_master_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'upload', ?, datetime('now'), datetime('now'))
+  `).run(id, orgId, master.slug, master.display_name, master.category || 'policy', engine, originalFilename, filePath, masterId);
+  return id;
+}
+
 function enrichLibraryMasterRow(row) {
   let manifest = {};
   try {
@@ -307,15 +584,26 @@ function enrichLibraryMasterRow(row) {
     /* ignore malformed manifest */
   }
   const packs = normalizeManifestPacks(manifest);
+  let sectionCount = 0;
+  if (row.sections_json) {
+    try {
+      sectionCount = JSON.parse(row.sections_json).length;
+    } catch {
+      sectionCount = 0;
+    }
+  }
+  const { sections_json, ...rest } = row;
   return {
-    ...row,
+    ...rest,
     packs,
     pack: packs[0] || manifest.pack || null,
     signature_count: Number(manifest.signature_count) || 0,
     category: row.category || manifest.category || null,
     required_signer_role: row.required_signer_role ?? manifest.required_signer_role ?? null,
     participant_service_types: manifest.participant_service_types || ['all'],
-    staff_roles: manifest.staff_roles || ['all']
+    staff_roles: manifest.staff_roles || ['all'],
+    section_count: sectionCount,
+    override_mode: row.override_mode || 'inherit'
   };
 }
 
@@ -330,7 +618,8 @@ export function listLibraryMasters(orgId = null) {
     SELECT m.*,
            c.id as clone_id,
            c.is_active as clone_active,
-           c.variable_overrides_json
+           c.variable_overrides_json,
+           c.override_mode
     FROM document_library_masters m
     LEFT JOIN document_library_org_clones c ON c.master_id = m.id AND c.org_id = ?
     WHERE m.is_active = 1

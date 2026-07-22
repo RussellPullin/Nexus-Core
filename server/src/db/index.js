@@ -2261,6 +2261,7 @@ try {
         provider_profile_id TEXT,
         form_template_id TEXT,
         variable_overrides_json TEXT,
+        override_mode TEXT NOT NULL DEFAULT 'inherit',
         is_active INTEGER DEFAULT 1,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
@@ -2269,7 +2270,30 @@ try {
         FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_document_library_org_clones_org ON document_library_org_clones(org_id);
+
+      CREATE TABLE IF NOT EXISTS document_library_org_section_overrides (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        master_id TEXT NOT NULL,
+        section_key TEXT NOT NULL,
+        content_html TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now')),
+        updated_by TEXT,
+        UNIQUE(org_id, master_id, section_key),
+        FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE,
+        FOREIGN KEY (master_id) REFERENCES document_library_masters(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_document_library_org_section_overrides_org_master
+        ON document_library_org_section_overrides(org_id, master_id);
     `);
+    const dlmCols = db.prepare('PRAGMA table_info(document_library_masters)').all();
+    if (!dlmCols.some((c) => c.name === 'sections_json')) {
+      db.exec('ALTER TABLE document_library_masters ADD COLUMN sections_json TEXT');
+    }
+    const dlocCols = db.prepare('PRAGMA table_info(document_library_org_clones)').all();
+    if (!dlocCols.some((c) => c.name === 'override_mode')) {
+      db.exec("ALTER TABLE document_library_org_clones ADD COLUMN override_mode TEXT NOT NULL DEFAULT 'inherit'");
+    }
   } catch (e) {
     if (!e.message?.includes('already exists')) console.warn('document library migration:', e.message);
   }
