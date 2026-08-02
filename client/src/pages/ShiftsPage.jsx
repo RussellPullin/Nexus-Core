@@ -184,7 +184,7 @@ export default function ShiftsPage() {
   );
 
   const handleCleanupDuplicates = async () => {
-    if (!confirm('Remove duplicate shifts?\n\n• Extra copies of the same client + worker + date + time (keeps one scheduled shift)\n• Past empty shifts when a completed shift already exists for that slot\n\nThis permanently deletes the extras.')) return;
+    if (!confirm('Remove duplicate shifts?\n\n• Extra copies of the same client + worker + date + time (keeps one scheduled shift)\n• Empty scheduled shifts when a completed shift already exists for the same client + worker on the same date (including close start times)\n\nThis permanently deletes the extras.')) return;
     setCleaningDuplicates(true);
     try {
       const r = await shifts.cleanupDuplicates();

@@ -25,7 +25,10 @@ import {
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 import { recordSuppressedShifterShiftId } from '../services/shiftImportSuppression.service.js';
 import { hardDeleteShiftRow } from '../services/shiftHardDelete.service.js';
-import { cleanupAllDuplicateShifts } from '../services/shiftDuplicateCleanup.service.js';
+import {
+  cleanupAllDuplicateShifts,
+  filterSupersededScheduledShifts,
+} from '../services/shiftDuplicateCleanup.service.js';
 import { findShiftBySameSlot, normalizeShiftDateTimePrefix } from '../services/progressNoteMatcher.js';
 import { SHIFT_INVOICE_RESOLVE_SQL, findInvalidShiftInvoiceLinks, repairInvalidShiftInvoiceLinks, shiftImportIdentityMatches } from '../services/shiftInvoiceLink.service.js';
 
@@ -139,6 +142,11 @@ router.get('/', (req, res) => {
     if (recurring_group_id) {
       shifts = shifts.filter(s => s.recurring_group_id === recurring_group_id);
     }
+
+    // When a worker completes a shift, Shifter often creates a new completed row instead of
+    // updating the roster placeholder. Hide the empty scheduled copy once a completed shift
+    // exists for the same client on the same date with a close start time.
+    shifts = filterSupersededScheduledShifts(shifts);
 
     res.json(shifts);
   } catch (err) {

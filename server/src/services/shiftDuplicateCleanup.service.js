@@ -1,12 +1,20 @@
 /**
  * Automatic cleanup of duplicate shifts:
- * 1) Empty past duplicates when a noted shift exists at the same time (legacy rule).
+ * 1) Empty past/today duplicates when a completed shift exists for the same client + worker
+ *    on the same date at a close start time (or overlapping window).
  * 2) Exact same-slot copies (usually scheduled roster placeholders) — keep one, remove extras.
+ *
+ * Also exports a view filter so the planner/table can hide scheduled placeholders that were
+ * fulfilled by a nearby completed shift (same client, same date, close start) without waiting
+ * for hard-delete cleanup.
  */
 import { db } from '../db/index.js';
 import { shiftCompletionEvidenceSql } from '../lib/shiftBillingEligibility.js';
 import { hardDeleteShiftRow } from './shiftHardDelete.service.js';
 import { normalizeShiftDateTimePrefix } from './progressNoteMatcher.js';
+
+/** Start times within this many minutes count as "close" for superseding a scheduled placeholder. */
+export const SUPERSEDE_START_TOLERANCE_MIN = 60;
 
 /** Local 'YYYY-MM-DD' for "today" (server local time). */
 function todayDateStr(now = new Date()) {
@@ -14,6 +22,90 @@ function todayDateStr(now = new Date()) {
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+function shiftLocalDate(row) {
+  const n = normalizeShiftDateTimePrefix(row?.start_time);
+  return n.length >= 10 ? n.slice(0, 10) : '';
+}
+
+function shiftStartMinutes(row) {
+  const n = normalizeShiftDateTimePrefix(row?.start_time);
+  if (n.length < 16) return null;
+  const h = Number(n.slice(11, 13));
+  const m = Number(n.slice(14, 16));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+function startsClose(a, b, toleranceMin = SUPERSEDE_START_TOLERANCE_MIN) {
+  const am = shiftStartMinutes(a);
+  const bm = shiftStartMinutes(b);
+  if (am == null || bm == null) return false;
+  return Math.abs(am - bm) <= toleranceMin;
+}
+
+function isCompletedLikeStatus(row) {
+  const st = String(row?.status || '')
+    .trim()
+    .toLowerCase();
+  return st === 'completed' || st === 'completed_by_admin';
+}
+
+function isScheduledPlaceholderStatus(row) {
+  const st = String(row?.status || '')
+    .trim()
+    .toLowerCase();
+  return !st || st === 'scheduled';
+}
+
+function shiftIsBilled(row) {
+  return (
+    (row.billing_invoice_id != null && String(row.billing_invoice_id).trim() !== '') ||
+    Number(row.has_legacy_invoice) === 1
+  );
+}
+
+function scheduledLooksEmpty(row) {
+  if (!isScheduledPlaceholderStatus(row)) return false;
+  if (row?.notes && String(row.notes).trim()) return false;
+  if (row?.expenses != null && Number(row.expenses) > 0) return false;
+  if (Number(row?.line_items_locked) === 1) return false;
+  if (shiftIsBilled(row)) return false;
+  return true;
+}
+
+/**
+ * Hide scheduled roster placeholders from list/planner when a completed shift already
+ * exists for the same client on the same date with a close start time.
+ * Does not mutate the database — completed rows stay; empty scheduled rows are omitted.
+ *
+ * @param {Array<object>} shifts
+ * @param {{ toleranceMin?: number }} [opts]
+ * @returns {Array<object>}
+ */
+export function filterSupersededScheduledShifts(shifts, opts = {}) {
+  if (!Array.isArray(shifts) || shifts.length < 2) return shifts || [];
+  const toleranceMin = opts.toleranceMin ?? SUPERSEDE_START_TOLERANCE_MIN;
+  const completed = shifts.filter(isCompletedLikeStatus);
+  if (!completed.length) return shifts;
+
+  const hideIds = new Set();
+  for (const sched of shifts) {
+    if (!scheduledLooksEmpty(sched)) continue;
+    const date = shiftLocalDate(sched);
+    if (!date || !sched.participant_id) continue;
+    const match = completed.find(
+      (c) =>
+        c.id !== sched.id &&
+        c.participant_id === sched.participant_id &&
+        shiftLocalDate(c) === date &&
+        startsClose(c, sched, toleranceMin),
+    );
+    if (match) hideIds.add(sched.id);
+  }
+  if (!hideIds.size) return shifts;
+  return shifts.filter((s) => !hideIds.has(s.id));
 }
 
 function sameSlotKey(row) {
@@ -38,13 +130,6 @@ function keeperScore(row) {
   return score;
 }
 
-function shiftIsBilled(row) {
-  return (
-    (row.billing_invoice_id != null && String(row.billing_invoice_id).trim() !== '') ||
-    Number(row.has_legacy_invoice) === 1
-  );
-}
-
 function shiftIsDeletableDuplicate(row) {
   const st = String(row.status || '').trim().toLowerCase();
   if (st === 'cancelled' || st === 'canceled') return false;
@@ -61,9 +146,12 @@ function shiftIsDeletableDuplicate(row) {
 export function findDuplicateUnworkedShifts(opts = {}) {
   const orgId = opts.orgId ? String(opts.orgId).trim() : null;
   const today = todayDateStr(opts.now || new Date());
+  const tolerance = opts.toleranceMin ?? SUPERSEDE_START_TOLERANCE_MIN;
 
   // Normalised time expression so 'YYYY-MM-DD HH:MM:SS' and 'YYYY-MM-DDTHH:MM:SS' compare correctly.
   const norm = (col) => `REPLACE(${col}, ' ', 'T')`;
+  const startMins = (col) =>
+    `(CAST(substr(${norm(col)}, 12, 2) AS INTEGER) * 60 + CAST(substr(${norm(col)}, 15, 2) AS INTEGER))`;
 
   const params = [];
   let orgClause = '';
@@ -71,8 +159,14 @@ export function findDuplicateUnworkedShifts(opts = {}) {
     orgClause = 'AND p.provider_org_id = ?';
     params.push(orgId);
   }
-  // start date (first 10 chars of normalised start) strictly before today
+  // Include today: once a completed shift exists, the empty scheduled placeholder can go.
   params.push(today);
+  params.push(tolerance);
+
+  const completedLike = `(
+    ${shiftCompletionEvidenceSql('s2')}
+    OR LOWER(COALESCE(s2.status, '')) IN ('completed', 'completed_by_admin')
+  )`;
 
   const candidates = db
     .prepare(
@@ -84,17 +178,23 @@ export function findDuplicateUnworkedShifts(opts = {}) {
         ${orgClause}
         AND s.billing_invoice_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id)
-        AND LOWER(COALESCE(s.status, '')) NOT IN ('cancelled', 'canceled')
+        AND LOWER(COALESCE(s.status, '')) IN ('', 'scheduled')
         AND NOT ${shiftCompletionEvidenceSql('s')}
-        AND substr(${norm('s.start_time')}, 1, 10) < ?
+        AND substr(${norm('s.start_time')}, 1, 10) <= ?
         AND EXISTS (
           SELECT 1 FROM shifts s2
           WHERE s2.id <> s.id
             AND s2.participant_id = s.participant_id
             AND s2.staff_id = s.staff_id
-            AND ${norm('s2.start_time')} < ${norm('s.end_time')}
-            AND ${norm('s2.end_time')} > ${norm('s.start_time')}
-            AND ${shiftCompletionEvidenceSql('s2')}
+            AND substr(${norm('s2.start_time')}, 1, 10) = substr(${norm('s.start_time')}, 1, 10)
+            AND (
+              (
+                ${norm('s2.start_time')} < ${norm('s.end_time')}
+                AND ${norm('s2.end_time')} > ${norm('s.start_time')}
+              )
+              OR ABS(${startMins('s2.start_time')} - ${startMins('s.start_time')}) <= ?
+            )
+            AND ${completedLike}
         )
       ORDER BY s.start_time
     `,
