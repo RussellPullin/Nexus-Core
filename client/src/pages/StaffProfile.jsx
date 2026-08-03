@@ -958,6 +958,7 @@ export default function StaffProfile() {
           ) : null}
           <OnboardingDocumentSelectPanel
             mode="staff"
+            staffId={id}
             recipientEmail={data.email.trim()}
             recipientName={data.name || ''}
             defaultContextValue={inferStaffOnboardingRole(data || {})}

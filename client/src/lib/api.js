@@ -856,7 +856,24 @@ export const staff = {
   signatureEnvelopeFileUrl: (staffId, envelopeId, kind) =>
     `${API}/staff/${staffId}/signature-envelopes/${envelopeId}/${kind}`,
   deleteSignatureEnvelope: (staffId, envelopeId) =>
-    fetchApi(`/staff/${staffId}/signature-envelopes/${envelopeId}`, { method: 'DELETE' })
+    fetchApi(`/staff/${staffId}/signature-envelopes/${envelopeId}`, { method: 'DELETE' }),
+  getOnboardingOrgFields: (staffId, masterId) =>
+    fetchApi(`/staff/${staffId}/onboarding-org-fields/${masterId}`),
+  /** Returns an ArrayBuffer (PDF bytes), not JSON — the fill-and-sign preview renders it via pdfjs-dist. */
+  previewOnboardingDocument: async (staffId, masterId, adminFieldValues) => {
+    const res = await fetch(`${API}/staff/${staffId}/onboarding-preview`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ master_id: masterId, admin_field_values: adminFieldValues || {} })
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Could not render preview');
+    }
+    return res.arrayBuffer();
+  }
 };
 
 export const shifts = {

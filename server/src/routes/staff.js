@@ -16,6 +16,8 @@ import { orchestrateStaffOnboarding } from '../services/staffOnboardingOrchestra
 import { generateStaffContractBuffers } from '../services/staffContractFill.service.js';
 import { prepareSplitOnboardingSend } from '../services/onboardingDocumentSend.service.js';
 import { sendStaffCustomTemplateForSignature } from '../services/staffCustomFormSignature.service.js';
+import { listOnboardingLibraryMasters, renderLibraryMasterAttachment } from '../services/onboardingDocumentPacks.service.js';
+import { getLibraryMasterOrgFields } from '../services/libraryDocumentSignature.service.js';
 import { VALID_STAFF_ONBOARDING_ROLES } from '../../../shared/onboardingDocumentContext.js';
 import { getStaffIntakeFieldMap, mergeStaffIntakeForProfile } from '../services/staffOnboardingSync.service.js';
 import { STAFF_ONBOARDING_FIELD_DEFS } from '../../../shared/onboardingFieldRegistry.js';
@@ -1020,6 +1022,45 @@ router.get('/:id/onboarding/status', requireAdminOrDelegate, (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/staff/:id/onboarding-org-fields/:masterId — the org-signer fields (signature/date/text
+// boxes) declared on a library master's signing_layout, used by the admin fill-and-sign preview
+// to know which admin_fields have a real page position worth overlaying.
+router.get('/:id/onboarding-org-fields/:masterId', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(req.params.id, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+    const master = listOnboardingLibraryMasters(orgId, 'staff_onboarding').find((m) => m.id === req.params.masterId);
+    if (!master) return res.status(404).json({ error: 'Document not found' });
+    const fields = await getLibraryMasterOrgFields({ masterId: master.id, orgId, workflow: 'staff_onboarding' });
+    res.json({ fields });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/staff/:id/onboarding-preview — render a library master with the admin's in-progress
+// field values, for the fill-and-sign preview. Read-only: never touches the actual send path.
+router.post('/:id/onboarding-preview', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const orgId = requesterOrgId(req.session?.user?.id);
+    const s = visibleStaffById(req.params.id, orgId);
+    if (!s) return res.status(404).json({ error: 'Staff not found' });
+    const masterId = req.body?.master_id;
+    const master = listOnboardingLibraryMasters(orgId, 'staff_onboarding').find((m) => m.id === masterId);
+    if (!master) return res.status(404).json({ error: 'Document not found' });
+    const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
+    const extra = req.body?.admin_field_values && typeof req.body.admin_field_values === 'object' ? req.body.admin_field_values : {};
+    const att = await renderLibraryMasterAttachment(master, orgId, { staff: staffFull, extra });
+    if (!att?.content) return res.status(500).json({ error: 'Could not render preview' });
+    res.setHeader('Content-Type', att.contentType || 'application/pdf');
+    res.send(att.content);
+  } catch (err) {
+    console.error('[onboarding-preview]', err);
+    res.status(500).json({ error: err.message || 'Could not render preview' });
   }
 });
 

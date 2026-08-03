@@ -6,6 +6,8 @@ import {
   participantServiceTypeLabel,
   staffOnboardingRoleLabel
 } from '@nexus-shared/onboardingDocumentContext.js';
+import AdminDocumentSignPreview from './AdminDocumentSignPreview.jsx';
+import AdminFieldInput from './AdminFieldInput.jsx';
 
 function DocumentChecklist({ docs, selectedIds, toggleDoc, sending, contextLabel }) {
   if (docs.length === 0) return null;
@@ -66,27 +68,6 @@ function DocumentChecklist({ docs, selectedIds, toggleDoc, sending, contextLabel
   );
 }
 
-function AdminFieldInput({ field, value, onChange }) {
-  if (field.type === 'select') {
-    return (
-      <select className="form-input" value={value || ''} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Select…</option>
-        {(field.options || []).map((opt) => (
-          <option key={opt} value={opt}>{opt}</option>
-        ))}
-      </select>
-    );
-  }
-  return (
-    <input
-      type={field.type === 'date' ? 'date' : 'text'}
-      className="form-input"
-      value={value || ''}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  );
-}
-
 /**
  * One-document-at-a-time wizard for filling admin_fields declared on a document's manifest
  * before it's sent for signature (e.g. remuneration rate, governing state).
@@ -133,6 +114,7 @@ function AdminFieldsWizard({ docs, index, values, onChange, onBack, onNext, send
  */
 export default function OnboardingDocumentSelectPanel({
   mode,
+  staffId = null,
   recipientEmail,
   recipientName,
   defaultContextValue = 'all',
@@ -295,6 +277,20 @@ export default function OnboardingDocumentSelectPanel({
   if (!active) return null;
 
   if (wizardDocs) {
+    if (!isParticipant && staffId) {
+      return (
+        <AdminDocumentSignPreview
+          staffId={staffId}
+          docs={wizardDocs}
+          index={wizardIndex}
+          values={adminFieldValues}
+          onChange={handleWizardFieldChange}
+          onBack={handleWizardBack}
+          onNext={handleWizardNext}
+          sending={busy}
+        />
+      );
+    }
     return (
       <AdminFieldsWizard
         docs={wizardDocs}
