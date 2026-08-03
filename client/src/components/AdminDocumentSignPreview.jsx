@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { staff as staffApi } from '../lib/api';
+import { staff as staffApi, onboarding as onboardingApi } from '../lib/api';
 import SignatureCanvas from './SignatureCanvas';
 import AdminFieldInput from './AdminFieldInput.jsx';
 
@@ -151,9 +151,15 @@ function DocumentPreviewPages({ pdfBytes, positionedFields, values, onFieldChang
   );
 }
 
-export default function AdminDocumentSignPreview({ staffId, docs, index, values, onChange, onBack, onNext, sending }) {
+export default function AdminDocumentSignPreview({ staffId, participantId, docs, index, values, onChange, onBack, onNext, sending }) {
   const doc = docs[index];
   const docValues = values[doc?.id] || {};
+
+  const api = participantId
+    ? { preview: onboardingApi.previewOnboardingDocument, orgFields: onboardingApi.getOnboardingOrgFields }
+    : { preview: staffApi.previewOnboardingDocument, orgFields: staffApi.getOnboardingOrgFields };
+  const recipientId = participantId || staffId;
+  const recipientLabel = participantId ? 'participant' : 'staff member';
 
   const [orgFields, setOrgFields] = useState([]);
   const [pdfBytes, setPdfBytes] = useState(null);
@@ -168,7 +174,7 @@ export default function AdminDocumentSignPreview({ staffId, docs, index, values,
       setLoading(true);
       setError('');
       try {
-        const buf = await staffApi.previewOnboardingDocument(staffId, doc.id, fieldValues);
+        const buf = await api.preview(recipientId, doc.id, fieldValues);
         setPdfBytes(new Uint8Array(buf));
       } catch (err) {
         setError(err.message || 'Could not render preview');
@@ -176,15 +182,16 @@ export default function AdminDocumentSignPreview({ staffId, docs, index, values,
         setLoading(false);
       }
     },
-    [staffId, doc?.id]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [recipientId, doc?.id]
   );
 
   useEffect(() => {
     if (!doc) return;
     let cancelled = false;
     setPdfBytes(null);
-    staffApi
-      .getOnboardingOrgFields(staffId, doc.id)
+    api
+      .orgFields(recipientId, doc.id)
       .then((res) => {
         if (!cancelled) setOrgFields(res?.fields || []);
       })
@@ -232,7 +239,7 @@ export default function AdminDocumentSignPreview({ staffId, docs, index, values,
   return (
     <div>
       <p className="forms-muted" style={{ marginTop: 0 }}>
-        Prepare document {index + 1} of {docs.length} before it's sent to the staff member — fill in your part and
+        Prepare document {index + 1} of {docs.length} before it's sent to the {recipientLabel} — fill in your part and
         sign directly on the document below.
       </p>
 

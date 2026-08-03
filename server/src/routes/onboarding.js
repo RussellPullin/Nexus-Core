@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { db } from '../db/index.js';
-import { canAccessParticipant, sessionIsAdminOrDelegate } from '../middleware/roles.js';
+import { canAccessParticipant, sessionIsAdminOrDelegate, requireAdminOrDelegate } from '../middleware/roles.js';
 import {
   initializeParticipantOnboarding,
   upsertIntakeFields,
@@ -41,6 +41,8 @@ import { fillConsentForm, getConsentFormPath, convertDocxToPdf } from '../servic
 import { tryPushParticipantDocument } from '../services/orgOnedriveSync.service.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from '../services/notification.service.js';
 import { prepareSplitOnboardingSend } from '../services/onboardingDocumentSend.service.js';
+import { listOnboardingLibraryMasters, renderLibraryMasterAttachment } from '../services/onboardingDocumentPacks.service.js';
+import { getLibraryMasterOrgFields } from '../services/libraryDocumentSignature.service.js';
 import { VALID_PARTICIPANT_SERVICE_TYPES } from '../../../shared/onboardingDocumentContext.js';
 import { orchestrateParticipantOnboarding } from '../services/participantOnboardingOrchestrator.service.js';
 import {
@@ -285,6 +287,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
     const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
     const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(req.params.id);
     const includeExtraPdfs = req.body?.include_extra_pdfs !== false;
+    const adminFieldValuesByMasterId = req.body?.admin_field_values || {};
 
     let attachments = [];
     let signatureRequests = [];
@@ -296,7 +299,8 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
         masterIds: hasSelection ? masterIds : undefined,
         participant: fullParticipant,
         includeExtraPdfs,
-        orgName
+        orgName,
+        adminFieldValuesByMasterId
       });
       attachments = splitSend.policyAttachments;
       signatureRequests = splitSend.signatureRequests;
@@ -367,6 +371,48 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
   } catch (err) {
     console.error('[send-onboarding-pack]', err);
     res.status(400).json({ error: formatSmtpAuthError(err) });
+  }
+});
+
+// GET /api/onboarding/participants/:id/onboarding-org-fields/:masterId — the org-signer fields
+// (signature/date/text boxes) declared on a library master's signing_layout, used by the admin
+// fill-and-sign preview to know which admin_fields have a real page position worth overlaying.
+router.get('/participants/:id/onboarding-org-fields/:masterId', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const onboarding = getOnboardingByParticipant(req.params.id);
+    if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
+    const pp = db.prepare(`SELECT organisation_id FROM provider_profiles WHERE id = ?`).get(onboarding.provider_profile_id);
+    const orgId = pp?.organisation_id || null;
+    const master = listOnboardingLibraryMasters(orgId, 'participant_onboarding').find((m) => m.id === req.params.masterId);
+    if (!master) return res.status(404).json({ error: 'Document not found' });
+    const fields = await getLibraryMasterOrgFields({ masterId: master.id, orgId, workflow: 'participant_onboarding' });
+    res.json({ fields });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/onboarding/participants/:id/onboarding-preview — render a library master with the
+// admin's in-progress field values, for the fill-and-sign preview. Read-only: never touches the
+// actual send path.
+router.post('/participants/:id/onboarding-preview', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const onboarding = getOnboardingByParticipant(req.params.id);
+    if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
+    const pp = db.prepare(`SELECT organisation_id FROM provider_profiles WHERE id = ?`).get(onboarding.provider_profile_id);
+    const orgId = pp?.organisation_id || null;
+    const masterId = req.body?.master_id;
+    const master = listOnboardingLibraryMasters(orgId, 'participant_onboarding').find((m) => m.id === masterId);
+    if (!master) return res.status(404).json({ error: 'Document not found' });
+    const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(req.params.id);
+    const extra = req.body?.admin_field_values && typeof req.body.admin_field_values === 'object' ? req.body.admin_field_values : {};
+    const att = await renderLibraryMasterAttachment(master, orgId, { participant: fullParticipant, extra });
+    if (!att?.content) return res.status(500).json({ error: 'Could not render preview' });
+    res.setHeader('Content-Type', att.contentType || 'application/pdf');
+    res.send(att.content);
+  } catch (err) {
+    console.error('[onboarding-preview]', err);
+    res.status(500).json({ error: err.message || 'Could not render preview' });
   }
 });
 

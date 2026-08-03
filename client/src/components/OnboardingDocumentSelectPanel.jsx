@@ -115,6 +115,7 @@ function AdminFieldsWizard({ docs, index, values, onChange, onBack, onNext, send
 export default function OnboardingDocumentSelectPanel({
   mode,
   staffId = null,
+  participantId = null,
   recipientEmail,
   recipientName,
   defaultContextValue = 'all',
@@ -277,10 +278,11 @@ export default function OnboardingDocumentSelectPanel({
   if (!active) return null;
 
   if (wizardDocs) {
-    if (!isParticipant && staffId) {
+    if ((!isParticipant && staffId) || (isParticipant && participantId)) {
       return (
         <AdminDocumentSignPreview
-          staffId={staffId}
+          staffId={!isParticipant ? staffId : null}
+          participantId={isParticipant ? participantId : null}
           docs={wizardDocs}
           index={wizardIndex}
           values={adminFieldValues}

@@ -1516,6 +1516,7 @@ export default function OnboardingPage() {
       <OnboardingDocumentSelectModal
         open={showPackModal}
         mode="participant"
+        participantId={id}
         recipientEmail={participant?.email?.trim() || ''}
         recipientName={participant?.name || ''}
         defaultContextValue={inferParticipantServiceType(intake)}

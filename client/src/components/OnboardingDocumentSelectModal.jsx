@@ -6,6 +6,8 @@ import OnboardingDocumentSelectPanel from './OnboardingDocumentSelectPanel.jsx';
 export default function OnboardingDocumentSelectModal({
   open,
   mode,
+  staffId = null,
+  participantId = null,
   recipientEmail,
   recipientName,
   defaultContextValue = 'all',
@@ -30,6 +32,8 @@ export default function OnboardingDocumentSelectModal({
         </h3>
         <OnboardingDocumentSelectPanel
           mode={mode}
+          staffId={staffId}
+          participantId={participantId}
           recipientEmail={recipientEmail}
           recipientName={recipientName}
           defaultContextValue={defaultContextValue}

@@ -26,5 +26,45 @@
   ],
   "packs": [
     "participant_onboarding"
+  ],
+  "signing_layout": {
+    "page_width": 595,
+    "page_height": 842,
+    "page_count": 20,
+    "fields": [
+      {
+        "id": "org-signature",
+        "page": 20,
+        "x": 36,
+        "y": 250,
+        "width": 170,
+        "height": 24,
+        "type": "signature",
+        "merge_key": "org_signature",
+        "label": "Organisation signature",
+        "signer": "org",
+        "required": true
+      },
+      {
+        "id": "participant-signature",
+        "page": 20,
+        "x": 36,
+        "y": 378,
+        "width": 170,
+        "height": 24,
+        "type": "signature",
+        "merge_key": "signature",
+        "signer": "participant",
+        "required": true
+      }
+    ]
+  },
+  "admin_fields": [
+    {
+      "key": "org_signature",
+      "label": "Organisation signature (type full name to sign)",
+      "type": "text",
+      "required": true
+    }
   ]
 }

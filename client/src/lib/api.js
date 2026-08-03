@@ -1132,6 +1132,23 @@ export const onboarding = {
   getIntakeToken: (participantId) => fetchApi(`/onboarding/participants/${participantId}/intake-token`),
   sendOnboardingPack: (participantId, body) =>
     fetchApi(`/onboarding/participants/${participantId}/send-onboarding-pack`, { method: 'POST', body: JSON.stringify(body || {}) }),
+  getOnboardingOrgFields: (participantId, masterId) =>
+    fetchApi(`/onboarding/participants/${participantId}/onboarding-org-fields/${masterId}`),
+  /** Returns an ArrayBuffer (PDF bytes), not JSON — the fill-and-sign preview renders it via pdfjs-dist. */
+  previewOnboardingDocument: async (participantId, masterId, adminFieldValues) => {
+    const res = await fetch(`${API}/onboarding/participants/${participantId}/onboarding-preview`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ master_id: masterId, admin_field_values: adminFieldValues || {} })
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Could not render preview');
+    }
+    return res.arrayBuffer();
+  },
   get: (participantId) => fetchApi(`/onboarding/participants/${participantId}`),
   status: (participantId) => fetchApi(`/onboarding/participants/${participantId}/status`),
   updateIntakeFields: (participantId, fields) => fetchApi(`/onboarding/participants/${participantId}/intake-fields`, {
