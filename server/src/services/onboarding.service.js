@@ -16,6 +16,9 @@ import { tryPushParticipantDocument } from './orgOnedriveSync.service.js';
 import { buildPrivacyConsentSnapshot } from './privacyConsentSnapshot.service.js';
 import { generatePrivacyConsentPdfBuffer } from './privacyConsentPdf.service.js';
 import { listOnboardingLibraryMasters } from './onboardingDocumentPacks.service.js';
+import { buildServiceAgreementSnapshot } from './serviceAgreementSnapshot.service.js';
+import { computeServiceAgreementGaps } from './serviceAgreementGaps.service.js';
+import { generateServiceAgreementPdfBuffer } from './serviceAgreementPdf.service.js';
 
 function documentAvailabilityForOnboarding(orgId, profileId, workflow) {
   const libraryCount = listOnboardingLibraryMasters(orgId, workflow).length;
@@ -40,6 +43,16 @@ const onboardingDir = join(projectRoot, 'data', 'onboarding');
 const CORE_FORM_TYPES = ['service_agreement', 'intake_form', 'support_plan', 'privacy_consent'];
 const DEFAULT_HYBRID_SEPARATE = new Set(['privacy_consent']);
 
+/**
+ * Pseudo master-document id representing the structured Service Agreement inside the document
+ * library picker (documentLibrary.js's onboarding-pack list, and the send-onboarding-pack route)
+ * — lets the sender pick it alongside document_library_masters documents like Service Schedule
+ * in the same list/single send, while generation and signing still go through the Service
+ * Agreement's own pipeline (buildServiceAgreementSnapshot / generateServiceAgreementPdfBuffer /
+ * bridgeNexusServiceAgreementToFormInstance), not document_library_masters.
+ */
+export const CORE_SERVICE_AGREEMENT_MASTER_ID = 'core:service_agreement';
+
 function ensureOnboardingDir() {
   if (!existsSync(onboardingDir)) {
     mkdirSync(onboardingDir, { recursive: true });
@@ -50,19 +63,34 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function orgHasNexusServiceAgreement(orgId) {
+export function orgHasNexusServiceAgreement(orgId) {
   if (!orgId) return false;
-  const row = db
+  return Boolean(resolveActiveServiceAgreementTemplate(orgId));
+}
+
+/**
+ * The org's active Service Agreement org-template + its master row — everything
+ * buildServiceAgreementSnapshot/computeServiceAgreementGaps need. Used both by the dedicated
+ * Service Agreement UI (participantServiceAgreements.js) and by the document-library picker's
+ * "core:service_agreement" pseudo-document (documentLibrary.js / onboarding.js), so an org
+ * always has exactly one definition of "which template is active" regardless of which screen
+ * generates from it.
+ * @returns {{ orgTemplate: object, master: object } | null}
+ */
+export function resolveActiveServiceAgreementTemplate(orgId) {
+  if (!orgId) return null;
+  const orgTemplate = db
     .prepare(
-      `
-    SELECT i.id FROM nexus_org_form_templates i
-    JOIN nexus_form_template_masters m ON m.id = i.master_id
-    WHERE i.org_id = ? AND m.template_type = 'service_agreement'
-    LIMIT 1
-  `
+      `SELECT i.* FROM nexus_org_form_templates i
+       JOIN nexus_form_template_masters m ON m.id = i.master_id
+       WHERE i.org_id = ? AND m.template_type = 'service_agreement'
+       ORDER BY datetime(i.updated_at) DESC LIMIT 1`
     )
     .get(orgId);
-  return Boolean(row);
+  if (!orgTemplate) return null;
+  const master = db.prepare(`SELECT * FROM nexus_form_template_masters WHERE id = ?`).get(orgTemplate.master_id);
+  if (!master) return null;
+  return { orgTemplate, master };
 }
 
 function parseJson(value, fallback = null) {
@@ -1220,6 +1248,71 @@ export function bridgeNexusServiceAgreementToFormInstance({
   );
 
   return { form_instance_id: formId, participant_onboarding_id: onboarding.id };
+}
+
+/**
+ * Generate the structured Service Agreement PDF for one participant and bridge it into a normal
+ * participant_form_instances row, so it can be sent for signature the same way as any other
+ * onboarding document — the mechanism behind picking "Service Agreement" from the document
+ * library picker (documentLibrary.js's onboarding-pack list) instead of the dedicated
+ * Service Agreement screen. Throws with a structured `.code` on missing template / blocking gaps
+ * so the caller (onboarding.js's send-onboarding-pack route) can surface a clear error, same as
+ * every other failure mode in that send flow.
+ * @param {{ participantId: string, orgId: string, instanceOverrides?: object }} params
+ * @returns {Promise<{ formInstanceId: string, snapshot: object }>}
+ */
+export async function generateServiceAgreementForBridge({ participantId, orgId, instanceOverrides = {} }) {
+  const resolved = resolveActiveServiceAgreementTemplate(orgId);
+  if (!resolved) {
+    const err = new Error('No Service Agreement template configured for this organisation.');
+    err.code = 'NO_SERVICE_AGREEMENT_TEMPLATE';
+    throw err;
+  }
+
+  const gapResult = computeServiceAgreementGaps({
+    participantId,
+    orgId,
+    masterRow: resolved.master,
+    orgTemplateRow: resolved.orgTemplate,
+    instanceOverrides
+  });
+  if (!gapResult.can_generate) {
+    const titles = gapResult.gaps.filter((g) => g.severity === 'blocking').map((g) => g.title).join(', ');
+    const err = new Error(`Complete required fields before this can be sent: ${titles}.`);
+    err.code = 'SERVICE_AGREEMENT_GAPS';
+    err.gaps = gapResult.gaps;
+    throw err;
+  }
+
+  const snapshot = buildServiceAgreementSnapshot({
+    participantId,
+    orgId,
+    masterRow: resolved.master,
+    orgTemplateRow: resolved.orgTemplate,
+    instanceOverrides
+  });
+  const pdfBuffer = await generateServiceAgreementPdfBuffer(snapshot);
+
+  const generatedRoot = process.env.DATA_DIR ? join(process.env.DATA_DIR, 'generated-forms') : join(projectRoot, 'data', 'generated-forms');
+  const docId = uuidv4();
+  const absPath = join(generatedRoot, orgId, `${docId}.pdf`);
+  mkdirSync(dirname(absPath), { recursive: true });
+  writeFileSync(absPath, pdfBuffer);
+
+  const bridged = bridgeNexusServiceAgreementToFormInstance({
+    participantId,
+    organisationId: orgId,
+    pdfAbsolutePath: absPath,
+    snapshot,
+    nexusGeneratedDocumentId: docId
+  });
+  if (!bridged?.form_instance_id) {
+    const err = new Error('Could not prepare the Service Agreement for signature.');
+    err.code = 'SERVICE_AGREEMENT_BRIDGE_FAILED';
+    throw err;
+  }
+
+  return { formInstanceId: bridged.form_instance_id, snapshot };
 }
 
 /**

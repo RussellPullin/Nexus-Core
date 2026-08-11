@@ -20,13 +20,18 @@ import {
   getTemplateCoverage,
   createAuditEvent,
   assertProviderOnboardingReady,
-  preparePrivacyConsentForm
+  preparePrivacyConsentForm,
+  resolveActiveServiceAgreementTemplate,
+  generateServiceAgreementForBridge,
+  CORE_SERVICE_AGREEMENT_MASTER_ID
 } from '../services/onboarding.service.js';
 import { createAgreementPacket, createAgreementWithDocument, uploadTransientDocument } from '../services/nativeSignature.service.js';
 import {
   buildServiceAgreementDocuSealFields,
   isServiceAgreementSnapshot
 } from '../services/serviceAgreementDocuSealFields.service.js';
+import { buildServiceAgreementSnapshot } from '../services/serviceAgreementSnapshot.service.js';
+import { generateServiceAgreementPdfBuffer } from '../services/serviceAgreementPdf.service.js';
 import {
   buildCustomFormDocuSealFields,
   resolveOrgSignatoryForDocuSeal
@@ -74,6 +79,126 @@ function actorContext(req) {
     actorId: req.headers['x-actor-id'] || null,
     sourceIp: req.headers['x-forwarded-for'] || req.ip || null,
     userAgent: req.headers['user-agent'] || null
+  };
+}
+
+/**
+ * Send an already-generated Service Agreement participant_form_instances row for native
+ * signature. Deliberately a focused duplicate of the service_agreement branch inside
+ * POST /participants/:id/send-form/:formInstanceId, rather than a shared extraction — that
+ * route handles several other form types in the same function body, and duplicating this one
+ * proven path here was lower-risk than restructuring it. Used by send-onboarding-pack for the
+ * "core:service_agreement" pseudo-document; keep both in sync if the signer-resolution logic
+ * changes (see deriveSigners in serviceAgreementDocuSealFields.service.js).
+ */
+async function sendServiceAgreementFormInstanceForSignature({ participantId, formInstanceId, req }) {
+  const onboarding = getOnboardingByParticipant(participantId);
+  if (!onboarding) throw Object.assign(new Error('Onboarding not found'), { code: 'ONBOARDING_NOT_FOUND' });
+
+  const participant = db
+    .prepare('SELECT id, name, email FROM participants WHERE id = ?')
+    .get(participantId);
+  if (!participant) throw Object.assign(new Error('Participant not found'), { code: 'PARTICIPANT_NOT_FOUND' });
+
+  const form = db
+    .prepare(
+      `SELECT pfi.*, ft.form_type, ft.display_name
+       FROM participant_form_instances pfi
+       JOIN form_templates ft ON ft.id = pfi.form_template_id
+       WHERE pfi.id = ? AND pfi.participant_onboarding_id = ?`
+    )
+    .get(formInstanceId, onboarding.id);
+  if (!form || !form.draft_document_path || !existsSync(form.draft_document_path)) {
+    throw Object.assign(new Error('Service Agreement document not found.'), { code: 'SERVICE_AGREEMENT_BRIDGE_FAILED' });
+  }
+
+  const organisationId = onboarding.organisation_id || null;
+  const envelopeRecords = createEnvelopeRecords({
+    participantId: participant.id,
+    participantOnboardingId: onboarding.id,
+    packets: [[form]],
+    packetMode: 'separate',
+    ...actorContext(req)
+  });
+  const envelope = envelopeRecords[0];
+
+  let snap = {};
+  try {
+    snap = parseSnapshot(form) || {};
+  } catch {
+    snap = {};
+  }
+
+  const docBuffer = readFileSync(form.draft_document_path);
+  const filename = `${form.display_name || 'Service-Agreement'}-${participant.name || 'Participant'}.pdf`.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  let docuSealFieldOpts = {};
+  let twoSignerSigners = null;
+  if (isServiceAgreementSnapshot(snap)) {
+    docuSealFieldOpts = buildServiceAgreementDocuSealFields(snap);
+    const derived = docuSealFieldOpts.signers || {};
+    const orgEmail = (derived.org?.email || '').trim();
+    const orgName = (derived.org?.name || '').trim();
+    const primaryEmail = (derived.participant?.email || participant.email || '').trim();
+    const primaryName = (derived.participant?.name || participant.name || '').trim();
+    if (!orgEmail) {
+      throw Object.assign(new Error('Set the default signatory email in Settings → Business so the organisation admin signs first.'), {
+        code: 'ORG_SIGNATORY_MISSING'
+      });
+    }
+    if (!primaryEmail) {
+      throw Object.assign(
+        new Error(
+          snap.signer_type === 'guardian'
+            ? 'Add a representative/guardian email before sending for signature.'
+            : 'Add a participant email before sending for signature.'
+        ),
+        { code: 'GUARDIAN_EMAIL_MISSING' }
+      );
+    }
+    twoSignerSigners = [
+      { name: orgName || 'Organisation admin', email: orgEmail, order: 0, role: derived.org?.role || 'Organisation admin' },
+      { name: primaryName || 'Participant', email: primaryEmail, order: 1, role: derived.participant?.role || 'Participant' }
+    ];
+  }
+
+  const transientId = await uploadTransientDocument(docBuffer, filename, organisationId, {
+    formFieldsPerDocument: docuSealFieldOpts.formFieldsPerDocument,
+    signers: twoSignerSigners
+  });
+  const agreement = await createAgreementWithDocument({
+    participantName: participant.name,
+    participantEmail: participant.email,
+    envelopeId: envelope.envelope_id,
+    transientDocumentId: transientId,
+    documentName: form.display_name || 'Service Agreement',
+    orgId: organisationId
+  });
+
+  db.prepare(
+    `UPDATE signature_envelopes
+     SET external_envelope_id = ?, provider_name = ?, status = ?, updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(agreement.external_envelope_id, agreement.provider || 'native', agreement.status || 'sent', envelope.envelope_id);
+
+  try {
+    void tryPushParticipantDocument({
+      participantId: participant.id,
+      category: 'Service agreements',
+      buffer: docBuffer,
+      originalFilename: filename,
+      mimeType: 'application/pdf',
+      notes: `Sent for signature: ${form.display_name || 'Service Agreement'}`
+    });
+  } catch (pushErr) {
+    console.warn('[onboarding] OneDrive copy after service agreement send:', pushErr?.message);
+  }
+
+  return {
+    master_id: CORE_SERVICE_AGREEMENT_MASTER_ID,
+    envelope_id: envelope.envelope_id,
+    status: 'sent',
+    display_name: form.display_name || 'Service Agreement'
   };
 }
 
@@ -307,6 +432,12 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
     const includeExtraPdfs = req.body?.include_extra_pdfs !== false;
     const adminFieldValuesByMasterId = req.body?.admin_field_values || {};
 
+    // The Service Agreement pseudo-document isn't a document_library_masters row — pull it out
+    // before the library pipeline sees it (it would 404 looking it up), handle it via the
+    // Service Agreement's own generate/gap-check/bridge pipeline below instead.
+    const wantsServiceAgreement = hasSelection && masterIds.includes(CORE_SERVICE_AGREEMENT_MASTER_ID);
+    const libraryMasterIds = hasSelection ? masterIds.filter((id) => id !== CORE_SERVICE_AGREEMENT_MASTER_ID) : masterIds;
+
     let attachments = [];
     let signatureRequests = [];
     try {
@@ -314,7 +445,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
         orgId,
         providerProfileId,
         workflow: 'participant_onboarding',
-        masterIds: hasSelection ? masterIds : undefined,
+        masterIds: hasSelection ? libraryMasterIds : undefined,
         participant: fullParticipant,
         includeExtraPdfs,
         orgName,
@@ -330,6 +461,28 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
         return res.status(400).json({ error: err.message, code: err.code });
       }
       throw err;
+    }
+
+    if (wantsServiceAgreement) {
+      try {
+        const signerType = adminFieldValuesByMasterId[CORE_SERVICE_AGREEMENT_MASTER_ID]?.signer_type === 'guardian' ? 'guardian' : 'participant';
+        const { formInstanceId } = await generateServiceAgreementForBridge({
+          participantId: req.params.id,
+          orgId,
+          instanceOverrides: { signer_type: signerType }
+        });
+        const saResult = await sendServiceAgreementFormInstanceForSignature({
+          participantId: req.params.id,
+          formInstanceId,
+          req
+        });
+        signatureRequests = [...signatureRequests, saResult];
+      } catch (err) {
+        if (['NO_SERVICE_AGREEMENT_TEMPLATE', 'SERVICE_AGREEMENT_GAPS', 'SERVICE_AGREEMENT_BRIDGE_FAILED', 'GUARDIAN_EMAIL_MISSING'].includes(err.code)) {
+          return res.status(400).json({ error: err.message, code: err.code, gaps: err.gaps || undefined });
+        }
+        throw err;
+      }
     }
 
     if (!attachments.length && !signatureRequests.length) {
@@ -400,6 +553,11 @@ router.get('/participants/:id/onboarding-org-fields/:masterId', requireAdminOrDe
     const onboarding = getOnboardingByParticipant(req.params.id);
     if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
     const orgId = requesterOrgId(req);
+    // The Service Agreement pseudo-document has no positioned org fields — its only admin_field
+    // (signer_type) is a plain choice, not something overlaid on the page.
+    if (req.params.masterId === CORE_SERVICE_AGREEMENT_MASTER_ID) {
+      return res.json({ fields: [] });
+    }
     const master = listOnboardingLibraryMasters(orgId, 'participant_onboarding').find((m) => m.id === req.params.masterId);
     if (!master) return res.status(404).json({ error: 'Document not found' });
     const fields = await getLibraryMasterOrgFields({ masterId: master.id, orgId, workflow: 'participant_onboarding' });
@@ -418,10 +576,26 @@ router.post('/participants/:id/onboarding-preview', requireAdminOrDelegate, asyn
     if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
     const orgId = requesterOrgId(req);
     const masterId = req.body?.master_id;
+    const extra = req.body?.admin_field_values && typeof req.body.admin_field_values === 'object' ? req.body.admin_field_values : {};
+
+    if (masterId === CORE_SERVICE_AGREEMENT_MASTER_ID) {
+      const resolved = resolveActiveServiceAgreementTemplate(orgId);
+      if (!resolved) return res.status(404).json({ error: 'Document not found' });
+      const snapshot = buildServiceAgreementSnapshot({
+        participantId: req.params.id,
+        orgId,
+        masterRow: resolved.master,
+        orgTemplateRow: resolved.orgTemplate,
+        instanceOverrides: { signer_type: extra.signer_type === 'guardian' ? 'guardian' : 'participant' }
+      });
+      const pdfBuffer = await generateServiceAgreementPdfBuffer(snapshot);
+      res.setHeader('Content-Type', 'application/pdf');
+      return res.send(pdfBuffer);
+    }
+
     const master = listOnboardingLibraryMasters(orgId, 'participant_onboarding').find((m) => m.id === masterId);
     if (!master) return res.status(404).json({ error: 'Document not found' });
     const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(req.params.id);
-    const extra = req.body?.admin_field_values && typeof req.body.admin_field_values === 'object' ? req.body.admin_field_values : {};
     const att = await renderLibraryMasterAttachment(master, orgId, { participant: fullParticipant, extra });
     if (!att?.content) return res.status(500).json({ error: 'Could not render preview' });
     res.setHeader('Content-Type', att.contentType || 'application/pdf');
@@ -639,19 +813,27 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
           const derived = docuSealFieldOpts.signers || {};
           const orgEmail = (derived.org?.email || '').trim();
           const orgName = (derived.org?.name || '').trim();
-          const participantEmail = (participant.email || '').trim();
-          const participantName = (participant.name || '').trim();
+          // Use the resolved signer (participant or guardian, per snapshot.signer_type — see
+          // deriveSigners in serviceAgreementDocuSealFields.service.js), not raw participant.*
+          // directly, or a guardian choice would silently never take effect on the actual send.
+          const primaryEmail = (derived.participant?.email || participant.email || '').trim();
+          const primaryName = (derived.participant?.name || participant.name || '').trim();
           if (!orgEmail) {
             return res
               .status(400)
               .json({ error: 'Set the default signatory email in Settings → Business so the organisation admin signs first.' });
           }
-          if (!participantEmail) {
-            return res.status(400).json({ error: 'Add a participant email before sending for signature.' });
+          if (!primaryEmail) {
+            return res.status(400).json({
+              error:
+                snap.signer_type === 'guardian'
+                  ? 'Add a representative/guardian email before sending for signature.'
+                  : 'Add a participant email before sending for signature.'
+            });
           }
           twoSignerSigners = [
             { name: orgName || 'Organisation admin', email: orgEmail, order: 0, role: derived.org?.role || 'Organisation admin' },
-            { name: participantName || 'Participant', email: participantEmail, order: 1, role: 'Participant' }
+            { name: primaryName || 'Participant', email: primaryEmail, order: 1, role: derived.participant?.role || 'Participant' }
           ];
         }
       } else if (form.form_type === 'custom' && ext === 'pdf') {

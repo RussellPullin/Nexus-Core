@@ -47,6 +47,7 @@ import {
   VALID_STAFF_ONBOARDING_ROLES
 } from '../services/onboardingDocumentPacks.service.js';
 import { renderLibraryDocument } from '../services/documentLibraryRender.service.js';
+import { resolveActiveServiceAgreementTemplate, CORE_SERVICE_AGREEMENT_MASTER_ID } from '../services/onboarding.service.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -237,6 +238,32 @@ router.get('/onboarding-pack', (req, res) => {
       participantServiceType,
       staffRole
     });
+
+    // The structured Service Agreement isn't a document_library_masters row, but the sender
+    // should be able to pick it from the same list as Service Schedule etc. instead of using a
+    // separate screen — see CORE_SERVICE_AGREEMENT_MASTER_ID's doc comment.
+    if (workflow === 'participant_onboarding' && resolveActiveServiceAgreementTemplate(orgId)) {
+      documents.push({
+        id: CORE_SERVICE_AGREEMENT_MASTER_ID,
+        slug: 'service_agreement',
+        display_name: 'Service Agreement',
+        signature_count: 2,
+        requires_signature: true,
+        participant_service_types: ['all'],
+        staff_roles: ['all'],
+        suggested: true,
+        admin_fields: [
+          {
+            key: 'signer_type',
+            label: 'Who is completing and signing this document?',
+            type: 'select',
+            options: ['participant', 'guardian'],
+            required: true
+          }
+        ]
+      });
+    }
+
     res.json({ workflow, documents });
   } catch (err) {
     res.status(500).json({ error: err.message });
