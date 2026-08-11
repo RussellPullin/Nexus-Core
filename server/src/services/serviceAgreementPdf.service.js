@@ -23,7 +23,22 @@ function hexToRgb(hex) {
 }
 
 function resolveLogoFullPath(branding, org) {
-  // Phase 1: prefer the org-level logo uploaded via the setup wizard (absolute path).
+  // Prefer business_settings (Settings -> Business logo upload, copied into
+  // snapshot.org.business_logo_filename) — that's what an admin actually updates. The
+  // org-level logo_path set via the initial setup wizard is only ever written once and never
+  // updated again, so checking it first meant a logo change in Settings would silently never
+  // appear on rendered documents.
+  const legacy = org?.business_logo_filename;
+  if (legacy) {
+    const file = String(legacy).trim().replace(/^.*[/\\]/, '');
+    const candidates = [
+      join(dataUploadsDir, file),
+      join(projectRoot, 'data', 'uploads', file)
+    ];
+    for (const p of candidates) {
+      if (existsSync(p)) return p;
+    }
+  }
   if (org?.logo_path) {
     const raw = String(org.logo_path).trim();
     if (raw) {
@@ -37,19 +52,6 @@ function resolveLogoFullPath(branding, org) {
       for (const p of candidates) {
         if (existsSync(p)) return p;
       }
-    }
-  }
-  // Legacy: Settings → Business stored a relative filename in business_settings.logo_path
-  // and copied that into snapshot.org.business_logo_filename.
-  const legacy = org?.business_logo_filename;
-  if (legacy) {
-    const file = String(legacy).trim().replace(/^.*[/\\]/, '');
-    const candidates = [
-      join(dataUploadsDir, file),
-      join(projectRoot, 'data', 'uploads', file)
-    ];
-    for (const p of candidates) {
-      if (existsSync(p)) return p;
     }
   }
   // Template branding fallback.

@@ -59,9 +59,23 @@ function parseObject(value, fallback = {}) {
 }
 
 function resolveLogoFullPath(branding, org) {
-  // Same resolution order as serviceAgreementPdf.service.js:
-  // org profile logo first, legacy business settings next, then template branding.
-  // Accept both snake_case (raw DB row) and camelCase (orgContext shape).
+  // business_settings (org.business_logo_filename) first — that's what Settings actually
+  // updates when an admin uploads a new logo. organisations.logo_path is only ever set once,
+  // during initial org setup, and never updated again, so preferring it here meant a logo
+  // change in Settings would silently never show up on rendered documents. Then template
+  // branding as a last resort. Accept both snake_case (raw DB row) and camelCase (orgContext shape).
+  const legacy = org?.business_logo_filename;
+  if (legacy) {
+    const file = String(legacy).trim().replace(/^.*[/\\]/, '');
+    const candidates = [
+      join(dataUploadsDir, file),
+      join(projectRoot, 'data', 'uploads', file)
+    ];
+    for (const p of candidates) {
+      if (existsSync(p)) return p;
+    }
+  }
+
   if (org?.logo_path || org?.logoPath) {
     const raw = String(org.logo_path || org.logoPath || '').trim();
     if (raw) {
@@ -75,18 +89,6 @@ function resolveLogoFullPath(branding, org) {
       for (const p of candidates) {
         if (existsSync(p)) return p;
       }
-    }
-  }
-
-  const legacy = org?.business_logo_filename;
-  if (legacy) {
-    const file = String(legacy).trim().replace(/^.*[/\\]/, '');
-    const candidates = [
-      join(dataUploadsDir, file),
-      join(projectRoot, 'data', 'uploads', file)
-    ];
-    for (const p of candidates) {
-      if (existsSync(p)) return p;
     }
   }
 

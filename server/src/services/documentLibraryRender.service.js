@@ -21,7 +21,7 @@ import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
 import ImageModule from 'docxtemplater-image-module-free';
 import { db } from '../db/index.js';
-import { buildOrgTokenMap } from './orgContext.service.js';
+import { buildOrgTokenMap, getOrgRenderContext } from './orgContext.service.js';
 import { buildGlobalTokenMap } from '../lib/templateTokens.js';
 import { convertDocxToPdf } from './consentForm.service.js';
 import { getOrgFullUploadDocument, listOrgSectionOverrides } from './documentLibrary.service.js';
@@ -94,14 +94,16 @@ function flattenStaff(s) {
 }
 
 /**
- * Resolve the org logo to an absolute file path (mirrors brandedFormPdf.service.js order).
+ * Resolve the org logo to an absolute file path. Uses the same canonical org render context as
+ * every text token (getOrgRenderContext, orgContext.service.js) — business_settings.logo_path
+ * (set via Settings) over the organisations row's own logo_path, which is often still whatever
+ * was seeded at initial org setup and never updated again.
  * @param {string} orgId
  * @returns {string|null}
  */
 function resolveOrgLogoPath(orgId) {
   if (!orgId) return null;
-  const row = db.prepare('SELECT logo_path FROM organisations WHERE id = ?').get(orgId);
-  const raw = String(row?.logo_path || '').trim();
+  const raw = String(getOrgRenderContext(orgId)?.branding?.logoPath || '').trim();
   if (!raw) return null;
   const candidates = isAbsolute(raw)
     ? [raw]

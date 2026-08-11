@@ -46,21 +46,31 @@ export function getOrgRenderContext(orgId) {
   if (!orgId) return empty;
   const row = db.prepare('SELECT * FROM organisations WHERE id = ?').get(orgId);
   if (!row) return empty;
+  // business_settings holds the org's actual trading identity (set via Settings) and is the
+  // source of truth over `organisations` — that row's own name/legal_name/logo often still hold
+  // whatever placeholder was seeded during initial org setup (e.g. literally "Primary organisation",
+  // or an old default logo) and are never updated afterwards. Every document/register/contract
+  // rendered through this context must prefer business_settings so branding stays current when an
+  // admin updates it in Settings. Mirrors the same precedence already used by the structured
+  // form-template system (nexusFormTemplateRuntime.service.js: enrichVariablesFromOrgProfile).
+  const biz = db.prepare('SELECT * FROM business_settings WHERE org_id = ?').get(orgId) || {};
+  const tradingName = biz.company_name || row.trading_name || row.name || NOT_PROVIDED;
+  const legalName = biz.company_name || row.legal_name || row.name || NOT_PROVIDED;
   return {
     org: {
       id: row.id,
-      name: row.trading_name || row.legal_name || row.name || NOT_PROVIDED,
-      legalName: row.legal_name || row.name || NOT_PROVIDED,
-      tradingName: row.trading_name || row.name || NOT_PROVIDED,
-      abn: row.abn || NOT_PROVIDED,
+      name: tradingName,
+      legalName,
+      tradingName,
+      abn: biz.company_abn || row.abn || NOT_PROVIDED,
       acn: row.acn || NOT_PROVIDED,
-      ndisProviderNumber: row.ndis_reg_number || NOT_PROVIDED,
-      email: row.email || NOT_PROVIDED,
-      phone: row.phone || NOT_PROVIDED,
+      ndisProviderNumber: biz.ndis_provider_number || row.ndis_reg_number || NOT_PROVIDED,
+      email: biz.company_email || row.email || NOT_PROVIDED,
+      phone: biz.company_phone || row.phone || NOT_PROVIDED,
       website: row.website || NOT_PROVIDED,
-      address: row.address || row.street_address || row.postal_address || NOT_PROVIDED,
-      postalAddress: row.postal_address || row.address || NOT_PROVIDED,
-      streetAddress: row.street_address || row.address || NOT_PROVIDED,
+      address: biz.company_address || row.address || row.street_address || row.postal_address || NOT_PROVIDED,
+      postalAddress: row.postal_address || biz.company_address || row.address || NOT_PROVIDED,
+      streetAddress: row.street_address || biz.company_address || row.address || NOT_PROVIDED,
       primaryContact: {
         name: row.primary_contact_name || NOT_PROVIDED,
         role: row.primary_contact_role || NOT_PROVIDED,
@@ -69,7 +79,7 @@ export function getOrgRenderContext(orgId) {
       }
     },
     branding: {
-      logoPath: row.logo_path || null,
+      logoPath: biz.logo_path || row.logo_path || null,
       primaryColor: row.brand_primary_color || '#1d4ed8',
       accentColor: row.brand_accent_color || '#0ea5e9',
       letterheadFooterText: row.letterhead_footer_text || NOT_PROVIDED
@@ -81,9 +91,9 @@ export function getOrgRenderContext(orgId) {
     },
     bank: {
       name: row.bank_name || NOT_PROVIDED,
-      bsb: row.bsb || NOT_PROVIDED,
-      accountName: row.account_name || NOT_PROVIDED,
-      accountNumber: row.account_number || NOT_PROVIDED,
+      bsb: biz.bsb || row.bsb || NOT_PROVIDED,
+      accountName: biz.account_name || row.account_name || NOT_PROVIDED,
+      accountNumber: biz.account_number || row.account_number || NOT_PROVIDED,
       xeroShortCode: row.xero_short_code || NOT_PROVIDED
     }
   };
