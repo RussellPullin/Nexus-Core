@@ -567,9 +567,9 @@ export async function generateFormPack({
   if (!onboarding.onboarding_enabled) throw new Error('Onboarding is disabled for this provider');
 
   const actingUserId = userId || actorId;
-  const coordinatorSignatureDataUrl = actingUserId
-    ? (db.prepare('SELECT signature_data FROM users WHERE id = ?').get(actingUserId)?.signature_data || null)
-    : null;
+  const actingUserRow = actingUserId ? db.prepare('SELECT name, signature_data FROM users WHERE id = ?').get(actingUserId) : null;
+  const coordinatorName = actingUserRow?.name || '';
+  const coordinatorSignatureDataUrl = actingUserRow?.signature_data || null;
 
   const allTemplates = getProviderTemplates(onboarding.provider_profile_id);
   const coreTemplates = allTemplates.filter((t) => ['service_agreement', 'support_plan', 'privacy_consent'].includes(t.form_type));
@@ -605,7 +605,6 @@ export async function generateFormPack({
 
   for (const template of templates) {
     const tmplPath = pathOpts(template);
-    if (template.form_type === 'privacy_consent' && !getConsentFormPath(tmplPath)) continue;
     const version = getNextFormVersion(onboarding.id, template.id);
     const dueAtBase = new Date();
     const renewalDays = template.renewal_days || 365;
@@ -613,30 +612,34 @@ export async function generateFormPack({
     let draftPath;
     let sourceJson;
     if (template.form_type === 'privacy_consent') {
-      // Prefer PDF-based privacy consent rendering (matches the supplied Privacy Consent Form PDF fields).
-      // If the org template is a DOCX (legacy), keep the old flow.
+      // The structured, data-driven PDF renderer (auto-fills from intake, interactive
+      // checkboxes/signature at signing time) is the default. Only fall back to the legacy
+      // docx-fill flow when an org has explicitly uploaded their own custom .docx consent form —
+      // there is no longer a "skip privacy_consent entirely" case.
       const consentTpl = getConsentFormPath(tmplPath);
-      const isPdfTemplate = consentTpl && String(consentTpl).toLowerCase().endsWith('.pdf');
-      if (isPdfTemplate) {
-        const pcSnapshot = buildPrivacyConsentSnapshot({
-          participantId,
-          participantOnboardingId: onboarding.id,
-          overrides: {}
-        });
-        const pdfBuffer = await generatePrivacyConsentPdfBuffer(pcSnapshot);
-        draftPath = persistFilledDocument(participantId, template.form_type, version, pdfBuffer, 'pdf');
-        sourceJson = JSON.stringify({
-          ...snapshot,
-          privacy_consent: pcSnapshot,
-          template: { id: template.id, form_type: 'privacy_consent', display_name: template.display_name }
-        });
-      } else {
+      const isCustomDocx = consentTpl && String(consentTpl).toLowerCase().endsWith('.docx');
+      if (isCustomDocx) {
         const filledDocx = fillConsentForm(participant, intake, { ...signatureOptions, ...tmplPath });
         const pdfBuffer = convertDocxToPdf(filledDocx);
         const ext = pdfBuffer ? 'pdf' : 'docx';
         draftPath = persistFilledDocument(participantId, template.form_type, version, pdfBuffer || filledDocx, ext);
         sourceJson = JSON.stringify({
           ...snapshot,
+          template: { id: template.id, form_type: 'privacy_consent', display_name: template.display_name }
+        });
+      } else {
+        const pcSnapshot = buildPrivacyConsentSnapshot({
+          participantId,
+          participantOnboardingId: onboarding.id,
+          overrides: {},
+          coordinatorName,
+          coordinatorSignatureDataUrl
+        });
+        const pdfBuffer = await generatePrivacyConsentPdfBuffer(pcSnapshot);
+        draftPath = persistFilledDocument(participantId, template.form_type, version, pdfBuffer, 'pdf');
+        sourceJson = JSON.stringify({
+          ...snapshot,
+          privacy_consent: pcSnapshot,
           template: { id: template.id, form_type: 'privacy_consent', display_name: template.display_name }
         });
       }
@@ -780,6 +783,55 @@ export async function generateFormPack({
   });
 
   return getOnboardingByParticipant(participantId);
+}
+
+/**
+ * Re-render an already-generated Privacy Consent form with a chosen signer (participant or
+ * guardian) — the one thing the sender needs to decide before sending. Rewrites the same draft
+ * in place (same version, not yet sent) rather than creating a new form instance.
+ */
+export async function preparePrivacyConsentForm({ participantId, formInstanceId, signerType, actingUserId }) {
+  const onboarding = getOnboardingByParticipant(participantId);
+  if (!onboarding) throw new Error('Onboarding not initialized for participant');
+
+  const form = db
+    .prepare(
+      `SELECT pfi.*, ft.form_type
+       FROM participant_form_instances pfi
+       JOIN form_templates ft ON ft.id = pfi.form_template_id
+       WHERE pfi.id = ? AND pfi.participant_onboarding_id = ?`
+    )
+    .get(formInstanceId, onboarding.id);
+  if (!form) throw new Error('Form not found');
+  if (form.form_type !== 'privacy_consent') throw new Error('This action only supports Privacy Consent forms.');
+  if (!['generated', 'draft'].includes(form.status)) {
+    throw new Error(`Form already ${form.status}. Cannot change signer after sending.`);
+  }
+
+  const actingUserRow = actingUserId ? db.prepare('SELECT name, signature_data FROM users WHERE id = ?').get(actingUserId) : null;
+  const pcSnapshot = buildPrivacyConsentSnapshot({
+    participantId,
+    participantOnboardingId: onboarding.id,
+    overrides: { signer_type: signerType },
+    coordinatorName: actingUserRow?.name || '',
+    coordinatorSignatureDataUrl: actingUserRow?.signature_data || null
+  });
+  const pdfBuffer = await generatePrivacyConsentPdfBuffer(pcSnapshot);
+  persistFilledDocument(participantId, 'privacy_consent', form.version, pdfBuffer, 'pdf');
+
+  let existingSnap = {};
+  try {
+    existingSnap = form.source_snapshot_json ? JSON.parse(form.source_snapshot_json) : {};
+  } catch {
+    existingSnap = {};
+  }
+  const sourceJson = JSON.stringify({ ...existingSnap, privacy_consent: pcSnapshot });
+  db.prepare(`UPDATE participant_form_instances SET source_snapshot_json = ?, updated_at = datetime('now') WHERE id = ?`).run(
+    sourceJson,
+    formInstanceId
+  );
+
+  return { id: formInstanceId, signer_type: signerType };
 }
 
 export function getLatestGeneratedForms(participantOnboardingId) {

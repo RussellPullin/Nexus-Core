@@ -1149,6 +1149,11 @@ export const onboarding = {
   sendFormForSignature: (participantId, formInstanceId) => fetchApi(`/onboarding/participants/${participantId}/send-form/${formInstanceId}`, {
     method: 'POST'
   }),
+  setPrivacyConsentSigner: (participantId, formInstanceId, signerType) =>
+    fetchApi(`/onboarding/participants/${participantId}/forms/${formInstanceId}/privacy-consent-signer`, {
+      method: 'POST',
+      body: JSON.stringify({ signer_type: signerType })
+    }),
   regenerate: (participantId) => fetchApi(`/onboarding/participants/${participantId}/regenerate`, {
     method: 'POST'
   }),

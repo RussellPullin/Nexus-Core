@@ -19,7 +19,8 @@ import {
   seedCoreTemplates,
   getTemplateCoverage,
   createAuditEvent,
-  assertProviderOnboardingReady
+  assertProviderOnboardingReady,
+  preparePrivacyConsentForm
 } from '../services/onboarding.service.js';
 import { createAgreementPacket, createAgreementWithDocument, uploadTransientDocument } from '../services/nativeSignature.service.js';
 import {
@@ -482,6 +483,25 @@ router.post('/participants/:id/generate-form-pack', async (req, res) => {
   }
 });
 
+// POST /api/onboarding/participants/:id/forms/:formInstanceId/privacy-consent-signer — the one
+// thing the sender decides before sending a Privacy Consent form: does the participant sign
+// Section A themselves, or does a guardian/representative sign Section B on their behalf.
+// Re-renders the draft in place with that choice applied; call before send-form.
+router.post('/participants/:id/forms/:formInstanceId/privacy-consent-signer', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const signerType = req.body?.signer_type === 'guardian' ? 'guardian' : 'participant';
+    const result = await preparePrivacyConsentForm({
+      participantId: req.params.id,
+      formInstanceId: req.params.formInstanceId,
+      signerType,
+      actingUserId: req.session?.user?.id || null
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message, code: err.code });
+  }
+});
+
 router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
   try {
     const onboarding = getOnboardingByParticipant(req.params.id);
@@ -517,22 +537,31 @@ router.post('/participants/:id/send-form/:formInstanceId', async (req, res) => {
 
     const organisationId = onboarding.organisation_id || null;
     const consentPathOpts = { organisationId, templateFilename: form.template_filename || null };
-    if (form.form_type === 'privacy_consent' && getConsentFormPath(consentPathOpts)) {
+    if (form.form_type === 'privacy_consent') {
       const intakeRows = db.prepare(`
         SELECT field_key, field_value FROM participant_intake_fields
         WHERE participant_onboarding_id = ?
       `).all(onboarding.id);
       const intake = Object.fromEntries(intakeRows.map((r) => [r.field_key, r.field_value]));
-      const coordinatorSignatureDataUrl = req.session?.user?.id
-        ? (db.prepare('SELECT signature_data FROM users WHERE id = ?').get(req.session.user.id)?.signature_data || null)
+      const actingUserRow = req.session?.user?.id
+        ? db.prepare('SELECT name, signature_data FROM users WHERE id = ?').get(req.session.user.id)
         : null;
+      const coordinatorSignatureDataUrl = actingUserRow?.signature_data || null;
       const resolved = getConsentFormPath(consentPathOpts);
-      const isPdfTemplate = resolved && String(resolved).toLowerCase().endsWith('.pdf');
-      if (isPdfTemplate) {
+      // Structured, data-driven PDF is the default (matches generateFormPack) — only the legacy
+      // docx flow when an org has explicitly uploaded their own custom .docx consent form.
+      const isCustomDocx = resolved && String(resolved).toLowerCase().endsWith('.docx');
+      if (!isCustomDocx) {
         const snap = parseSnapshot(form) || {};
         const pcSnap = snap.privacy_consent && isPrivacyConsentSnapshot(snap.privacy_consent)
           ? snap.privacy_consent
-          : buildPrivacyConsentSnapshot({ participantId: participant.id, participantOnboardingId: onboarding.id, overrides: {} });
+          : buildPrivacyConsentSnapshot({
+              participantId: participant.id,
+              participantOnboardingId: onboarding.id,
+              overrides: {},
+              coordinatorName: actingUserRow?.name || '',
+              coordinatorSignatureDataUrl
+            });
         const pdfBuffer = await generatePrivacyConsentPdfBuffer(pcSnap);
         const filename = 'Privacy-Consent-Form.pdf';
         oneDriveCopy = {
@@ -1031,7 +1060,9 @@ router.get('/participants/:id/forms/:formId/document', (req, res) => {
     let buf;
     let ext = 'pdf';
     const consentPathOpts = { organisationId: onboarding.organisation_id || null, templateFilename: form.template_filename || null };
-    if (form.form_type === 'privacy_consent' && getConsentFormPath(consentPathOpts)) {
+    const consentTplPath = form.form_type === 'privacy_consent' ? getConsentFormPath(consentPathOpts) : null;
+    const isCustomConsentDocx = consentTplPath && String(consentTplPath).toLowerCase().endsWith('.docx');
+    if (isCustomConsentDocx) {
       const participant = db.prepare('SELECT * FROM participants WHERE id = ?').get(req.params.id);
       const intakeRows = db.prepare('SELECT field_key, field_value FROM participant_intake_fields WHERE participant_onboarding_id = ?').all(onboarding.id);
       const intake = Object.fromEntries((intakeRows || []).map((r) => [r.field_key, r.field_value]));

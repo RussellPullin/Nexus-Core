@@ -41,19 +41,27 @@ function getIntakeFields(participantOnboardingId) {
   return Object.fromEntries((rows || []).map((r) => [r.field_key, r.field_value]));
 }
 
-function normalizeBool(v) {
-  if (v === true || v === false) return v;
-  if (v == null) return false;
-  const s = String(v).trim().toLowerCase();
-  if (['1', 'true', 'yes', 'y', 'on'].includes(s)) return true;
-  return false;
-}
-
 /**
  * Snapshot used for rendering + signing a Privacy Consent Form.
- * Coordinator can toggle checkboxes via `overrides.checkboxes` before sending.
+ *
+ * `overrides.signer_type` ('participant' | 'guardian') is the one thing the sender decides
+ * before generating/sending — it picks which of Section A (Client) / Section B (Guardian) is
+ * printed and who the native signing request goes to. Everything else (liaison/withdrawal
+ * checkboxes, the two free-text preference fields, the copy-request email) is filled
+ * interactively by whoever signs, not pre-set here — see privacyConsentDocuSealFields.service.js.
+ *
+ * `coordinatorName`/`coordinatorSignatureDataUrl` populate the staff declaration block, stamped
+ * directly onto the document at generation time using the sending admin's saved signature
+ * (Settings), the same way the legacy fillConsentForm flow already does — no separate signing
+ * turn needed for the org side.
  */
-export function buildPrivacyConsentSnapshot({ participantId, participantOnboardingId = null, overrides = {} }) {
+export function buildPrivacyConsentSnapshot({
+  participantId,
+  participantOnboardingId = null,
+  overrides = {},
+  coordinatorName = '',
+  coordinatorSignatureDataUrl = null
+}) {
   const participant = db.prepare('SELECT * FROM participants WHERE id = ?').get(participantId);
   if (!participant) throw new Error('Participant not found');
 
@@ -74,35 +82,21 @@ export function buildPrivacyConsentSnapshot({ participantId, participantOnboardi
   const guardianPhone = String(intake.primary_contact_phone || participant.parent_guardian_phone || '').trim();
   const guardianEmail = String(intake.primary_contact_email || participant.parent_guardian_email || '').trim();
 
-  const checkboxes = overrides?.checkboxes && typeof overrides.checkboxes === 'object' ? overrides.checkboxes : {};
-  const text = overrides?.text && typeof overrides.text === 'object' ? overrides.text : {};
-
-  const liaison = {
-    ndis_coordinator: normalizeBool(checkboxes.ndis_coordinator),
-    occupational_therapist: normalizeBool(checkboxes.occupational_therapist),
-    school_guidance_officer: normalizeBool(checkboxes.school_guidance_officer),
-    general_practitioner: normalizeBool(checkboxes.general_practitioner),
-    psychologist: normalizeBool(checkboxes.psychologist),
-    psychiatrist: normalizeBool(checkboxes.psychiatrist),
-    physiotherapist: normalizeBool(checkboxes.physiotherapist),
-    other_1: normalizeBool(checkboxes.other_1),
-    other_2: normalizeBool(checkboxes.other_2),
-    other_3: normalizeBool(checkboxes.other_3)
-  };
-
-  const withdrawal = {
-    ndis_audit_quality: normalizeBool(checkboxes.ndis_audit_quality),
-    internal_training: normalizeBool(checkboxes.internal_training),
-    marketing_communications: normalizeBool(checkboxes.marketing_communications),
-    photos_website_social: normalizeBool(checkboxes.photos_website_social),
-    audio_visual_recordings: normalizeBool(checkboxes.audio_visual_recordings)
-  };
+  const signerType = overrides?.signer_type === 'guardian' ? 'guardian' : 'participant';
+  if (signerType === 'guardian' && !guardianEmail) {
+    const err = new Error(
+      'This participant has no guardian/representative email on file. Add one via the intake form before sending Section B to a guardian.'
+    );
+    err.code = 'GUARDIAN_EMAIL_MISSING';
+    throw err;
+  }
 
   const orgCtx = participant.provider_org_id ? getOrgRenderContext(participant.provider_org_id) : null;
 
   const snapshot = {
     kind: 'privacy_consent_form_v1',
     generated_at_iso: new Date().toISOString(),
+    signer_type: signerType,
     org: orgCtx?.org
       ? {
           trading_name: orgCtx.org.tradingName,
@@ -133,20 +127,12 @@ export function buildPrivacyConsentSnapshot({ participantId, participantOnboardi
       phone: guardianPhone,
       email: guardianEmail
     },
-    consent: {
-      liaison,
-      liaison_other_details_1: String(text.liaison_other_details_1 || '').trim(),
-      liaison_other_details_2: String(text.liaison_other_details_2 || '').trim(),
-      liaison_other_details_3: String(text.liaison_other_details_3 || '').trim(),
-      contact_by_email_sms: normalizeBool(checkboxes.contact_by_email_sms),
-      not_provide_info_to_names: String(text.not_provide_info_to_names || '').trim(),
-      disclose_to_additional_names: String(text.disclose_to_additional_names || '').trim(),
-      withdrawal,
-      wants_copy_and_policy: normalizeBool(checkboxes.wants_copy_and_policy),
-      copy_delivery_details: String(text.copy_delivery_details || '').trim()
-    },
+    // Liaison/withdrawal checkboxes and the two free-text preference fields are filled
+    // interactively by whoever signs (see privacyConsentDocuSealFields.service.js) — this
+    // snapshot no longer pre-sets them, so the PDF always renders them blank/unchecked.
     staff: {
-      name_print: String(text.staff_name_print || '').trim()
+      name_print: String(coordinatorName || '').trim(),
+      signature_data_url: coordinatorSignatureDataUrl || null
     }
   };
 

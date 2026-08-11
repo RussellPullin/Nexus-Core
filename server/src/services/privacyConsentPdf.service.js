@@ -9,24 +9,23 @@ function ensureSpace(doc, y, needed, margin, pageMaxY) {
   return y;
 }
 
-function checkbox(doc, x, y, checked) {
-  const size = 10;
-  doc.rect(x, y, size, size).stroke('#0f172a');
-  if (checked) {
-    doc
-      .save()
-      .lineWidth(2)
-      .moveTo(x + 2, y + 5)
-      .lineTo(x + 4, y + 8)
-      .lineTo(x + 9, y + 2)
-      .stroke('#0f172a')
-      .restore();
-  }
-  return size;
+const CHECKBOX_SIZE = 10;
+
+/** Always drawn empty — ticking happens interactively at signing time (see the `fields` array). */
+function checkbox(doc, x, y) {
+  doc.rect(x, y, CHECKBOX_SIZE, CHECKBOX_SIZE).stroke('#0f172a');
+  return CHECKBOX_SIZE;
 }
 
 function safeText(v) {
   return String(v ?? '').trim();
+}
+
+function formatAusDateToday() {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
 }
 
 /**
@@ -48,6 +47,14 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
     const pageWidth = doc.page.width;
     const pageMaxY = () => doc.page.height - 60;
     let y = margin;
+
+    // Interactive fields the signer (participant or guardian, whichever was chosen) fills in on
+    // their own signing page — accumulated as each is drawn so page/x/y always match what's on
+    // the actual rendered PDF. Consumed by privacyConsentDocuSealFields.service.js.
+    const fields = [];
+    const recordField = (entry) => {
+      fields.push({ page: doc.bufferedPageRange().count, ...entry });
+    };
 
     const org = snapshot?.org || null;
     const providerName = providerDisplayName(org);
@@ -131,36 +138,41 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
     kv2('Phone', snapshot.primary_contact?.phone, 'Email', snapshot.primary_contact?.email);
 
     h2('Consent to liaise and share information (tick relevant boxes)');
-    const liaison = snapshot.consent?.liaison || {};
     const liaisonItems = [
-      ['NDIS Coordinator', liaison.ndis_coordinator],
-      ['Occupational Therapist', liaison.occupational_therapist],
-      ['School Guidance Officer', liaison.school_guidance_officer],
-      ['General Practitioner (GP)', liaison.general_practitioner],
-      ['Psychologist', liaison.psychologist],
-      ['Psychiatrist', liaison.psychiatrist],
-      ['Physiotherapist', liaison.physiotherapist],
-      ['Other', liaison.other_1],
-      ['Other', liaison.other_2],
-      ['Other', liaison.other_3]
+      ['ndis_coordinator', 'NDIS Coordinator'],
+      ['occupational_therapist', 'Occupational Therapist'],
+      ['school_guidance_officer', 'School Guidance Officer'],
+      ['general_practitioner', 'General Practitioner (GP)'],
+      ['psychologist', 'Psychologist'],
+      ['psychiatrist', 'Psychiatrist'],
+      ['physiotherapist', 'Physiotherapist'],
+      ['other_1', 'Other'],
+      ['other_2', 'Other'],
+      ['other_3', 'Other']
     ];
 
-    const itemRow = (label, checked, detailValue = '') => {
+    const itemRow = (key, label, withDetailField = false) => {
       const lineH = 16;
       y = ensureSpace(doc, y, lineH + 10, margin, pageMaxY());
-      checkbox(doc, margin, y + 2, Boolean(checked));
+      checkbox(doc, margin, y + 2);
+      recordField({ key: `liaison_${key}`, type: 'checkbox', label, x: margin, y: y + 2, width: CHECKBOX_SIZE, height: CHECKBOX_SIZE });
       doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text(label, margin + 16, y, {
         width: pageWidth - 2 * margin - 16
       });
       y += lineH;
-      if (label === 'Other') {
-        const dv = safeText(detailValue);
-        if (dv) {
-          doc.font('Helvetica').fontSize(9).fillColor('#334155').text(`Details: ${dv}`, margin + 16, y - 2, {
-            width: pageWidth - 2 * margin - 16
-          });
-          y += 12;
-        }
+      if (withDetailField) {
+        const lineY = y + 10;
+        doc.save().moveTo(margin + 16, lineY).lineTo(pageWidth - margin, lineY).lineWidth(0.5).stroke('#94a3b8').restore();
+        recordField({
+          key: `liaison_${key}_details`,
+          type: 'text',
+          label: 'Details',
+          x: margin + 16,
+          y: y - 2,
+          width: pageWidth - margin - (margin + 16),
+          height: 14
+        });
+        y += 14;
       }
     };
 
@@ -171,13 +183,14 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
     itemRow(liaisonItems[4][0], liaisonItems[4][1]);
     itemRow(liaisonItems[5][0], liaisonItems[5][1]);
     itemRow(liaisonItems[6][0], liaisonItems[6][1]);
-    itemRow(liaisonItems[7][0], liaisonItems[7][1], snapshot.consent?.liaison_other_details_1);
-    itemRow(liaisonItems[8][0], liaisonItems[8][1], snapshot.consent?.liaison_other_details_2);
-    itemRow(liaisonItems[9][0], liaisonItems[9][1], snapshot.consent?.liaison_other_details_3);
+    itemRow(liaisonItems[7][0], liaisonItems[7][1], true);
+    itemRow(liaisonItems[8][0], liaisonItems[8][1], true);
+    itemRow(liaisonItems[9][0], liaisonItems[9][1], true);
 
     y += 8;
     y = ensureSpace(doc, y, 18, margin, pageMaxY());
-    checkbox(doc, margin, y + 2, Boolean(snapshot.consent?.contact_by_email_sms));
+    checkbox(doc, margin, y + 2);
+    recordField({ key: 'contact_by_email_sms', type: 'checkbox', label: 'Contact by email/SMS', x: margin, y: y + 2, width: CHECKBOX_SIZE, height: CHECKBOX_SIZE });
     doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text('I consent to contact by email and SMS.', margin + 16, y);
     y += 18;
 
@@ -194,13 +207,9 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
       'You can contact us to request copies of our Privacy and Dignity Policy, Feedback and Complaints Management Policy or Incident Management and Reporting Policy.'
     );
 
-    h2('Client Consent (A)');
-    para(
-      'I have read this Privacy Consent Form and the Privacy and Dignity Policy and consent to the use of my personal information for the purposes set out above and in accordance with my preferences.'
-    );
-
-    // Signature block A (Participant)
-    const sigBlock = (labelLeft, labelRight) => {
+    // Signature block — draws signature/date lines and, when `signerRole` is set, records them
+    // as interactive fields for that signer to fill on their own signing page.
+    const sigBlock = (labelLeft, labelRight, signerRole = null, keyPrefix = '') => {
       y = ensureSpace(doc, y, 60, margin, pageMaxY());
       doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a').text(labelLeft, margin, y);
       doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a').text(labelRight, margin + 320, y);
@@ -214,40 +223,62 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
         .lineTo(pageWidth - margin, lineY)
         .stroke('#0f172a')
         .restore();
+      if (signerRole) {
+        recordField({ key: `${keyPrefix}signature`, type: 'signature', label: labelLeft, x: margin, y: y - 4, width: 280, height: 28, role: signerRole, required: true });
+        recordField({ key: `${keyPrefix}date`, type: 'date', label: labelRight, x: margin + 320, y: y - 4, width: pageWidth - margin - (margin + 320), height: 28, role: signerRole, required: true });
+      }
       y += 46;
     };
 
-    sigBlock('Client signature', 'Date');
-    kv1('Client name (print)', snapshot.participant?.full_legal_name || snapshot.participant?.first_name || snapshot.participant?.last_name);
-
-    h2('Guardian/Parent Consent (B)');
-    para(
-      'I am authorised to act on behalf of the client named below and consent on their behalf for the use of their personal information for the purposes set out above and in accordance with the preferences set out below.'
-    );
-    kv1('Client name (print)', snapshot.participant?.full_legal_name || snapshot.participant?.first_name || snapshot.participant?.last_name);
-    sigBlock('Representative signature', 'Date');
-    kv1('Representative name (print)', snapshot.primary_contact?.name);
-    para('Please complete either A or B above.');
+    // Only the section relevant to who the sender chose signs — avoids sending a form with a
+    // blank, unexplained "complete either A or B" section for the other party.
+    if (snapshot.signer_type === 'guardian') {
+      h2('Guardian/Parent Consent (B)');
+      para(
+        'I am authorised to act on behalf of the client named below and consent on their behalf for the use of their personal information for the purposes set out above and in accordance with the preferences set out below.'
+      );
+      kv1('Client name (print)', snapshot.participant?.full_legal_name || snapshot.participant?.first_name || snapshot.participant?.last_name);
+      sigBlock('Representative signature', 'Date', 'participant', 'pc_signer_');
+      kv1('Representative name (print)', snapshot.primary_contact?.name);
+    } else {
+      h2('Client Consent (A)');
+      para(
+        'I have read this Privacy Consent Form and the Privacy and Dignity Policy and consent to the use of my personal information for the purposes set out above and in accordance with my preferences.'
+      );
+      sigBlock('Client signature', 'Date', 'participant', 'pc_signer_');
+      kv1('Client name (print)', snapshot.participant?.full_legal_name || snapshot.participant?.first_name || snapshot.participant?.last_name);
+    }
 
     h2('Keeping other people informed');
-    kv1('1. I direct you NOT to provide my / the client’s personal information to (names / details)', snapshot.consent?.not_provide_info_to_names);
-    kv1(
+    const kv1Interactive = (label, key) => {
+      doc.font('Helvetica-Bold').fontSize(8);
+      const labelH = doc.heightOfString(label, { width: pageWidth - 2 * margin });
+      const rowH = labelH + 24;
+      y = ensureSpace(doc, y, rowH + 8, margin, pageMaxY());
+      doc.fillColor('#475569').text(label, margin, y, { width: pageWidth - 2 * margin });
+      const lineY = y + labelH + 16;
+      doc.save().moveTo(margin, lineY).lineTo(pageWidth - margin, lineY).lineWidth(0.5).stroke('#94a3b8').restore();
+      recordField({ key, type: 'text', label, x: margin, y: y + labelH + 2, width: pageWidth - 2 * margin, height: 14 });
+      y += rowH;
+    };
+    kv1Interactive('1. I direct you NOT to provide my / the client’s personal information to (names / details)', 'not_provide_info_to_names');
+    kv1Interactive(
       '2. In addition to the people set out above, I consent for you to disclose my / the client’s personal information to (names / contact details)',
-      snapshot.consent?.disclose_to_additional_names
+      'disclose_to_additional_names'
     );
 
     h2('Withdrawal of consent (if applicable)');
-    const w = snapshot.consent?.withdrawal || {};
     const withdrawalItems = [
-      ['NDIS audit and other quality assurance activities', w.ndis_audit_quality],
-      ['Carrying out internal functions including training', w.internal_training],
-      ['Receiving marketing communications', w.marketing_communications],
-      ['Photos published on website or social media', w.photos_website_social],
-      ['Audio and/or visual recordings', w.audio_visual_recordings]
+      ['ndis_audit_quality', 'NDIS audit and other quality assurance activities'],
+      ['internal_training', 'Carrying out internal functions including training'],
+      ['marketing_communications', 'Receiving marketing communications'],
+      ['photos_website_social', 'Photos published on website or social media'],
+      ['audio_visual_recordings', 'Audio and/or visual recordings']
     ];
-    withdrawalItems.forEach(([label, checked]) => {
+    withdrawalItems.forEach(([key, label]) => {
       y = ensureSpace(doc, y, 16, margin, pageMaxY());
-      checkbox(doc, margin, y + 2, Boolean(checked));
+      checkbox(doc, margin, y + 2);
+      recordField({ key: `withdraw_${key}`, type: 'checkbox', label, x: margin, y: y + 2, width: CHECKBOX_SIZE, height: CHECKBOX_SIZE });
       doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text(label, margin + 16, y, {
         width: pageWidth - 2 * margin - 16
       });
@@ -256,7 +287,8 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
 
     y += 10;
     y = ensureSpace(doc, y, 22, margin, pageMaxY());
-    checkbox(doc, margin, y + 2, Boolean(snapshot.consent?.wants_copy_and_policy));
+    checkbox(doc, margin, y + 2);
+    recordField({ key: 'wants_copy_and_policy', type: 'checkbox', label: 'Send me a copy', x: margin, y: y + 2, width: CHECKBOX_SIZE, height: CHECKBOX_SIZE });
     doc
       .font('Helvetica')
       .fontSize(10)
@@ -265,32 +297,49 @@ export function generatePrivacyConsentPdfBuffer(snapshot) {
         width: pageWidth - 2 * margin - 16
       });
     y += 22;
-    kv1('Email or mailing address', snapshot.consent?.copy_delivery_details);
+    kv1Interactive('Email or mailing address (if requesting a copy above)', 'copy_delivery_details');
     para('You can withdraw or modify consent at any time by providing written or verbal notice.');
 
     h2('Declaration by staff member');
     para('I declare that I have explained the matters on this form to the client, including how their personal and sensitive information will be handled.');
 
-    // Staff declaration signature lines (non-interactive for now)
-    sigBlock('Staff signature', 'Date');
+    // Staff declaration is stamped directly onto the document using the sending admin's own
+    // saved signature (Settings) at generation time — not a separate signing turn, since the
+    // person sending this IS the staff member making the declaration.
+    y = ensureSpace(doc, y, 60, margin, pageMaxY());
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a').text('Staff signature', margin, y);
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a').text('Date', margin + 320, y);
+    const staffLineY = y + 22;
+    doc
+      .save()
+      .moveTo(margin, staffLineY)
+      .lineTo(margin + 280, staffLineY)
+      .stroke('#0f172a')
+      .moveTo(margin + 320, staffLineY)
+      .lineTo(pageWidth - margin, staffLineY)
+      .stroke('#0f172a')
+      .restore();
+    const staffSigDataUrl = snapshot.staff?.signature_data_url;
+    if (staffSigDataUrl && /^data:image\/(png|jpe?g);base64,/.test(staffSigDataUrl)) {
+      try {
+        const base64 = staffSigDataUrl.replace(/^data:image\/(png|jpe?g);base64,/, '');
+        const imgBuf = Buffer.from(base64, 'base64');
+        doc.image(imgBuf, margin, staffLineY - 26, { fit: [260, 24] });
+      } catch {
+        // Malformed signature data — leave the line blank rather than fail the whole document.
+      }
+    }
+    doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text(formatAusDateToday(), margin + 320, staffLineY - 14);
+    y += 46;
     kv1('Name (print)', snapshot.staff?.name_print);
     para(
       'Need help understanding? Let us know if you need help to understand this document. We can arrange bilingual staff, interpreters or advocates to support you.'
     );
 
-    // Signing layout — place a single signer (participant) over Client Consent (A)
-    // signature + printed name + date. This is the minimum viable signing flow.
-    // Coordinates are derived from current y positions; we anchor to the Client Consent (A) lines by
-    // replaying rough offsets. For stability we compute them using fixed positions on the last page.
-    const signingPage = doc.bufferedPageRange().count;
-    const sigY = doc.page.height - 250;
     snapshot.signing_layout = {
-      page: signingPage,
-      participant: {
-        signature: { page: signingPage, x: margin, y: sigY, width: 280, height: 32 },
-        printed_name: { page: signingPage, x: margin, y: sigY + 54, width: pageWidth - 2 * margin, height: 16 },
-        date: { page: signingPage, x: margin + 320, y: sigY, width: pageWidth - margin - (margin + 320), height: 16 }
-      }
+      page_width: pageWidth,
+      page_height: doc.page.height,
+      fields
     };
 
     doc.end();

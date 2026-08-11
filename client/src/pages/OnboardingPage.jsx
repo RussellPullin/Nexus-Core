@@ -128,6 +128,8 @@ export default function OnboardingPage() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
+  const [privacyConsentSigner, setPrivacyConsentSigner] = useState({});
+  const [preparingConsentSigner, setPreparingConsentSigner] = useState(null);
   const [intake, setIntake] = useState(participantEmptyIntake());
   const [providerOrgId, setProviderOrgId] = useState('');
   const [previewFormId, setPreviewFormId] = useState(null);
@@ -576,6 +578,24 @@ export default function OnboardingPage() {
       alert(err.message);
     } finally {
       setWorking(false);
+    }
+  };
+
+  const handleChangePrivacyConsentSigner = async (formInstanceId, signerType) => {
+    setPrivacyConsentSigner((prev) => ({ ...prev, [formInstanceId]: signerType }));
+    setPreparingConsentSigner(formInstanceId);
+    try {
+      await onboarding.setPrivacyConsentSigner(id, formInstanceId, signerType);
+      await refresh();
+    } catch (err) {
+      alert(
+        err.message ||
+          (signerType === 'guardian'
+            ? 'Could not switch to guardian — check the participant has a guardian email on their intake form.'
+            : 'Could not update signer')
+      );
+    } finally {
+      setPreparingConsentSigner(null);
     }
   };
 
@@ -1443,6 +1463,19 @@ export default function OnboardingPage() {
                       <td style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
                         {['generated', 'draft'].includes(f.status) && (
                           <>
+                            {f.form_type === 'privacy_consent' && (
+                              <select
+                                className="form-input"
+                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.8rem', width: 'auto' }}
+                                value={privacyConsentSigner[f.id] || 'participant'}
+                                disabled={working || preparingConsentSigner === f.id}
+                                onChange={(e) => handleChangePrivacyConsentSigner(f.id, e.target.value)}
+                                title="Who is completing and signing this consent form?"
+                              >
+                                <option value="participant">Participant signs</option>
+                                <option value="guardian">Guardian/rep signs</option>
+                              </select>
+                            )}
                             <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => handleViewDocument(f.id, false)} title="View filled document in CRM">View document</button>
                             <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => handleViewPreview(f.id)} title="View prefill data">View data</button>
                             <label className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', margin: 0, cursor: 'pointer' }}>
@@ -1464,7 +1497,7 @@ export default function OnboardingPage() {
                               className="btn btn-primary"
                               style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
                               onClick={() => handleSendForm(f.id)}
-                              disabled={working || !signEnabled}
+                              disabled={working || !signEnabled || preparingConsentSigner === f.id}
                               title={
                                 signEnabled
                                   ? 'Send for signature via Nexus Core'
