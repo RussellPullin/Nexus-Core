@@ -1161,11 +1161,23 @@ export default function ParticipantProfile() {
       } catch {
         /* keep previous readiness */
       }
+      return { ok: result?.ready !== false };
     } catch (err) {
       // 409 responses include structured payload via fetchApi error message.
       setOrchestratorError(err?.message || 'Onboarding run failed');
+      return { ok: false };
     } finally {
       setOrchestratorBusy(false);
+    }
+  };
+
+  // "Onboard Participant" — single entry point that runs the orchestrator, then jumps straight
+  // into the document picker on the onboarding page (still a manual choice) instead of making
+  // the admin click "Run onboarding" here and separately hunt down the send action there.
+  const handleOnboardParticipant = async () => {
+    const { ok } = await handleRunOnboarding();
+    if (ok) {
+      navigate(`${pathPrefix}/onboarding/${id}?autoOpenPack=1`);
     }
   };
 
@@ -1619,15 +1631,15 @@ export default function ParticipantProfile() {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    onClick={handleRunOnboarding}
+                    onClick={handleOnboardParticipant}
                     disabled={orchestratorBusy || onboardingReadiness?.ready === false}
                     title={
                       onboardingReadiness?.ready === false
                         ? onboardingReadiness?.reason
-                        : 'Initialise onboarding, ensure templates are cloned, and generate every required form'
+                        : 'Initialise onboarding, generate every required form, then choose documents and send in one step'
                     }
                   >
-                    {orchestratorBusy ? 'Running…' : 'Run onboarding'}
+                    {orchestratorBusy ? 'Preparing…' : 'Onboard Participant'}
                   </button>
                   <button
                     type="button"

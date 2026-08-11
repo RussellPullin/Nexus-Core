@@ -845,7 +845,10 @@ function BusinessSetup() {
         bsb: biz.bsb || null,
         account_number: biz.account_number || null,
         payment_terms_days: biz.payment_terms_days ?? 7,
-        accounting_provider: biz.accounting_provider || null
+        accounting_provider: biz.accounting_provider || null,
+        xero_sales_account_code: biz.xero_sales_account_code || null,
+        xero_tax_type_gst: biz.xero_tax_type_gst || null,
+        xero_tax_type_exempt: biz.xero_tax_type_exempt || null
       });
       setMsg('Business settings saved.');
     } catch (err) {
@@ -1090,8 +1093,44 @@ function BusinessSetup() {
         attaches is determined during that login (you can disconnect and reconnect to change it).
       </div>
       <p className="settings-desc">
-        Authorised sales invoices are posted for payment and reconciliation. Your administrator can align account codes on the server with your
-        Xero chart of accounts. Use <strong>Connect to Xero</strong> below and sign in to authorise Nexus for this organisation.
+        Authorised sales invoices are posted for payment and reconciliation. Use <strong>Connect to Xero</strong> below and sign in to
+        authorise Nexus for this organisation.
+      </p>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+        <div className="form-group" style={{ flex: 0, minWidth: 140 }}>
+          <label>Sales account code</label>
+          <input
+            type="text"
+            value={biz.xero_sales_account_code || ''}
+            onChange={(e) => setBiz({ ...biz, xero_sales_account_code: e.target.value })}
+            placeholder="200"
+            className="form-input"
+          />
+        </div>
+        <div className="form-group" style={{ flex: 0, minWidth: 160 }}>
+          <label>Tax type (GST-applicable)</label>
+          <input
+            type="text"
+            value={biz.xero_tax_type_gst || ''}
+            onChange={(e) => setBiz({ ...biz, xero_tax_type_gst: e.target.value })}
+            placeholder="OUTPUT"
+            className="form-input"
+          />
+        </div>
+        <div className="form-group" style={{ flex: 0, minWidth: 160 }}>
+          <label>Tax type (GST-free / NDIS-exempt)</label>
+          <input
+            type="text"
+            value={biz.xero_tax_type_exempt || ''}
+            onChange={(e) => setBiz({ ...biz, xero_tax_type_exempt: e.target.value })}
+            placeholder="BASEXCLUDED"
+            className="form-input"
+          />
+        </div>
+      </div>
+      <p className="settings-desc" style={{ marginTop: '-0.5rem', marginBottom: '1rem', fontSize: '0.85rem' }}>
+        Match these to your own Xero chart of accounts and tax rates. Leave blank to use the server default (account 200,
+        OUTPUT / BASEXCLUDED). Save with the button at the bottom of this section.
       </p>
       {biz.xero_linked ? (
         <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: '1rem' }}>

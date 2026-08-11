@@ -5,11 +5,27 @@ import { db } from '../db/index.js';
 import { getXeroAccessToken, parseXeroApiBodyOrThrow, XERO_API_BASE } from '../routes/settings.js';
 import { participantInvoiceIncludesGst, roundMoney } from '../lib/invoiceGst.js';
 
-const SALES_ACCOUNT = process.env.XERO_SALES_ACCOUNT_CODE?.trim() || '200';
+const DEFAULT_SALES_ACCOUNT = process.env.XERO_SALES_ACCOUNT_CODE?.trim() || '200';
 /** Australian Xero org: GST on sales 10% */
-const TAX_GST = process.env.XERO_LINE_TAX_TYPE_GST?.trim() || 'OUTPUT';
+const DEFAULT_TAX_GST = process.env.XERO_LINE_TAX_TYPE_GST?.trim() || 'OUTPUT';
 /** GST-free / bas excluded (common NDIS supports) */
-const TAX_EXEMPT = process.env.XERO_LINE_TAX_TYPE_EXEMPT?.trim() || 'BASEXCLUDED';
+const DEFAULT_TAX_EXEMPT = process.env.XERO_LINE_TAX_TYPE_EXEMPT?.trim() || 'BASEXCLUDED';
+
+/**
+ * Per-org Xero line settings, so each org's chart of accounts / tax types can differ
+ * (white-label: an org's own Xero setup shouldn't be constrained to Spring 2 Health's).
+ * Falls back to the env-var defaults above when the org hasn't set an override.
+ */
+function getXeroLineSettings(orgId = null) {
+  const row = orgId
+    ? db.prepare('SELECT xero_sales_account_code, xero_tax_type_gst, xero_tax_type_exempt FROM business_settings WHERE org_id = ?').get(orgId)
+    : db.prepare('SELECT xero_sales_account_code, xero_tax_type_gst, xero_tax_type_exempt FROM business_settings WHERE id = ?').get('default');
+  return {
+    salesAccount: row?.xero_sales_account_code?.trim() || DEFAULT_SALES_ACCOUNT,
+    taxGst: row?.xero_tax_type_gst?.trim() || DEFAULT_TAX_GST,
+    taxExempt: row?.xero_tax_type_exempt?.trim() || DEFAULT_TAX_EXEMPT
+  };
+}
 
 function xeroHeaders(accessToken, tenantId) {
   return {
@@ -194,8 +210,10 @@ export async function pushBillingInvoiceToXero(billingInvoiceId, orgId = null) {
     inv.participant_email
   );
 
+  const targetOrgId = orgId || inv.provider_org_id || null;
+  const { salesAccount, taxGst, taxExempt } = getXeroLineSettings(targetOrgId);
   const includesGst = participantInvoiceIncludesGst(inv.invoice_includes_gst);
-  const taxType = includesGst ? TAX_GST : TAX_EXEMPT;
+  const taxType = includesGst ? taxGst : taxExempt;
 
   const lineItems = items.map((li) => {
     const qty = Number(li.quantity) || 0;
@@ -207,12 +225,11 @@ export async function pushBillingInvoiceToXero(billingInvoiceId, orgId = null) {
       Description: desc || 'Support',
       Quantity: qty,
       UnitAmount: unit,
-      AccountCode: SALES_ACCOUNT,
+      AccountCode: salesAccount,
       TaxType: taxType,
     };
   });
 
-  const targetOrgId = orgId || inv.provider_org_id || null;
   const { accessToken, tenantId } = await getXeroAccessToken(targetOrgId);
   const contactId = await ensureXeroContact(
     accessToken,

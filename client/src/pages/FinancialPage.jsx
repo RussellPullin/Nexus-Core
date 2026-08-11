@@ -1,6 +1,6 @@
 import { useState, useEffect, Fragment, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { billing, invoices } from '../lib/api';
+import { billing } from '../lib/api';
 import { formatDate } from '../lib/dateUtils';
 
 export default function FinancialPage() {
@@ -30,7 +30,6 @@ export default function FinancialPage() {
     if (searchParams.get('participant')) return 'invoices';
     return 'charges';
   }); // 'charges' | 'batches' | 'invoices'
-  const [shiftInvoices, setShiftInvoices] = useState([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [batches, setBatches] = useState([]);
   const [batchesLoading, setBatchesLoading] = useState(false);
@@ -77,12 +76,11 @@ export default function FinancialPage() {
   const loadAllInvoices = async () => {
     setInvoicesLoading(true);
     try {
-      const [billingList, shiftList] = await Promise.all([billing.list(), invoices.list()]);
+      const billingList = await billing.list();
       setBillingInvoices(billingList);
-      setShiftInvoices(shiftList);
     } catch (e) {
       console.error(e);
-      // Keep existing lists on error so a failed refresh does not hide invoices after a successful create.
+      // Keep existing list on error so a failed refresh does not hide invoices after a successful create.
     } finally {
       setInvoicesLoading(false);
     }
@@ -126,11 +124,6 @@ export default function FinancialPage() {
     if (!participantFilterId) return billingInvoices;
     return billingInvoices.filter((inv) => String(inv.participant_id) === String(participantFilterId));
   }, [billingInvoices, participantFilterId]);
-
-  const filteredShiftInvoices = useMemo(() => {
-    if (!participantFilterId) return shiftInvoices;
-    return shiftInvoices.filter((inv) => String(inv.participant_id) === String(participantFilterId));
-  }, [shiftInvoices, participantFilterId]);
 
   const clearParticipantFilter = () => {
     const next = new URLSearchParams(searchParams);
@@ -278,13 +271,11 @@ export default function FinancialPage() {
     p.items?.some((i) => selectedIds.has(i.id))
   ).length ?? 0;
 
-  const handleDeleteInvoice = async (type, id) => {
+  const handleDeleteInvoice = async (id) => {
     if (!window.confirm('Delete this invoice? The charges can be included in a new batch.')) return;
     try {
-      if (type === 'batch') {
-        await billing.delete(id);
-        loadBatches();
-      } else await invoices.delete(id);
+      await billing.delete(id);
+      loadBatches();
       loadAllInvoices();
     } catch (e) {
       alert(e.message || 'Failed to delete invoice');
@@ -856,9 +847,9 @@ export default function FinancialPage() {
           </p>
           {invoicesLoading ? (
             <p>Loading...</p>
-          ) : billingInvoices.length === 0 && shiftInvoices.length === 0 ? (
+          ) : billingInvoices.length === 0 ? (
             <p className="muted">No invoices yet. Use &quot;Batch invoices&quot; to create a batch.</p>
-          ) : participantFilterId && filteredBillingInvoices.length === 0 && filteredShiftInvoices.length === 0 ? (
+          ) : participantFilterId && filteredBillingInvoices.length === 0 ? (
             <p className="muted">
               No invoices found for {participantFilterName || 'this participant'}. They may only have charges not yet batched, or invoices under another organisation view.
             </p>
@@ -983,36 +974,13 @@ export default function FinancialPage() {
                           type="button"
                           className="btn btn-secondary"
                           style={{ fontSize: '0.8rem' }}
-                          onClick={() => handleDeleteInvoice('batch', inv.id)}
+                          onClick={() => handleDeleteInvoice(inv.id)}
                         >
                           Delete
                         </button>
                       </td>
                     </tr>
                   );})}
-                  {filteredShiftInvoices.map((inv) => (
-                    <tr key={`shift-${inv.id}`}>
-                      <td>{inv.invoice_number}</td>
-                      <td>{inv.participant_name}</td>
-                      <td>{inv.start_time ? formatDate(inv.start_time) : '–'}</td>
-                      <td><span className="badge badge-secondary">Shift</span></td>
-                      <td style={{ textAlign: 'right', color: '#94a3b8' }}>–</td>
-                      <td style={{ textAlign: 'right', color: '#94a3b8' }}>–</td>
-                      <td style={{ textAlign: 'right', color: '#94a3b8' }}>–</td>
-                      <td><span className={`badge badge-${inv.status}`}>{inv.status}</span></td>
-                      <td>
-                        <a href={invoices.pdfUrl(inv.id)} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ fontSize: '0.8rem', marginRight: '0.25rem' }}>PDF</a>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.8rem' }}
-                          onClick={() => handleDeleteInvoice('shift', inv.id)}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
                 </tbody>
               </table>
             </div>

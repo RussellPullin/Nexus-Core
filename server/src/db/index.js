@@ -1580,7 +1580,13 @@ try {
       'xero_redirect_uri',
       'xero_refresh_token',
       'xero_tenant_id',
-      'xero_tenant_name'
+      'xero_tenant_name',
+      // Per-org Xero invoice line settings (sales account code + GST/exempt tax types). Falls
+      // back to XERO_SALES_ACCOUNT_CODE/XERO_LINE_TAX_TYPE_GST/XERO_LINE_TAX_TYPE_EXEMPT env vars
+      // when unset, so existing orgs are unaffected. See xeroBillingPush.service.js.
+      'xero_sales_account_code',
+      'xero_tax_type_gst',
+      'xero_tax_type_exempt'
     ]) {
       businessCols = db.prepare("PRAGMA table_info(business_settings)").all();
       if (!businessCols.some((c) => c.name === col)) {

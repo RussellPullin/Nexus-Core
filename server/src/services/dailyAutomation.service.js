@@ -11,8 +11,34 @@
  * caller doesn't have to know the implementation. Each step is independent and one
  * step's failure never blocks the others.
  */
+import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { upsertRenewalTasksForParticipant, createAuditEvent } from './onboarding.service.js';
+import { sendEmailViaRelay } from './notification.service.js';
+
+/**
+ * Picks an org user to send background reminder emails as. There is no server-level
+ * "send as the org" identity in this codebase (see notification.service.js) — every send
+ * goes through a specific admin's connected mailbox — so for a system-triggered tick (no
+ * session user) we pick any admin/delegate in the org who already has one connected.
+ * Returns null (and the caller skips quietly) if nobody in the org has connected email yet.
+ */
+function resolveAutomationSenderUserId(orgId) {
+  if (!orgId) return null;
+  const row = db
+    .prepare(
+      `SELECT id FROM users
+       WHERE org_id = ?
+         AND email_provider IN ('google', 'microsoft')
+         AND email_connected_address IS NOT NULL
+         AND email_oauth_refresh_encrypted IS NOT NULL
+         AND (email_reconnect_required IS NULL OR email_reconnect_required = 0)
+       ORDER BY CASE WHEN role = 'admin' THEN 0 ELSE 1 END, created_at ASC
+       LIMIT 1`
+    )
+    .get(orgId);
+  return row?.id || null;
+}
 
 /**
  * @typedef {{
@@ -72,7 +98,7 @@ export async function runDailyAutomationTick({ orgId = null, actorType = 'system
       .slice(0, 10);
     const expiring = db
       .prepare(
-        `SELECT scd.id, scd.staff_id, scd.document_type, scd.expiry_date, s.org_id, s.name as staff_name
+        `SELECT scd.id, scd.staff_id, scd.document_type, scd.expiry_date, scd.updated_at, s.org_id, s.name as staff_name
          FROM staff_compliance_documents scd
          JOIN staff s ON s.id = scd.staff_id
          WHERE scd.expiry_date IS NOT NULL
@@ -81,7 +107,7 @@ export async function runDailyAutomationTick({ orgId = null, actorType = 'system
            ${orgId ? 'AND s.org_id = ?' : ''}`
       )
       .all(...(orgId ? [horizon, orgId] : [horizon]));
-    push({ step: 'staff_compliance_scan', ok: true, detail: { horizon_days: horizonDays, expiring: expiring.length } });
+    let remindersSent = 0;
     for (const row of expiring) {
       try {
         createAuditEvent({
@@ -100,7 +126,50 @@ export async function runDailyAutomationTick({ orgId = null, actorType = 'system
       } catch (e) {
         console.warn('[automation] audit emit failed for staff doc', row.id, e?.message);
       }
+
+      // Best-effort reminder email — closes the gap between "we know it's expiring" (the
+      // audit event above) and someone actually finding out. Skips quietly, never blocks
+      // the sweep, if the org has no admin with a connected mailbox yet, or if a reminder
+      // was already sent since this document's expiry date was last set (dedupe via
+      // staff_certification_reminders, so re-running this tick doesn't spam).
+      try {
+        const lastReminder = db
+          .prepare(
+            `SELECT sent_at FROM staff_certification_reminders
+             WHERE staff_id = ? AND document_type = ? ORDER BY sent_at DESC LIMIT 1`
+          )
+          .get(row.staff_id, row.document_type);
+        const alreadyRemindedThisCycle = lastReminder && row.updated_at && lastReminder.sent_at >= row.updated_at;
+        if (!alreadyRemindedThisCycle) {
+          const senderUserId = resolveAutomationSenderUserId(row.org_id);
+          const staffFull = senderUserId
+            ? db.prepare('SELECT name, email, manager_id FROM staff WHERE id = ?').get(row.staff_id)
+            : null;
+          if (staffFull?.email?.trim()) {
+            const subject = 'Compliance document renewal reminder – Nexus Core';
+            const text = `Hi ${staffFull.name},\n\nYour ${row.document_type} is expiring on ${row.expiry_date}. Please renew it and upload the updated document, or contact your manager.\n\nThank you.`;
+            await sendEmailViaRelay(senderUserId, staffFull.email, subject, text, null, null);
+            const manager = staffFull.manager_id
+              ? db.prepare('SELECT email FROM staff WHERE id = ?').get(staffFull.manager_id)
+              : null;
+            if (manager?.email?.trim()) {
+              await sendEmailViaRelay(senderUserId, manager.email, `Compliance reminder: ${staffFull.name}`, text, null, null);
+            }
+            db.prepare(
+              `INSERT INTO staff_certification_reminders (id, staff_id, document_type, reminder_type) VALUES (?, ?, ?, ?)`
+            ).run(uuidv4(), row.staff_id, row.document_type, 'auto_compliance_expiry');
+            remindersSent += 1;
+          }
+        }
+      } catch (e) {
+        console.warn('[automation] compliance reminder email skipped for', row.id, e?.message);
+      }
     }
+    push({
+      step: 'staff_compliance_scan',
+      ok: true,
+      detail: { horizon_days: horizonDays, expiring: expiring.length, reminders_sent: remindersSent }
+    });
   } catch (err) {
     push({ step: 'staff_compliance_scan', ok: false, error: err.message });
   }

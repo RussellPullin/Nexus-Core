@@ -19,6 +19,8 @@ export default function BillingPage() {
   const [creating, setCreating] = useState(false);
   const [invoices, setInvoices] = useState([]);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [newBatchRef, setNewBatchRef] = useState(null);
+  const [sendingBatch, setSendingBatch] = useState(false);
   const [paymentFormInvoice, setPaymentFormInvoice] = useState(null);
   const [invoicePaymentAmount, setInvoicePaymentAmount] = useState('');
   const [invoicePaymentDate, setInvoicePaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -81,17 +83,42 @@ export default function BillingPage() {
     }
     setCreating(true);
     try {
-      await billing.createBatch({
+      const result = await billing.createBatch({
         from_date: fromDate,
         to_date: toDate,
         selected_ids: Array.from(selectedIds)
       });
+      const firstInvoiceNumber = result?.created?.[0]?.invoice_number || '';
+      const match = firstInvoiceNumber.match(/^BINV-(\d+)-\d+$/);
+      setNewBatchRef(match ? match[1] : null);
       setDraft(null);
-      loadInvoices();
+      await loadInvoices();
     } catch (e) {
       alert(e.message || 'Failed to create batch');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleSendNewBatch = async () => {
+    if (!newBatchRef) return;
+    setSendingBatch(true);
+    try {
+      const r = await billing.sendBatch(newBatchRef);
+      await loadInvoices();
+      const lines = [];
+      if (r?.message) lines.push(r.message);
+      if (r?.errors?.length) {
+        lines.push(r.errors.map((e) => `${e.invoice_number || e.billing_invoice_id}: ${e.error}`).join('\n'));
+      }
+      if (r?.xero_warnings?.length) {
+        lines.push('Xero:', ...r.xero_warnings.map((w) => `${w.invoice_number || w.billing_invoice_id}: ${w.error}`));
+      }
+      if (lines.length) alert(lines.join('\n\n'));
+    } catch (e) {
+      alert(e.message || 'Failed to send invoices');
+    } finally {
+      setSendingBatch(false);
     }
   };
 
@@ -137,6 +164,11 @@ export default function BillingPage() {
       setInvoicePaymentSubmitting(false);
     }
   };
+
+  const newBatchInvoices = newBatchRef
+    ? invoices.filter((inv) => inv.invoice_number?.startsWith(`BINV-${newBatchRef}-`))
+    : [];
+  const newBatchHasDraft = newBatchInvoices.some((inv) => inv.status === 'draft');
 
   const selectedTotal = draft?.participants?.reduce((sum, p) => {
     const pTotal = p.items?.filter((i) => selectedIds.has(i.id)).reduce((s, i) => s + i.total, 0) || 0;
@@ -228,6 +260,54 @@ export default function BillingPage() {
                 </button>
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {newBatchRef && newBatchInvoices.length > 0 && (
+        <div className="card" style={{ marginBottom: '1.5rem', border: '1px solid #bfdbfe' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <h3 style={{ marginTop: 0, marginBottom: '0.25rem' }}>Batch created – ready to send</h3>
+              <p style={{ color: '#64748b', margin: 0 }}>
+                {newBatchInvoices.length} invoice{newBatchInvoices.length === 1 ? '' : 's'} created for this period.
+                {newBatchHasDraft ? ' Review below, then send.' : ' Already sent.'}
+              </p>
+            </div>
+            <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setNewBatchRef(null)}>
+              Dismiss
+            </button>
+          </div>
+          <div className="table-wrap" style={{ marginTop: '1rem' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Invoice #</th>
+                  <th>Participant</th>
+                  <th style={{ textAlign: 'right' }}>Total</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {newBatchInvoices.map((inv) => (
+                  <tr key={inv.id}>
+                    <td>{inv.invoice_number}</td>
+                    <td>{inv.participant_name}</td>
+                    <td style={{ textAlign: 'right' }}>${(Number(inv.total) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td><span className={`badge badge-${inv.status === 'paid' ? 'paid' : inv.status}`}>{inv.status}</span></td>
+                    <td><a href={billing.pdfUrl(inv.id)} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ fontSize: '0.8rem' }}>PDF</a></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {newBatchHasDraft && (
+            <div style={{ marginTop: '1rem', textAlign: 'right' }}>
+              <button type="button" className="btn btn-primary" onClick={handleSendNewBatch} disabled={sendingBatch}>
+                {sendingBatch ? 'Sending…' : `Send ${newBatchInvoices.length} invoice(s)`}
+              </button>
+            </div>
           )}
         </div>
       )}

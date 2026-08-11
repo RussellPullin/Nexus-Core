@@ -1049,25 +1049,6 @@ export const billing = {
   delete: (id) => fetchApi(`/billing/${id}`, { method: 'DELETE' })
 };
 
-export const invoices = {
-  list: (params) => fetchApi(`/invoices${params?.shift_id ? `?shift_id=${encodeURIComponent(params.shift_id)}` : ''}`),
-  get: (id) => fetchApi(`/invoices/${id}`),
-  pdfUrl: (id) => `${API}/invoices/${id}/pdf`,
-  updateStatus: (id, status) => fetchApi(`/invoices/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
-  delete: (id) => fetchApi(`/invoices/${id}`, { method: 'DELETE' }),
-  downloadNdiaManagedCsv: async () => {
-    const res = await fetch(`${API}/invoices/ndia-managed-csv`, { credentials: 'include' });
-    if (!res.ok) throw new Error('Download failed');
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'ndia-managed-invoices.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-};
-
 export const appShifts = {
   list: (params) => fetchApi(`/app-shifts?${new URLSearchParams(params || {}).toString()}`),
   update: (shiftId, data) => fetchApi(`/app-shifts/${encodeURIComponent(shiftId)}`, { method: 'PUT', body: JSON.stringify(data) }),

@@ -228,6 +228,9 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
       account_number,
       payment_terms_days,
       accounting_provider,
+      xero_sales_account_code,
+      xero_tax_type_gst,
+      xero_tax_type_exempt,
     } = req.body || {};
 
     const existing = getBusinessSettings(orgId);
@@ -261,6 +264,9 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
         ? (parseInt(payment_terms_days, 10) || 7)
         : (existing?.payment_terms_days ?? 7),
       accounting_provider: accountingProviderValue,
+      xero_sales_account_code: xero_sales_account_code !== undefined ? (String(xero_sales_account_code || '').trim() || null) : existing?.xero_sales_account_code,
+      xero_tax_type_gst: xero_tax_type_gst !== undefined ? (String(xero_tax_type_gst || '').trim() || null) : existing?.xero_tax_type_gst,
+      xero_tax_type_exempt: xero_tax_type_exempt !== undefined ? (String(xero_tax_type_exempt || '').trim() || null) : existing?.xero_tax_type_exempt,
     };
 
     const bizParams = [
@@ -277,6 +283,9 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
       updates.account_number,
       updates.payment_terms_days,
       updates.accounting_provider,
+      updates.xero_sales_account_code,
+      updates.xero_tax_type_gst,
+      updates.xero_tax_type_exempt,
     ];
     if (hasBusinessSettingsForOrg(orgId)) {
       db.prepare(`
@@ -284,14 +293,16 @@ router.put('/business', requireAdminOrDelegate, (req, res) => {
           pay_period_start = ?,
           company_name = ?, company_abn = ?, company_acn = ?, ndis_provider_number = ?,
           company_email = ?, company_address = ?, company_phone = ?, account_name = ?, bsb = ?, account_number = ?,
-          payment_terms_days = ?, accounting_provider = ?, updated_at = datetime('now')
+          payment_terms_days = ?, accounting_provider = ?,
+          xero_sales_account_code = ?, xero_tax_type_gst = ?, xero_tax_type_exempt = ?, updated_at = datetime('now')
         WHERE org_id = ?
       `).run(...bizParams, orgId);
     } else {
       db.prepare(`
         INSERT INTO business_settings (id, org_id, pay_period_start, company_name, company_abn, company_acn, ndis_provider_number,
-          company_email, company_address, company_phone, account_name, bsb, account_number, payment_terms_days, accounting_provider, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          company_email, company_address, company_phone, account_name, bsb, account_number, payment_terms_days, accounting_provider,
+          xero_sales_account_code, xero_tax_type_gst, xero_tax_type_exempt, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(orgId, orgId, ...bizParams);
     }
 

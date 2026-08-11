@@ -341,19 +341,13 @@ export default function StaffProfile() {
       } catch {
         /* keep prev readiness */
       }
+      return { ok: result?.ready !== false };
     } catch (err) {
       setOrchError(err?.message || 'Run failed');
+      return { ok: false };
     } finally {
       setOrchBusy(false);
     }
-  };
-
-  const onboardEmailButtonLabel = () => {
-    if (showOnboardPanel) return 'Hide onboarding pack';
-    if (onboardingSending) return 'Sending…';
-    if (data?.onboarding_status === 'complete') return 'Resend with selected docs';
-    if (data?.onboarding_status === 'in_progress') return 'Resend onboarding email';
-    return 'Onboard';
   };
 
   const handleOpenOnboardPanel = async () => {
@@ -376,6 +370,20 @@ export default function StaffProfile() {
     setShowOnboardPanel(true);
   };
 
+  // "Employ Staff" — single entry point that runs the readiness/orchestrator step and, once
+  // ready, opens straight into the document picker (still a manual choice) instead of making
+  // the admin click "Run staff onboarding" and then separately find the "Onboard" button.
+  const handleEmployStaff = async () => {
+    if (!data?.email) {
+      alert('Add an email address for this staff member first.');
+      return;
+    }
+    const { ok } = await handleRunStaffOnboarding();
+    if (ok && !showOnboardPanel) {
+      await handleOpenOnboardPanel();
+    }
+  };
+
   const handleConfirmSendStaffOnboarding = async (payload) => {
     setOnboardingSending(true);
     setOnboardPackFeedback(null);
@@ -392,6 +400,14 @@ export default function StaffProfile() {
         message = `Onboarding email sent. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Nexus Core.`;
       } else {
         message = 'Onboarding email sent (form link only, no attachments).';
+      }
+      if (result?.contract_attached) {
+        message += ' Employment contract attached.';
+      }
+      if (result?.shifter_status === 'enabled') {
+        message += ' Shifter access enabled.';
+      } else if (result?.shifter_status === 'no_match') {
+        message += ' Shifter access not enabled yet — no matching Shifter account found for this email.';
       }
       setOnboardPackFeedback({ type: 'success', message });
       load();
@@ -688,28 +704,23 @@ export default function StaffProfile() {
                 </ul>
               </details>
             )}
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleRunStaffOnboarding}
-              disabled={orchBusy || staffReadiness?.ready === false}
-              title={
-                staffReadiness?.ready === false
-                  ? staffReadiness?.reason
-                  : 'Prepare onboarding setup (clone library documents, create record). Does not send email — use the button beside this to choose documents and send.'
-              }
-            >
-              {orchBusy ? 'Running…' : 'Run staff onboarding'}
-            </button>
             {data.email && (
               <button
                 type="button"
-                className={showOnboardPanel ? 'btn btn-secondary' : 'btn btn-primary'}
-                onClick={handleOpenOnboardPanel}
-                disabled={onboardingSending}
-                title="Choose role and documents, then send the onboarding email"
+                className="btn btn-primary"
+                onClick={handleEmployStaff}
+                disabled={orchBusy || onboardingSending || staffReadiness?.ready === false}
+                title={
+                  staffReadiness?.ready === false
+                    ? staffReadiness?.reason
+                    : 'Prepare onboarding, then choose documents and send in one step. The employment contract is attached automatically once intake details are on file, and Shifter access is enabled automatically if this org has a linked Shifter org and the email matches.'
+                }
               >
-                {onboardEmailButtonLabel()}
+                {orchBusy
+                  ? 'Preparing…'
+                  : data?.onboarding_status === 'complete'
+                  ? 'Re-run employment (resend docs)'
+                  : 'Employ Staff'}
               </button>
             )}
             <button
@@ -717,7 +728,7 @@ export default function StaffProfile() {
               className="btn btn-secondary"
               onClick={handleDownloadEmploymentContract}
               disabled={contractDownloading}
-              title="Prefilled employment contract (template-based forms coming soon)"
+              title="Manually download the prefilled employment contract (normally attached automatically when you send onboarding documents)"
             >
               {contractDownloading ? 'Downloading…' : 'Download to sign'}
             </button>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
-import { shifts, ndis, invoices, learning } from '../lib/api';
+import { shifts, ndis, learning } from '../lib/api';
 import { formatDate, formatDateLocal } from '../lib/dateUtils';
 import { getEffectiveNdisRate } from '../lib/ndisRates';
 
@@ -64,9 +64,6 @@ export default function ShiftDetailPage() {
   const [shift, setShift] = useState(null);
   const [lineItems, setLineItems] = useState([]);
   const [ndisItems, setNdisItems] = useState([]);
-  const [invoice, setInvoice] = useState(null);
-  /** Set when a row exists in the legacy `invoices` table (per-shift), vs Financial batch only. */
-  const [legacyInvoiceRow, setLegacyInvoiceRow] = useState(null);
   const [tab, setTab] = useState('finance');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(true);
@@ -118,10 +115,9 @@ export default function ShiftDetailPage() {
     setLoadError(null);
     setNotFound(false);
     try {
-      let [s, items, invList, receipts] = await Promise.all([
+      let [s, items, receipts] = await Promise.all([
         shifts.get(id),
         shifts.lineItems.list(id),
-        invoices.list({ shift_id: id }),
         shifts.receipts(id).catch(() => [])
       ]);
       if (s?.shifter_shift_id && (parseFloat(s?.expenses) || 0) === 0) {
@@ -133,11 +129,6 @@ export default function ShiftDetailPage() {
       setShift(s);
       setLineItems(items);
       setNotes(s?.notes || '');
-      setLegacyInvoiceRow(invList?.[0] || null);
-      setInvoice(
-        invList?.[0] ||
-          (s?.invoice_number ? { invoice_number: s.invoice_number, status: s.invoice_status } : null)
-      );
       setShiftReceipts(Array.isArray(receipts) ? receipts : []);
     } catch (e) {
       console.error(e);
@@ -492,13 +483,13 @@ export default function ShiftDetailPage() {
             </button>
             <h2 style={{ margin: '0.5rem 0 0', display: 'inline-block' }}>
               {shift.participant_name} – {formatDate(shift.start_time)}
-              {invoice && (
+              {shift.billing_invoice_id && (
                 <span
-                  className={`badge badge-${invoice.status || 'sent'}`}
+                  className="badge badge-sent"
                   style={{ marginLeft: '0.5rem', fontSize: '0.8rem', verticalAlign: 'middle' }}
-                  title={invoice.status ? `Invoice ${invoice.status}` : 'Invoiced'}
+                  title="Included on a billing invoice"
                 >
-                  {invoice.invoice_number}
+                  Invoiced
                 </span>
               )}
             </h2>
@@ -523,11 +514,8 @@ export default function ShiftDetailPage() {
             >
               {shift.roster_sent_at ? 'Sent ✓' : 'Send to staff'}
             </button>
-            {invoice && (
-              <Link
-                to={legacyInvoiceRow ? '/invoices' : shift?.billing_invoice_id ? '/financial' : '/invoices'}
-                className="btn btn-primary"
-              >
+            {shift.billing_invoice_id && (
+              <Link to="/financial" className="btn btn-primary">
                 View Invoice
               </Link>
             )}
@@ -868,11 +856,10 @@ export default function ShiftDetailPage() {
           <strong>Status:</strong><br />
           <span className={`badge badge-${shift.status}`}>{shift.status}</span>
         </p>
-        {invoice && (
+        {shift.billing_invoice_id && (
           <p>
             <strong>Invoice:</strong><br />
-            <span className={`badge badge-${invoice.status}`}>{invoice.invoice_number}</span>
-            {' '}({invoice.status})
+            <span className="badge badge-sent">Invoiced</span>
           </p>
         )}
         {shiftReceipts.length > 0 && (

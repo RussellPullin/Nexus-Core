@@ -1190,6 +1190,33 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
       return res.status(400).json({ error: err.message || 'Could not prepare onboarding documents.' });
     }
 
+    // Auto-attach the employment contract when the org has a template configured and the
+    // staff member already has intake data on file (avoids emailing a near-blank contract
+    // on the very first invite, before they've filled in the onboarding form). If either
+    // is missing, the standalone "Download to sign" contract action remains available.
+    let contractAttached = false;
+    try {
+      const rawIntakeForContract = onboarding?.id ? getStaffIntakeFieldMap(onboarding.id) : {};
+      if (Object.keys(rawIntakeForContract).length > 0) {
+        const mergedForContract = mergeStaffIntakeForProfile(rawIntakeForContract, staffFull?.name);
+        const { pdf: contractPdf, templateMeta: contractTemplateMeta } = await generateStaffContractBuffers(
+          staffFull,
+          mergedForContract,
+          providerProfileId
+        );
+        if (contractPdf?.length) {
+          allAttachments.push({
+            filename: `${(contractTemplateMeta?.displayName || 'employment-contract').replace(/[^a-zA-Z0-9-_]+/g, '_')}.pdf`,
+            content: contractPdf,
+            contentType: 'application/pdf'
+          });
+          contractAttached = true;
+        }
+      }
+    } catch (err) {
+      console.warn('[start-onboarding] contract auto-attach skipped:', err?.message);
+    }
+
     if (signatureRequests.length) {
       text += `\n\n${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately for e-signature via Nexus Core. Check your inbox for signing requests.\n`;
     }
@@ -1203,13 +1230,30 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
     }));
     await sendEmailViaRelay(userId, s.email, subject, text, null, attachmentsForEmail, orgName);
 
+    // Best-effort Shifter access enablement — never blocks the send. Skips quietly if the
+    // org has no linked Shifter org or the email doesn't match a Shifter worker yet (they
+    // may not have signed up for the app yet).
+    let shifterStatus = 'skipped';
+    try {
+      const nexusOrgId = nexusOrgIdForSessionUser(userId);
+      if (nexusOrgId) {
+        await setShifterEnabledForStaffEmail(s.email, true, { nexusOrgId, staffId: s.id, db });
+        scheduleMirrorShiftsForStaffSqliteId(s.id);
+        shifterStatus = 'enabled';
+      }
+    } catch (err) {
+      shifterStatus = err?.code === 'SHIFTER_WORKER_NOT_FOUND' ? 'no_match' : 'error';
+    }
+
     res.json({
       ok: true,
       message: `Onboarding email sent to ${s.email}`,
       formLink,
       attachment_count: allAttachments.length,
+      contract_attached: contractAttached,
       signature_requests: signatureRequests,
       signature_request_count: signatureRequests.length,
+      shifter_status: shifterStatus,
       resent: alreadyComplete
     });
   } catch (err) {

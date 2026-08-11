@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { onboarding, participants, organisations, ndis, smartDefaults, forms } from '../lib/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
@@ -120,6 +120,7 @@ function formatParticipantDob(value) {
 export default function OnboardingPage() {
   const pathPrefix = useProductPathPrefix();
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const idRef = useRef(id);
   idRef.current = id;
   const signEnabled = useSignEnabled();
@@ -153,6 +154,20 @@ export default function OnboardingPage() {
       .then((cats) => setSupportCategories(Array.isArray(cats) && cats.length > 0 ? cats : FALLBACK_SUPPORT_CATEGORIES))
       .catch(() => setSupportCategories(FALLBACK_SUPPORT_CATEGORIES));
   }, []);
+
+  // "Onboard Participant" (ParticipantProfile) runs the orchestrator then lands here with
+  // ?autoOpenPack=1 so the document picker opens immediately instead of requiring a second
+  // manual click on this page too. Strip the param once handled so a reload doesn't re-fire it.
+  useEffect(() => {
+    if (!participant || searchParams.get('autoOpenPack') !== '1') return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('autoOpenPack');
+      return next;
+    }, { replace: true });
+    handleSendParticipantPolicyPack();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [participant, searchParams]);
 
   // Load NDIS line items for schedule dropdown (filtered by selected support categories; hourly items)
   useEffect(() => {

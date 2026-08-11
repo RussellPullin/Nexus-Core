@@ -156,7 +156,6 @@ import bulkOnboardingRouter from './routes/bulkOnboarding.js';
 import staffRouter, { handleSetStaffShifterEnabled } from './routes/staff.js';
 import shiftsRouter from './routes/shifts.js';
 import ndisRouter from './routes/ndis.js';
-import invoicesRouter from './routes/invoices.js';
 import progressNotesRouter from './routes/progressNotes.js';
 import smartDefaultsRouter from './routes/smartDefaults.js';
 import onboardingRouter from './routes/onboarding.js';
@@ -272,7 +271,6 @@ app.post('/api/staff/set-shifter-enabled', requireAuth, requireAdminOrDelegate, 
 app.use('/api/staff', requireAuth, staffRouter);
 app.use('/api/shifts', requireAuth, requireAgencyShell, shiftsRouter);
 app.use('/api/ndis', requireAuth, ndisRouter);
-app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api/progress-notes', requireAuth, progressNotesRouter);
 app.use('/api/smart-defaults', requireAuth, smartDefaultsRouter);
 app.use('/api/onboarding', requireAuth, onboardingRouter);
