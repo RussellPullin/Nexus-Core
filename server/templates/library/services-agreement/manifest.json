@@ -6,7 +6,7 @@
   "engine": "docxtemplater",
   "version": "1.0.0",
   "template_file": "template.docx",
-  "pack": "participant_onboarding",
+  "pack": null,
   "placeholders": [
     "org.abn",
     "org.branding.logo_path",
@@ -24,9 +24,7 @@
   "participant_service_types": [
     "all"
   ],
-  "packs": [
-    "participant_onboarding"
-  ],
+  "packs": [],
   "signing_layout": {
     "page_width": 595,
     "page_height": 842,

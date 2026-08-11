@@ -15,6 +15,7 @@ export default function ServiceAgreementOnboardingBlock({
   intakeSavedAt
 }) {
   const [orgTemplateId, setOrgTemplateId] = useState('');
+  const [signerType, setSignerType] = useState('participant');
   const [saGaps, setSaGaps] = useState(null);
   const [saPreflightLoading, setSaPreflightLoading] = useState(false);
   const [saGenerated, setSaGenerated] = useState([]);
@@ -49,7 +50,8 @@ export default function ServiceAgreementOnboardingBlock({
     setSaPreflightLoading(true);
     try {
       const result = await participants.preflightServiceAgreement(participantId, {
-        org_template_id: orgTemplateId
+        org_template_id: orgTemplateId,
+        instance_overrides: { signer_type: signerType }
       });
       setSaGaps(result);
     } catch (e) {
@@ -57,7 +59,7 @@ export default function ServiceAgreementOnboardingBlock({
     } finally {
       setSaPreflightLoading(false);
     }
-  }, [participantId, orgTemplateId]);
+  }, [participantId, orgTemplateId, signerType]);
 
   useEffect(() => {
     loadTemplate();
@@ -66,7 +68,7 @@ export default function ServiceAgreementOnboardingBlock({
 
   useEffect(() => {
     if (orgTemplateId && participantId) runPreflight();
-  }, [orgTemplateId, participantId, intakeKey, intakeSavedAt, runPreflight]);
+  }, [orgTemplateId, participantId, intakeKey, intakeSavedAt, signerType, runPreflight]);
 
   const intakeChangedSinceGenerate =
     lastGeneratedIntakeKey != null && lastGeneratedIntakeKey !== intakeKey && saGenerated.length > 0;
@@ -84,7 +86,8 @@ export default function ServiceAgreementOnboardingBlock({
     setSaMessage('');
     try {
       const result = await participants.generateServiceAgreement(participantId, {
-        org_template_id: orgTemplateId
+        org_template_id: orgTemplateId,
+        instance_overrides: { signer_type: signerType }
       });
       setLastGeneratedIntakeKey(intakeKey);
       setSaMessage('Service agreement PDF generated.');
@@ -119,6 +122,22 @@ export default function ServiceAgreementOnboardingBlock({
         The participant is the <strong>client</strong> on this agreement. Fields come from the intake form above and the participant profile.
         After you change intake or profile details, generate again so the PDF matches.
       </p>
+
+      <div style={{ marginBottom: '0.75rem' }}>
+        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.25rem' }}>
+          Who is completing and signing this agreement?
+        </label>
+        <select
+          className="form-input"
+          style={{ maxWidth: 280 }}
+          value={signerType}
+          disabled={working || saPreflightLoading}
+          onChange={(e) => setSignerType(e.target.value)}
+        >
+          <option value="participant">Participant signs</option>
+          <option value="guardian">Guardian/representative signs</option>
+        </select>
+      </div>
 
       {intakeChangedSinceGenerate ? (
         <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.88rem', color: '#b45309', background: '#fffbeb', padding: '0.5rem 0.65rem', borderRadius: 6 }}>

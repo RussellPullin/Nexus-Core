@@ -81,14 +81,20 @@ function deriveSigners(snapshot) {
     '';
   const orgEmail = snapshot?.signatory?.email || snapshot?.org?.email || '';
 
-  const participantName = snapshot?.participant?.name || '';
-  const participantEmail = snapshot?.participant?.email || '';
+  // The sender's participant/guardian choice (snapshot.signer_type, set at generation time —
+  // see serviceAgreementSnapshot.service.js) decides who actually receives the signing request.
+  // Falls back to the participant when no representative is on file, same as if 'participant'
+  // had been chosen — serviceAgreementGaps.service.js is what actually blocks generation when a
+  // 'guardian' choice has no representative email to send to.
+  const useGuardian = snapshot?.signer_type === 'guardian' && snapshot?.representative;
+  const primaryName = useGuardian ? snapshot.representative?.name || '' : snapshot?.participant?.name || '';
+  const primaryEmail = useGuardian ? snapshot.representative?.email || '' : snapshot?.participant?.email || '';
 
   // `role` must match the field-builder's ROLE_ORG/ROLE_PARTICIPANT exactly — native
   // signing matches signers to fields by this string, not by position.
   return {
     org: { order: 0, name: orgName, email: orgEmail, role: ROLE_ORG },
-    participant: { order: 1, name: participantName, email: participantEmail, role: ROLE_PARTICIPANT }
+    participant: { order: 1, name: primaryName, email: primaryEmail, role: ROLE_PARTICIPANT }
   };
 }
 

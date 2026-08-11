@@ -35,6 +35,17 @@ export function computeServiceAgreementGaps(params) {
     });
   }
 
+  if (snapshot.signer_type === 'guardian' && isBlank(snapshot.representative?.email)) {
+    add({
+      id: 'representative_email_for_signing',
+      severity: 'blocking',
+      title: 'Representative/guardian email',
+      description: 'Guardian was chosen as the signer, but this participant has no representative email on file to send the signing request to.',
+      section: 'Section 1 — Representative details',
+      fix: { kind: 'onboarding_intake', field: 'primary_contact_email' }
+    });
+  }
+
   if (isBlank(o.legal_name) && isBlank(o.trading_name)) {
     add({
       id: 'org_legal_name',

@@ -397,7 +397,13 @@ export function buildServiceAgreementSnapshot({
     clauses_rendered: clausesRendered,
     definition_meta: definition.meta || {},
     section_titles: definition.sectionTitles || {},
-    parties_labels: definition.partiesBlockLabels || {}
+    parties_labels: definition.partiesBlockLabels || {},
+    // Who the sender decided completes and signs this agreement — participant, or their
+    // guardian/representative. Read by serviceAgreementDocuSealFields.service.js's deriveSigners
+    // to pick which email the signing request actually goes to. Missing representative details
+    // for a 'guardian' choice surface as a blocking gap in serviceAgreementGaps.service.js rather
+    // than failing here, consistent with how every other missing field on this document works.
+    signer_type: instanceOverrides?.signer_type === 'guardian' ? 'guardian' : 'participant'
   };
 
   return snapshot;
