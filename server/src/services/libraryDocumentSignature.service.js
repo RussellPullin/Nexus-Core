@@ -132,7 +132,14 @@ async function resolveSigningLayout(master, pdfBuffer, workflow) {
   return ensureMultiSignerLayout(suggested, master, workflow);
 }
 
-function resolvePrimaryRecipient({ workflow, staff, participant }) {
+/**
+ * `signerTypeOverride` ('participant' | 'guardian') lets a document that declares a `signer_type`
+ * admin_field (e.g. service-schedule) have the sender explicitly pick who signs, instead of this
+ * silently preferring whichever email happens to be on file. Falls back to the original
+ * auto-detect (prefer guardian if present) when no document in the send declares that field, so
+ * every other library master keeps its current behaviour unchanged.
+ */
+function resolvePrimaryRecipient({ workflow, staff, participant, signerTypeOverride = null }) {
   if (workflow === 'staff_onboarding') {
     return {
       name: staff?.name || 'Staff member',
@@ -142,6 +149,25 @@ function resolvePrimaryRecipient({ workflow, staff, participant }) {
   }
   const guardianEmail = (participant?.guardian_email || participant?.parent_guardian_email || '').trim();
   const guardianName = participant?.guardian_name || participant?.parent_guardian_name || '';
+
+  if (signerTypeOverride === 'guardian') {
+    if (!guardianEmail) {
+      const err = new Error(
+        'This participant has no guardian/representative email on file. Add one before choosing "guardian" as the signer.'
+      );
+      err.code = 'GUARDIAN_EMAIL_MISSING';
+      throw err;
+    }
+    return { name: guardianName || 'Guardian', email: guardianEmail, role: 'guardian' };
+  }
+  if (signerTypeOverride === 'participant') {
+    return {
+      name: participant?.name || 'Participant',
+      email: (participant?.email || '').trim(),
+      role: 'participant'
+    };
+  }
+
   if (guardianEmail) {
     return { name: guardianName || 'Guardian', email: guardianEmail, role: 'guardian' };
   }
@@ -168,13 +194,20 @@ export async function getLibraryMasterOrgFields({ masterId, orgId, workflow }) {
   return layout.fields.filter((f) => f.signer === 'org');
 }
 
-async function prepareMasterDocument(master, orgId, workflow, { staff, participant, adminFieldValuesByMasterId = {} }) {
+async function prepareMasterDocument(master, orgId, workflow, { staff, participant, adminFieldValuesByMasterId = {}, recipientRole = null }) {
   const extra = adminFieldValuesByMasterId[master.id] || {};
   const att = await renderLibraryMasterAttachment(master, orgId, { staff, participant, extra });
   if (!att?.content || att.contentType !== 'application/pdf') {
     throw new Error(`Could not render ${master.display_name || master.slug} as PDF for signature.`);
   }
   let layout = await resolveSigningLayout(master, att.content, workflow);
+  // A field tagged `applies_when` only belongs to one signer path (e.g. service-schedule's
+  // separate Client vs Representative signature blocks) — drop whichever doesn't match who's
+  // actually signing this send. Fields without the tag always apply, so this is a no-op for
+  // every other library master.
+  if (recipientRole) {
+    layout = { ...layout, fields: layout.fields.filter((f) => !f.applies_when || f.applies_when === recipientRole) };
+  }
   let buffer = att.content;
 
   const orgFields = layout.fields.filter((f) => f.signer === 'org');
@@ -208,10 +241,24 @@ async function prepareMasterDocument(master, orgId, workflow, { staff, participa
 }
 
 async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, participant, orgName, adminFieldValuesByMasterId = {} }) {
-  const recipient = resolvePrimaryRecipient({ workflow, staff, participant });
+  // Any master in this packet can declare a `signer_type` admin_field — if the sender set one,
+  // it decides who the whole packet is sent to (a guardian signing on your behalf signs
+  // everything in that send, not a mix).
+  const signerTypeOverride =
+    packetMasters
+      .map((m) => adminFieldValuesByMasterId[m.id]?.signer_type)
+      .find((v) => v === 'participant' || v === 'guardian') || null;
+  const recipient = resolvePrimaryRecipient({ workflow, staff, participant, signerTypeOverride });
   const prepared = [];
   for (const master of packetMasters) {
-    prepared.push(await prepareMasterDocument(master, orgId, workflow, { staff, participant, adminFieldValuesByMasterId }));
+    prepared.push(
+      await prepareMasterDocument(master, orgId, workflow, {
+        staff,
+        participant,
+        adminFieldValuesByMasterId,
+        recipientRole: recipient.role
+      })
+    );
   }
 
   let signers = prepared.find((p) => p.signers?.length)?.signers || null;
