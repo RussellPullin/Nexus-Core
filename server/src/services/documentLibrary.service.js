@@ -256,7 +256,7 @@ export async function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) 
       template_file_path, placeholders_json, manifest_json,
       required_signer_role, renewal_days, sections_json, is_active, last_synced_at,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'), datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
     ON CONFLICT(slug) DO UPDATE SET
       display_name = excluded.display_name,
       category = excluded.category,
@@ -269,7 +269,7 @@ export async function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) 
       required_signer_role = excluded.required_signer_role,
       renewal_days = excluded.renewal_days,
       sections_json = excluded.sections_json,
-      is_active = 1,
+      is_active = excluded.is_active,
       last_synced_at = datetime('now'),
       updated_at = datetime('now')
   `);
@@ -347,7 +347,8 @@ export async function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) 
       JSON.stringify(manifest),
       manifest.required_signer_role || null,
       Number.isFinite(manifest.renewal_days) ? manifest.renewal_days : null,
-      sectionsJson
+      sectionsJson,
+      manifest.is_active === false ? 0 : 1
     );
     result.registered += 1;
   }

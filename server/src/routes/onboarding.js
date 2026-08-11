@@ -1174,65 +1174,6 @@ router.get('/participants/:id/forms/:formId/prefill-snapshot', (req, res) => {
   }
 });
 
-/**
- * Update coordinator tickboxes / free-text for the PDF-based privacy consent form.
- * Stores snapshot back into participant_form_instances.source_snapshot_json and regenerates the draft PDF.
- *
- * Body:
- *   { overrides: { checkboxes?: object, text?: object } }
- */
-router.put('/participants/:id/forms/:formId/prefill-snapshot', async (req, res) => {
-  try {
-    const onboarding = getOnboardingByParticipant(req.params.id);
-    if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
-
-    const form = db.prepare(`
-      SELECT pfi.*, ft.form_type, ft.display_name, ft.template_filename
-      FROM participant_form_instances pfi
-      JOIN form_templates ft ON ft.id = pfi.form_template_id
-      WHERE pfi.id = ? AND pfi.participant_onboarding_id = ?
-    `).get(req.params.formId, onboarding.id);
-    if (!form) return res.status(404).json({ error: 'Form not found' });
-    if (form.form_type !== 'privacy_consent') {
-      return res.status(400).json({ error: 'This endpoint only supports privacy_consent.' });
-    }
-    if (!['generated', 'draft'].includes(form.status)) {
-      return res.status(400).json({ error: `Form is ${form.status}. Cannot update snapshot.` });
-    }
-
-    const current = parseSnapshot(form) || {};
-    const overrides = req.body?.overrides && typeof req.body.overrides === 'object' ? req.body.overrides : {};
-
-    const pcSnapshot = buildPrivacyConsentSnapshot({
-      participantId: req.params.id,
-      participantOnboardingId: onboarding.id,
-      overrides
-    });
-
-    const nextSnapshot = {
-      ...current,
-      privacy_consent: pcSnapshot
-    };
-
-    // Regenerate the draft PDF so the checkboxes + details are baked in before signature send.
-    const pdfBuffer = await generatePrivacyConsentPdfBuffer(pcSnapshot);
-    const ext = 'pdf';
-    const absolutePath = join(onboardingDir, `${form.participant_id}-privacy_consent-v${form.version}.${ext}`);
-    mkdirSync(onboardingDir, { recursive: true });
-    writeFileSync(absolutePath, pdfBuffer);
-
-    db.prepare(
-      `UPDATE participant_form_instances
-       SET source_snapshot_json = ?, draft_document_path = ?, updated_at = datetime('now')
-       WHERE id = ?`
-    ).run(JSON.stringify(nextSnapshot), absolutePath, form.id);
-
-    res.json({ ok: true, form_id: form.id, snapshot: nextSnapshot });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
 router.get('/participants/:id/forms/:formId/document', (req, res) => {
   try {
     const onboarding = getOnboardingByParticipant(req.params.id);

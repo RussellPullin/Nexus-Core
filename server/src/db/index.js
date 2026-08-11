@@ -2304,48 +2304,6 @@ try {
     if (!e.message?.includes('already exists')) console.warn('document library migration:', e.message);
   }
 
-  // Per-org mapping of library masters to send stages (participant_intake, participant_sa, staff_intake, staff_contract)
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS org_library_send_stages (
-        id TEXT PRIMARY KEY,
-        org_id TEXT NOT NULL,
-        master_id TEXT NOT NULL,
-        stage TEXT NOT NULL,
-        created_at TEXT DEFAULT (datetime('now')),
-        UNIQUE(org_id, master_id, stage),
-        FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE,
-        FOREIGN KEY (master_id) REFERENCES document_library_masters(id) ON DELETE CASCADE
-      );
-      CREATE INDEX IF NOT EXISTS idx_org_library_send_stages_org_stage ON org_library_send_stages(org_id, stage);
-    `);
-    // Seed defaults for any org that has library clones but no send stages yet
-    const STAGE_DEFAULTS = {
-      participant_intake: ['client-induction-checklist', 'privacy-consent-form'],
-      participant_sa:     ['service-schedule'],
-      staff_intake:       ['staff-induction-checklist', 'worker-declarations', 'pre-employment-collection-form'],
-      staff_contract:     []
-    };
-    const orgsWithClones = db.prepare(
-      `SELECT DISTINCT org_id FROM document_library_org_clones WHERE is_active = 1`
-    ).all();
-    const insertStage = db.prepare(
-      `INSERT OR IGNORE INTO org_library_send_stages (id, org_id, master_id, stage) VALUES (?, ?, ?, ?)`
-    );
-    for (const { org_id } of orgsWithClones) {
-      const existing = db.prepare(`SELECT COUNT(*) AS n FROM org_library_send_stages WHERE org_id = ?`).get(org_id);
-      if (existing.n > 0) continue;
-      for (const [stage, slugs] of Object.entries(STAGE_DEFAULTS)) {
-        for (const slug of slugs) {
-          const m = db.prepare(`SELECT id FROM document_library_masters WHERE slug = ? AND is_active = 1`).get(slug);
-          if (m) insertStage.run(randomUUID(), org_id, m.id, stage);
-        }
-      }
-    }
-  } catch (e) {
-    if (!e.message?.includes('already exists')) console.warn('org_library_send_stages migration:', e.message);
-  }
-
   // Nexus structured form templates (masters + org clones + generated PDF snapshots)
   try {
     db.exec(`

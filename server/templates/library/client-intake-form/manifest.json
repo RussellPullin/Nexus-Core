@@ -16,7 +16,8 @@
   "required_signer_role": "participant",
   "signature_count": 1,
   "renewal_days": null,
-  "is_active": true,
+  "is_active": false,
+  "_retired_reason": "Blank docx with zero participant merge fields — nothing for the recipient to fill during e-sign. Superseded by the self-service intake link (participant_intake_tokens / POST /api/participants/:id/intake-token, IntakePage.jsx) which writes real answers into participant_intake_fields and feeds the compliance registers directly.",
   "participant_service_types": [
     "all"
   ],
