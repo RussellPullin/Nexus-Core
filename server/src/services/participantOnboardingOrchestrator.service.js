@@ -83,12 +83,12 @@ export async function orchestrateParticipantOnboarding({
       blocking_reason: 'Participant not found'
     };
   }
-  const providerOrgId =
-    providerOrganisationId ||
-    participant.provider_org_id ||
-    participant.plan_manager_id ||
-    db.prepare('SELECT id FROM organisations ORDER BY created_at ASC LIMIT 1').get()?.id ||
-    null;
+  // Deliberately no "pick any org" fallback here — silently assigning a participant to an
+  // arbitrary org (e.g. the oldest one in the database) would clone/render documents under
+  // the wrong organisation's library, which previously surfaced as a confusing downstream
+  // "Document not found" once the caller's own org didn't match. Block instead and let the
+  // caller supply an explicit org (the route handler passes the requesting admin's own org).
+  const providerOrgId = providerOrganisationId || participant.provider_org_id || participant.plan_manager_id || null;
   pushStep({
     name: 'resolve_provider_org',
     ok: Boolean(providerOrgId),

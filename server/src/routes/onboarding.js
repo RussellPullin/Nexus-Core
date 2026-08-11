@@ -57,6 +57,16 @@ const onboardingDir = join(projectRoot, 'data', 'onboarding');
 const router = Router();
 const memoryUpload = multer({ storage: multer.memoryStorage() });
 
+/** Same resolution the document-picker list (documentLibrary.js) uses — keeps the org that
+ *  decides which library masters are selectable consistent with the org used to render/preview
+ *  them. Do not resolve org via the participant's onboarding->provider_profile chain here: that
+ *  can diverge from the requester's own org (e.g. via the orchestrator's org-resolution
+ *  fallbacks), which previously caused "Document not found" — the picker would list a master
+ *  cloned for the requester's org, but the preview looked it up under a different org. */
+function requesterOrgId(req) {
+  return db.prepare('SELECT org_id FROM users WHERE id = ?').get(req.session?.user?.id)?.org_id || null;
+}
+
 function actorContext(req) {
   return {
     actorType: req.headers['x-actor-type'] || 'user',
@@ -107,7 +117,10 @@ router.post('/participants/:id/onboarding/run', async (req, res) => {
   try {
     const result = await orchestrateParticipantOnboarding({
       participantId: req.params.id,
-      providerOrganisationId: req.body?.provider_organisation_id || null,
+      // Prefer the requesting admin's own org over whatever's stored on the participant row —
+      // keeps this consistent with how the document picker/preview/send resolve org, so the
+      // onboarding pack this run prepares is always selectable/renderable by whoever ran it.
+      providerOrganisationId: req.body?.provider_organisation_id || requesterOrgId(req) || null,
       userId: req.session?.user?.id || null,
       ...actorContext(req)
     });
@@ -281,8 +294,12 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
     const participant = db.prepare(`SELECT id, name, email FROM participants WHERE id = ?`).get(req.params.id);
     if (!participant?.email?.trim()) return res.status(400).json({ error: 'Participant has no email address' });
 
-    const pp = db.prepare(`SELECT organisation_id FROM provider_profiles WHERE id = ?`).get(onboarding.provider_profile_id);
-    const orgId = pp?.organisation_id || null;
+    // Resolve org/profile from the requesting admin's own session — must match how the document
+    // picker (documentLibrary.js) resolves org, since masterIds selected there only exist under
+    // that org's clone set. Using the onboarding row's provider_profile_id here previously caused
+    // "Document not found"-style mismatches when it pointed at a different org.
+    const orgId = requesterOrgId(req);
+    const providerProfileId = orgId ? ensureProviderProfile(orgId)?.id || null : null;
     const org = orgId ? db.prepare(`SELECT name FROM organisations WHERE id = ?`).get(orgId) : null;
     const orgName = org?.name || process.env.COMPANY_NAME || 'Nexus Core';
     const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(req.params.id);
@@ -294,7 +311,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
     try {
       const splitSend = await prepareSplitOnboardingSend({
         orgId,
-        providerProfileId: onboarding.provider_profile_id,
+        providerProfileId,
         workflow: 'participant_onboarding',
         masterIds: hasSelection ? masterIds : undefined,
         participant: fullParticipant,
@@ -381,8 +398,7 @@ router.get('/participants/:id/onboarding-org-fields/:masterId', requireAdminOrDe
   try {
     const onboarding = getOnboardingByParticipant(req.params.id);
     if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
-    const pp = db.prepare(`SELECT organisation_id FROM provider_profiles WHERE id = ?`).get(onboarding.provider_profile_id);
-    const orgId = pp?.organisation_id || null;
+    const orgId = requesterOrgId(req);
     const master = listOnboardingLibraryMasters(orgId, 'participant_onboarding').find((m) => m.id === req.params.masterId);
     if (!master) return res.status(404).json({ error: 'Document not found' });
     const fields = await getLibraryMasterOrgFields({ masterId: master.id, orgId, workflow: 'participant_onboarding' });
@@ -399,8 +415,7 @@ router.post('/participants/:id/onboarding-preview', requireAdminOrDelegate, asyn
   try {
     const onboarding = getOnboardingByParticipant(req.params.id);
     if (!onboarding) return res.status(404).json({ error: 'Onboarding not found' });
-    const pp = db.prepare(`SELECT organisation_id FROM provider_profiles WHERE id = ?`).get(onboarding.provider_profile_id);
-    const orgId = pp?.organisation_id || null;
+    const orgId = requesterOrgId(req);
     const masterId = req.body?.master_id;
     const master = listOnboardingLibraryMasters(orgId, 'participant_onboarding').find((m) => m.id === masterId);
     if (!master) return res.status(404).json({ error: 'Document not found' });
