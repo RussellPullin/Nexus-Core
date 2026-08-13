@@ -359,5 +359,13 @@
         "fillable": true
       }
     ]
-  }
+  },
+  "admin_fields": [
+    {
+      "key": "org_signature",
+      "label": "Organisation signature (type full name to sign)",
+      "type": "text",
+      "required": true
+    }
+  ]
 }

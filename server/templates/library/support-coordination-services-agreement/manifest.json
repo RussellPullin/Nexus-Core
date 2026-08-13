@@ -173,6 +173,12 @@
       "label": "Organisation signature (type full name to sign)",
       "type": "text",
       "required": true
+    },
+    {
+      "key": "org_printed_name",
+      "label": "Organisation signatory name (please print)",
+      "type": "text",
+      "required": true
     }
   ]
 }
