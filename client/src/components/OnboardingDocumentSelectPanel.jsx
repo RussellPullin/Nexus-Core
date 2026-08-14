@@ -234,6 +234,19 @@ export default function OnboardingDocumentSelectPanel({
     }
     const docsNeedingInput = documents.filter((d) => selectedIds.has(d.id) && d.admin_fields?.length);
     if (docsNeedingInput.length) {
+      // Pre-fill from each field's server-supplied default (e.g. the org's signatory name on
+      // file) so the sender isn't retyping it every time — still editable before sending.
+      setAdminFieldValues((prev) => {
+        const next = { ...prev };
+        for (const doc of docsNeedingInput) {
+          const docValues = { ...(next[doc.id] || {}) };
+          for (const f of doc.admin_fields || []) {
+            if (f.default != null && docValues[f.key] == null) docValues[f.key] = f.default;
+          }
+          next[doc.id] = docValues;
+        }
+        return next;
+      });
       setWizardDocs(docsNeedingInput);
       setWizardIndex(0);
       return;

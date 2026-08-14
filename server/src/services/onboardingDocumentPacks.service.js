@@ -12,6 +12,7 @@ import { join } from 'path';
 import { db } from '../db/index.js';
 import { renderLibraryDocument } from './documentLibraryRender.service.js';
 import { fillAcroFormWithTokens } from './formFill.service.js';
+import { getOrgRenderContext } from './orgContext.service.js';
 import {
   manifestMatchesOnboardingContext,
   VALID_PARTICIPANT_SERVICE_TYPES,
@@ -92,8 +93,23 @@ export function listOnboardingPackDocumentsForSelection(orgId, workflow, { parti
       ? { participantServiceType: participantServiceType || 'all' }
       : { staffRole: staffRole || 'all' };
 
+  // Org signatory name is already on file (business_settings/organisations) — pre-fill the
+  // org-side signature admin_fields with it so the sender doesn't retype it on every send,
+  // while leaving the input editable in case a different person is signing this time.
+  let orgSignatoryName = '';
+  if (orgId) {
+    try {
+      orgSignatoryName = getOrgRenderContext(orgId).signatory.name || '';
+    } catch {
+      orgSignatoryName = '';
+    }
+  }
+
   return listOnboardingLibraryMasters(orgId, workflow).map((master) => {
     const signatureCount = Number(master.manifest.signature_count) || 0;
+    const adminFields = (master.manifest.admin_fields || []).map((f) =>
+      orgSignatoryName && /^org_(signature|printed_name)/.test(f.key) ? { ...f, default: orgSignatoryName } : f
+    );
     return {
       id: master.id,
       slug: master.slug,
@@ -103,7 +119,7 @@ export function listOnboardingPackDocumentsForSelection(orgId, workflow, { parti
       participant_service_types: master.manifest.participant_service_types || ['all'],
       staff_roles: master.manifest.staff_roles || ['all'],
       suggested: manifestMatchesOnboardingContext(master.manifest, ctx),
-      admin_fields: master.manifest.admin_fields || []
+      admin_fields: adminFields
     };
   });
 }
