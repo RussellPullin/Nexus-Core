@@ -25,6 +25,7 @@ import {
 import { sendBillingBatch } from '../services/billingBatchSend.service.js';
 import { generateBillingInvoicePdfBuffer } from '../services/billingInvoicePdf.service.js';
 import { rebuildBillingInvoiceLineItems } from '../services/billingInvoiceRepair.service.js';
+import { repairInvalidShiftInvoiceLinks } from '../services/shiftInvoiceLink.service.js';
 import { syncBillingInvoiceFromXero } from '../services/xeroPaymentSync.service.js';
 import { getProviderOrgIdForUser } from '../middleware/roles.js';
 import {
@@ -155,6 +156,10 @@ router.get('/draft-batch', (req, res) => {
         total_items: 0
       });
     }
+
+    // Shifter can reuse a billed row (same shifter_shift_id, different client/day).
+    // Clear those stale links before building the unbilled draft.
+    repairInvalidShiftInvoiceLinks({ orgId: pc.orgId });
 
     const tasks = db.prepare(`
       SELECT ct.id, ct.participant_id, ct.activity_date, ct.description, ct.task_type,

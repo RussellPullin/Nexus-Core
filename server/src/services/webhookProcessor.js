@@ -13,7 +13,7 @@ import {
   findShiftByShifterShiftIdForParticipant,
   findShiftByParticipantStaffAndStartTime
 } from './progressNoteMatcher.js';
-import { canImportMergeIntoShift } from './shiftInvoiceLink.service.js';
+import { canImportMergeIntoShift, repairInvalidShiftInvoiceLinks } from './shiftInvoiceLink.service.js';
 import { recordEvent } from './learningEvent.service.js';
 import { updateAggregatesForShift } from './featureStore.service.js';
 import { scheduleMirrorShiftToNexusSupabase } from './nexusPublicShiftsSync.service.js';
@@ -557,5 +557,17 @@ export function processShifts(shiftsArray, options = {}) {
     processed++;
   }
 
-  return { processed, matched, unmatched, skipped, unchanged };
+  const invoiceRepair = repairInvalidShiftInvoiceLinks({
+    orgId: orgId || null,
+    log: (msg, data) => log(msg, data),
+  });
+
+  return {
+    processed,
+    matched,
+    unmatched,
+    skipped,
+    unchanged,
+    invoice_links_cleared: invoiceRepair.cleared,
+  };
 }
