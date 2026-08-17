@@ -4,8 +4,27 @@
  */
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
-import { getDefaultLineItemForParticipant } from './progressNoteMatcher.js';
+import { getDefaultLineItemForParticipant, parseTimeToMinutes } from './progressNoteMatcher.js';
 import { hoursBetweenIsoDateTimes } from '../lib/shiftDuration.js';
+
+function latestProgressNoteMatchingShift(shiftId, shiftStartTime) {
+  const notes = db
+    .prepare(
+      `SELECT participant_id, duration_hours, support_date, travel_km, travel_time_min, start_time
+       FROM progress_notes
+       WHERE shift_id = ?
+       ORDER BY created_at DESC`
+    )
+    .all(shiftId);
+  if (!notes.length) return null;
+  const shiftMins = parseTimeToMinutes(String(shiftStartTime || '').replace(' ', 'T').slice(11, 16));
+  if (shiftMins == null) return notes[0];
+  const matching = notes.find((n) => {
+    const noteMins = parseTimeToMinutes(n.start_time);
+    return noteMins != null && Math.abs(noteMins - shiftMins) <= 60;
+  });
+  return matching || notes[0];
+}
 
 /** When set, Excel/Shifter pull and auto line-item builders skip replacing shift_line_items (coordinator edits preserved). */
 function isShiftLineItemsLocked(shiftId) {
@@ -242,13 +261,8 @@ export function populateShiftLineItems(
  */
 export function supplementShiftTravelLineItemsFromProgressNote(shiftId) {
   if (isShiftLineItemsLocked(shiftId)) return;
-  const progressNote = db.prepare(`
-    SELECT participant_id, support_date, travel_km, travel_time_min
-    FROM progress_notes
-    WHERE shift_id = ?
-    ORDER BY created_at DESC
-    LIMIT 1
-  `).get(shiftId);
+  const shiftForNote = db.prepare('SELECT start_time FROM shifts WHERE id = ?').get(shiftId);
+  const progressNote = latestProgressNoteMatchingShift(shiftId, shiftForNote?.start_time);
   if (!progressNote) return;
 
   // Don't mutate historical billed shifts.
@@ -322,13 +336,7 @@ export function syncShiftLineItemsWithProgressNote(shiftId) {
   if (isShiftLineItemsLocked(shiftId)) return;
   const lineCount = db.prepare('SELECT COUNT(*) as c FROM shift_line_items WHERE shift_id = ?').get(shiftId);
 
-  const progressNote = db.prepare(`
-    SELECT participant_id, duration_hours, support_date, travel_km, travel_time_min
-    FROM progress_notes
-    WHERE shift_id = ?
-    ORDER BY created_at DESC
-    LIMIT 1
-  `).get(shiftId);
+  const progressNote = latestProgressNoteMatchingShift(shiftId, db.prepare('SELECT start_time FROM shifts WHERE id = ?').get(shiftId)?.start_time);
   if (!progressNote) return;
 
   const shift = db.prepare('SELECT start_time, end_time FROM shifts WHERE id = ?').get(shiftId);
@@ -399,15 +407,7 @@ export function recalculateShiftLineItemsFromShift(shiftId) {
       ? String(shift.start_time).replace(' ', 'T').slice(0, 10)
       : null;
 
-  const pn = db
-    .prepare(
-      `SELECT travel_km, travel_time_min, support_date
-       FROM progress_notes
-       WHERE shift_id = ?
-       ORDER BY created_at DESC
-       LIMIT 1`
-    )
-    .get(shiftId);
+  const pn = latestProgressNoteMatchingShift(shiftId, shift.start_time);
 
   const supportDate = supportDateFromShift || pn?.support_date || new Date().toISOString().slice(0, 10);
 

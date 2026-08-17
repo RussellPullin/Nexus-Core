@@ -18,7 +18,11 @@ export function isEstablishmentFee(item) {
   return unit === 'each' || unit === 'e' || desc.includes('establishment fee');
 }
 
-const TIME_TOLERANCE_MIN = 30;
+/** Incoming start must be this close to an existing shift start to count as the same slot. */
+const START_CLOSE_MIN = 60;
+/** Late clock-in on the same roster slot (e.g. 16:00 roster, 18:00 start) still merges if they overlap. */
+const LATE_START_MAX_MIN = 180;
+const MIN_OVERLAP_FOR_LATE_START = 60;
 
 /** Exclude group activities – prefer 1:1 community access for support worker shifts. */
 function isGroupActivity(item) {
@@ -118,7 +122,7 @@ export function parseSupportDate(dateStr) {
  * @param {string} timeStr - e.g. "09:00" or "'09:00"
  * @returns {number | null}
  */
-function parseTimeToMinutes(timeStr) {
+export function parseTimeToMinutes(timeStr) {
   if (!timeStr || typeof timeStr !== 'string') return null;
   const s = String(timeStr).trim().replace(/'/g, '');
   const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
@@ -126,6 +130,55 @@ function parseTimeToMinutes(timeStr) {
   const hours = parseInt(m[1], 10);
   const mins = parseInt(m[2], 10);
   return hours * 60 + mins;
+}
+
+function shiftWallStartMinutes(shift) {
+  if (!shift?.start_time) return null;
+  return parseTimeToMinutes(String(shift.start_time).replace(' ', 'T').slice(11, 16));
+}
+
+function shiftWallEndMinutes(shift) {
+  if (!shift?.end_time) return null;
+  return parseTimeToMinutes(String(shift.end_time).replace(' ', 'T').slice(11, 16));
+}
+
+/**
+ * Pick the same-day shift that is the same visit, not merely touching another slot.
+ * A 08:00–18:00 completion must not merge into an 18:00–20:30 evening shift.
+ *
+ * @param {Array<object>} shifts
+ * @param {string} startTime HH:mm
+ * @param {string} endTime HH:mm
+ * @returns {object | null}
+ */
+export function pickBestSameDayShiftMatch(shifts, startTime, endTime) {
+  const noteStartMins = parseTimeToMinutes(startTime);
+  const noteEndMins = parseTimeToMinutes(endTime);
+  if (noteStartMins == null || !Array.isArray(shifts) || !shifts.length) return null;
+
+  let best = null;
+  for (const shift of shifts) {
+    const shiftStart = shiftWallStartMinutes(shift);
+    const shiftEnd = shiftWallEndMinutes(shift);
+    if (shiftStart == null) continue;
+    const startDelta = Math.abs(shiftStart - noteStartMins);
+    const overlap =
+      noteEndMins != null && shiftEnd != null
+        ? Math.min(shiftEnd, noteEndMins) - Math.max(shiftStart, noteStartMins)
+        : 0;
+    const startClose = startDelta <= START_CLOSE_MIN;
+    const lateSameSlot =
+      overlap >= MIN_OVERLAP_FOR_LATE_START && startDelta <= LATE_START_MAX_MIN;
+    if (!startClose && !lateSameSlot) continue;
+    if (
+      !best ||
+      startDelta < best.startDelta ||
+      (startDelta === best.startDelta && overlap > best.overlap)
+    ) {
+      best = { shift, startDelta, overlap };
+    }
+  }
+  return best?.shift || null;
 }
 
 /**
@@ -195,7 +248,8 @@ export function findShiftByParticipantStaffAndStartTime(participantId, staffId, 
 
 /**
  * Find a shift matching participant, staff, date, and time window.
- * Uses ±30 min tolerance for clock-in variance.
+ * Matches the same visit: start within 60 minutes, or a late start on an overlapping slot.
+ * Does not merge a daytime completion into an evening shift that only touches at the boundary.
  * @param {object} params
  * @param {string} params.participantId
  * @param {string} params.staffId
@@ -232,20 +286,7 @@ export function findMatchingShift({ participantId, staffId, supportDate, startTi
       AND status IN ('scheduled', 'completed', 'completed_by_admin')
   `).all(participantId, staffId, dayStart, dayEnd);
 
-  const noteStartMins = parseTimeToMinutes(startTime);
-  const noteEndMins = parseTimeToMinutes(endTime);
-
-  for (const shift of shifts) {
-    const shiftStart = shift.start_time ? parseTimeToMinutes(shift.start_time.slice(11, 16)) : null;
-    const shiftEnd = shift.end_time ? parseTimeToMinutes(shift.end_time.slice(11, 16)) : null;
-    if (shiftStart == null || shiftEnd == null) continue;
-    if (noteStartMins != null && noteEndMins != null) {
-      const overlap = Math.min(shiftEnd, noteEndMins) - Math.max(shiftStart, noteStartMins);
-      if (overlap >= -TIME_TOLERANCE_MIN) return shift;
-      continue;
-    }
-  }
-  return null;
+  return pickBestSameDayShiftMatch(shifts, startTime, endTime);
 }
 
 /**
