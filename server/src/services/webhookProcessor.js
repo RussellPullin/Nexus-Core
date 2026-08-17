@@ -11,7 +11,8 @@ import {
   buildDateTime,
   findMatchingShift,
   findShiftByShifterShiftIdForParticipant,
-  findShiftByParticipantStaffAndStartTime
+  findShiftByParticipantStaffAndStartTime,
+  parseTimeToMinutes
 } from './progressNoteMatcher.js';
 import { canImportMergeIntoShift, repairInvalidShiftInvoiceLinks } from './shiftInvoiceLink.service.js';
 import { recordEvent } from './learningEvent.service.js';
@@ -336,6 +337,20 @@ export function processShifts(shiftsArray, options = {}) {
             billing_invoice_id: matchingShift.billing_invoice_id,
           });
           matchingShift = null;
+        }
+        // Same client/day but a different slot (e.g. 08:00 day vs 18:00 evening) must stay separate.
+        if (matchingShift) {
+          const existingMins = parseTimeToMinutes(String(matchingShift.start_time || '').replace(' ', 'T').slice(11, 16));
+          const incomingMins = parseTimeToMinutes(String(startDateTime || '').replace(' ', 'T').slice(11, 16));
+          if (existingMins != null && incomingMins != null && Math.abs(existingMins - incomingMins) > 180) {
+            log('Import is a different time slot than matched shift — creating new shift', {
+              shiftId,
+              existing_shift_id: matchingShift.id,
+              existing_start: matchingShift.start_time,
+              incoming_start: startDateTime,
+            });
+            matchingShift = null;
+          }
         }
 
         // Completion gate (pull sources only): never turn a scheduled-but-unworked shift into a
