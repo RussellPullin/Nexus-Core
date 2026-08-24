@@ -142,6 +142,67 @@ function shiftWallEndMinutes(shift) {
   return parseTimeToMinutes(String(shift.end_time).replace(' ', 'T').slice(11, 16));
 }
 
+/** True when an external shifter_shift_id looks like a Shifter app UUID, not an Excel row number. */
+export function looksLikeShifterUuid(id) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || '').trim());
+}
+
+export function shiftWallRangeMinutes(shift) {
+  const start = shiftWallStartMinutes(shift);
+  const end = shiftWallEndMinutes(shift);
+  if (start == null || end == null) return null;
+  return { start, end, duration: Math.max(0, end - start) };
+}
+
+export function overlapMinutes(a, b) {
+  const ra = shiftWallRangeMinutes(a);
+  const rb = shiftWallRangeMinutes(b);
+  if (!ra || !rb) return 0;
+  return Math.max(0, Math.min(ra.end, rb.end) - Math.max(ra.start, rb.start));
+}
+
+/**
+ * Two roster rows are the same visit when they overlap in time — not merely touch at a
+ * boundary (08:00–18:00 vs 18:00–20:30) and not a later evening after a morning gap.
+ * A 16:00–17:00 stub inside a 16:00–20:30 slot counts as the same visit.
+ */
+export function shiftsAreSameVisit(a, b) {
+  const o = overlapMinutes(a, b);
+  if (o <= 0) return false;
+  const da = shiftWallRangeMinutes(a)?.duration ?? 0;
+  const durB = shiftWallRangeMinutes(b)?.duration ?? 0;
+  const shorter = Math.min(da, durB);
+  if (shorter <= 0) return false;
+  return o >= Math.min(30, shorter) && o >= shorter * 0.5;
+}
+
+function duplicateKeeperScore(row) {
+  if (!row) return -Infinity;
+  const st = String(row.status || '').trim().toLowerCase();
+  let score = 0;
+  if (st === 'completed_by_admin') score += 1000;
+  else if (st === 'completed') score += 500;
+  if (looksLikeShifterUuid(row.shifter_shift_id)) score += 200;
+  else if (row.shifter_shift_id && String(row.shifter_shift_id).trim()) score += 20;
+  const dur = shiftWallRangeMinutes(row)?.duration ?? 0;
+  score += Math.min(dur, 24 * 60) / 10;
+  if (row.notes && String(row.notes).trim()) score += 25;
+  if (row.recurring_group_id) score += 10;
+  return score;
+}
+
+/** Prefer the Shifter UUID / longer / completed row when two copies of one visit exist. */
+export function preferDuplicateKeeper(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return duplicateKeeperScore(a) >= duplicateKeeperScore(b) ? a : b;
+}
+
+function isCompletedLikeShift(row) {
+  const st = String(row?.status || '').trim().toLowerCase();
+  return st === 'completed' || st === 'completed_by_admin';
+}
+
 /**
  * Pick the same-day shift that is the same visit, not merely touching another slot.
  * A 08:00–18:00 completion must not merge into an 18:00–20:30 evening shift.
@@ -309,23 +370,6 @@ export function findShiftBySameSlot(participantId, staffId, startDateTime, endDa
  * @returns {object | null} Shift row or null
  */
 export function findMatchingShift({ participantId, staffId, supportDate, startTime, endTime, shiftId }) {
-  if (shiftId) {
-    const byShifterId = db.prepare(`
-      SELECT * FROM shifts
-      WHERE shifter_shift_id = ? AND participant_id = ? AND staff_id = ?
-    `).get(shiftId, participantId, staffId);
-    if (byShifterId) return byShifterId;
-    const byNexusId = db.prepare(`
-      SELECT * FROM shifts
-      WHERE id = ? AND participant_id = ? AND staff_id = ?
-    `).get(shiftId, participantId, staffId);
-    if (byNexusId) return byNexusId;
-    // No row carries this external id yet. Don't return null here: a worker who created a NEW
-    // Shifter shift (new id) for a slot that already has a scheduled shift would otherwise produce
-    // a duplicate. Fall through to the same-day ±30-min overlap match so the incoming completion
-    // merges into the existing (usually scheduled) shift instead of creating a double-up.
-  }
-
   const shifts = db.prepare(`
     SELECT * FROM shifts
     WHERE participant_id = ? AND staff_id = ?
@@ -333,7 +377,79 @@ export function findMatchingShift({ participantId, staffId, supportDate, startTi
       AND status IN ('scheduled', 'completed', 'completed_by_admin')
   `).all(participantId, staffId, supportDate);
 
-  return pickBestSameDayShiftMatch(shifts, startTime, endTime);
+  let named = null;
+  if (shiftId) {
+    const sid = String(shiftId).trim();
+    named =
+      shifts.find((s) => String(s.shifter_shift_id || '').trim() === sid) ||
+      db
+        .prepare(
+          `
+      SELECT * FROM shifts
+      WHERE shifter_shift_id = ? AND participant_id = ? AND staff_id = ?
+    `,
+        )
+        .get(sid, participantId, staffId) ||
+      db
+        .prepare(
+          `
+      SELECT * FROM shifts
+      WHERE id = ? AND participant_id = ? AND staff_id = ?
+    `,
+        )
+        .get(sid, participantId, staffId) ||
+      null;
+  }
+
+  const incoming = {
+    start_time: `${supportDate}T${startTime}:00`,
+    end_time: `${supportDate}T${endTime}:00`,
+  };
+  const best = pickBestSameDayShiftMatch(shifts, startTime, endTime);
+
+  // Excel 319 and a Shifter UUID often sit on two overlapping roster rows for the same visit.
+  // Prefer the already-completed / UUID row so we do not complete a second copy.
+  const sameVisitPool = shifts.filter((s) => {
+    if (named && s.id === named.id) return true;
+    if (named) return shiftsAreSameVisit(s, named) || shiftsAreSameVisit(s, incoming);
+    return shiftsAreSameVisit(s, incoming);
+  });
+  const completedSameVisit = sameVisitPool.filter((s) => isCompletedLikeShift(s));
+  if (completedSameVisit.length) {
+    return completedSameVisit.reduce((a, b) => preferDuplicateKeeper(a, b));
+  }
+  if (named && best && named.id !== best.id && shiftsAreSameVisit(named, best)) {
+    return preferDuplicateKeeper(named, best);
+  }
+  if (named) return named;
+  return best;
+}
+
+/**
+ * Existing shift for the same worker + client that is the same visit (substantial overlap).
+ * Used when creating roster/recurring rows so a 16:00–20:30 series cannot sit on top of a 16:00–17:00 stub.
+ */
+export function findOverlappingSameVisitShift(participantId, staffId, startDateTime, endDateTime) {
+  if (!participantId || !staffId || !startDateTime || !endDateTime) return null;
+  const date = normalizeShiftDateTimePrefix(startDateTime).slice(0, 10);
+  if (date.length < 10) return null;
+  const incoming = { start_time: startDateTime, end_time: endDateTime };
+  const shifts = db
+    .prepare(
+      `
+    SELECT * FROM shifts
+    WHERE participant_id = ? AND staff_id = ?
+      AND substr(REPLACE(start_time, ' ', 'T'), 1, 10) = ?
+      AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'canceled')
+  `,
+    )
+    .all(participantId, staffId, date);
+  let best = null;
+  for (const s of shifts) {
+    if (!shiftsAreSameVisit(s, incoming)) continue;
+    best = preferDuplicateKeeper(best, s);
+  }
+  return best;
 }
 
 /**

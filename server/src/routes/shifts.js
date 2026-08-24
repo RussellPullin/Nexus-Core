@@ -29,7 +29,7 @@ import {
   cleanupAllDuplicateShifts,
   filterSupersededScheduledShifts,
 } from '../services/shiftDuplicateCleanup.service.js';
-import { findShiftBySameSlot, normalizeShiftDateTimePrefix } from '../services/progressNoteMatcher.js';
+import { findOverlappingSameVisitShift, findShiftBySameSlot, normalizeShiftDateTimePrefix } from '../services/progressNoteMatcher.js';
 import { SHIFT_INVOICE_RESOLVE_SQL, findInvalidShiftInvoiceLinks, repairInvalidShiftInvoiceLinks, shiftImportIdentityMatches } from '../services/shiftInvoiceLink.service.js';
 
 const router = Router();
@@ -492,7 +492,8 @@ router.post('/', async (req, res) => {
     }
 
     if (!isOpen && resolvedStaffId && start_time && end_time) {
-      const existingSlot = findShiftBySameSlot(participant_id, resolvedStaffId, start_time, end_time);
+      const existingSlot = findShiftBySameSlot(participant_id, resolvedStaffId, start_time, end_time)
+        || findOverlappingSameVisitShift(participant_id, resolvedStaffId, start_time, end_time);
       if (existingSlot) {
         const shift = getShiftByIdForUser(existingSlot.id, userId);
         return res.status(200).json(shift || existingSlot);

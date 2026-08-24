@@ -12,6 +12,7 @@ import {
   findMatchingShift,
   findShiftByShifterShiftIdForParticipant,
   findShiftByParticipantStaffAndStartTime,
+  looksLikeShifterUuid,
   parseTimeToMinutes
 } from './progressNoteMatcher.js';
 import { canImportMergeIntoShift, repairInvalidShiftInvoiceLinks } from './shiftInvoiceLink.service.js';
@@ -20,6 +21,7 @@ import { updateAggregatesForShift } from './featureStore.service.js';
 import { scheduleMirrorShiftToNexusSupabase } from './nexusPublicShiftsSync.service.js';
 import { syncCaseNoteFromShift } from './shiftCaseNoteSync.service.js';
 import { populateShiftLineItems } from './shiftLineItems.service.js';
+import { collapseOverlappingDuplicatesForShift } from './shiftDuplicateCleanup.service.js';
 import { resolveProgressNoteDurationHours } from '../lib/shiftDuration.js';
 import { isShifterShiftIdSuppressedForOrg, isShifterShiftIdSuppressedGlobally } from './shiftImportSuppression.service.js';
 
@@ -423,6 +425,12 @@ export function processShifts(shiftsArray, options = {}) {
             const clearBilling =
               matchingShift.billing_invoice_id &&
               (participantChanged || staffChanged || dateChanged);
+            const storedShifterId =
+              looksLikeShifterUuid(matchingShift.shifter_shift_id) &&
+              shifterShiftId &&
+              String(matchingShift.shifter_shift_id).trim() !== String(shifterShiftId).trim()
+                ? matchingShift.shifter_shift_id
+                : shifterShiftId;
             // Update existing shift (full refresh when re-imported so participant/staff/times stay in sync)
             db.prepare(`
               UPDATE shifts SET
@@ -439,7 +447,7 @@ export function processShifts(shiftsArray, options = {}) {
               importStatus,
               sessionDetails || null,
               expensesVal,
-              shifterShiftId,
+              storedShifterId,
               clearBilling ? 1 : 0,
               resolvedShiftId
             );
@@ -470,6 +478,10 @@ export function processShifts(shiftsArray, options = {}) {
             travelKm,
             travelTimeMin
           );
+          collapseOverlappingDuplicatesForShift(resolvedShiftId, {
+            orgId: orgId || null,
+            log: (msg, data) => log(msg, data),
+          });
         }
 
         const progressNoteId = uuidv4();

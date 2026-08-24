@@ -11,7 +11,12 @@
 import { db } from '../db/index.js';
 import { shiftCompletionEvidenceSql } from '../lib/shiftBillingEligibility.js';
 import { hardDeleteShiftRow } from './shiftHardDelete.service.js';
-import { normalizeShiftDateTimePrefix } from './progressNoteMatcher.js';
+import {
+  looksLikeShifterUuid,
+  normalizeShiftDateTimePrefix,
+  preferDuplicateKeeper,
+  shiftsAreSameVisit,
+} from './progressNoteMatcher.js';
 
 /** Start times within this many minutes count as "close" for superseding a scheduled placeholder. */
 export const SUPERSEDE_START_TOLERANCE_MIN = 60;
@@ -117,25 +122,31 @@ function sameSlotKey(row) {
   ].join('|');
 }
 
-/** Lower score = preferred keeper when deduplicating an identical slot. */
-function keeperScore(row) {
-  const st = String(row.status || '').trim().toLowerCase();
-  let score = 0;
-  if (st === 'completed_by_admin') score -= 1000;
-  else if (st === 'completed') score -= 500;
-  if (row.recurring_group_id) score -= 100;
-  if (row.roster_sent_at) score -= 50;
-  if (row.notes && String(row.notes).trim()) score -= 25;
-  if (row.shifter_shift_id && String(row.shifter_shift_id).trim()) score -= 10;
-  return score;
-}
-
 function shiftIsDeletableDuplicate(row) {
   const st = String(row.status || '').trim().toLowerCase();
   if (st === 'cancelled' || st === 'canceled') return false;
+  if (st === 'completed_by_admin') return false;
   if (shiftIsBilled(row)) return false;
-  if (Number(row.has_completion_evidence) === 1) return false;
+  if (Number(row.line_items_locked) === 1) return false;
   return true;
+}
+
+function shouldSuppressLoserShifterId(keeper, loser) {
+  const sid = String(loser?.shifter_shift_id || '').trim();
+  if (!sid) return false;
+  const keepSid = String(keeper?.shifter_shift_id || '').trim();
+  if (sid === keepSid) return false;
+  // Never suppress a real Shifter UUID — a later pull must still merge into the keeper.
+  if (looksLikeShifterUuid(sid)) return false;
+  return true;
+}
+
+function deleteDuplicateShift(row, keeper, opts, reason) {
+  return hardDeleteShiftRow(row.id, {
+    suppressShifterId: shouldSuppressLoserShifterId(keeper, row),
+    nexusOrgId: opts.orgId || null,
+    reason,
+  });
 }
 
 /**
@@ -257,7 +268,7 @@ export function findDuplicateSameSlotShifts(opts = {}) {
       `
       SELECT s.id, s.participant_id, s.staff_id, s.start_time, s.end_time, s.status, s.notes,
              s.recurring_group_id, s.roster_sent_at, s.shifter_shift_id, s.billing_invoice_id,
-             s.created_at,
+             s.line_items_locked, s.created_at,
              CASE WHEN ${shiftCompletionEvidenceSql('s')} THEN 1 ELSE 0 END AS has_completion_evidence,
              CASE WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id) THEN 1 ELSE 0 END AS has_legacy_invoice
       FROM shifts s
@@ -280,8 +291,9 @@ export function findDuplicateSameSlotShifts(opts = {}) {
   for (const group of groups.values()) {
     if (group.length < 2) continue;
     const sorted = [...group].sort((a, b) => {
-      const scoreDiff = keeperScore(a) - keeperScore(b);
-      if (scoreDiff !== 0) return scoreDiff;
+      const preferred = preferDuplicateKeeper(a, b);
+      if (preferred === a && preferred !== b) return -1;
+      if (preferred === b && preferred !== a) return 1;
       return String(a.created_at || '').localeCompare(String(b.created_at || ''));
     });
     const keeper = sorted[0];
@@ -289,7 +301,7 @@ export function findDuplicateSameSlotShifts(opts = {}) {
       const row = sorted[i];
       if (!shiftIsDeletableDuplicate(row)) continue;
       if (row.id === keeper.id) continue;
-      toDelete.push(row);
+      toDelete.push({ ...row, _keeper: keeper });
     }
   }
   return toDelete;
@@ -312,11 +324,7 @@ export function cleanupDuplicateSameSlotShifts(opts = {}) {
   const deletedIds = [];
   for (const row of rows) {
     try {
-      const r = hardDeleteShiftRow(row.id, {
-        suppressShifterId: false,
-        nexusOrgId: opts.orgId || null,
-        reason: 'duplicate_same_slot_cleanup',
-      });
+      const r = deleteDuplicateShift(row, row._keeper || row, opts, 'duplicate_same_slot_cleanup');
       if (r.deleted) deletedIds.push(row.id);
     } catch (e) {
       log('same-slot duplicate cleanup delete failed', { id: row.id, message: e?.message || String(e) });
@@ -329,17 +337,156 @@ export function cleanupDuplicateSameSlotShifts(opts = {}) {
   return { deleted: deletedIds.length, ids: deletedIds };
 }
 
+function loadDuplicateCandidateShifts(orgId) {
+  const params = [];
+  let orgClause = '';
+  if (orgId) {
+    orgClause = 'AND p.provider_org_id = ?';
+    params.push(orgId);
+  }
+  return db
+    .prepare(
+      `
+      SELECT s.id, s.participant_id, s.staff_id, s.start_time, s.end_time, s.status, s.notes,
+             s.recurring_group_id, s.roster_sent_at, s.shifter_shift_id, s.billing_invoice_id,
+             s.line_items_locked, s.created_at,
+             CASE WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id) THEN 1 ELSE 0 END AS has_legacy_invoice
+      FROM shifts s
+      JOIN participants p ON p.id = s.participant_id
+      WHERE 1 = 1
+        ${orgClause}
+        AND LOWER(COALESCE(s.status, '')) NOT IN ('cancelled', 'canceled')
+      ORDER BY s.start_time, s.created_at
+    `,
+    )
+    .all(...params);
+}
+
 /**
- * Run all duplicate-shift cleanup passes (unworked empties + same-slot copies).
+ * Overlapping copies of the same visit that are not an exact start+end match
+ * (e.g. a 16:00–17:00 stub inside a 16:00–20:30 completion).
+ */
+export function findOverlappingSameVisitDuplicates(opts = {}) {
+  const orgId = opts.orgId ? String(opts.orgId).trim() : null;
+  const rows = loadDuplicateCandidateShifts(orgId);
+  const byPair = new Map();
+  for (const row of rows) {
+    const key = `${row.participant_id}|${row.staff_id}|${shiftLocalDate(row)}`;
+    if (!byPair.has(key)) byPair.set(key, []);
+    byPair.get(key).push(row);
+  }
+
+  const toDelete = [];
+  const deleted = new Set();
+  for (const group of byPair.values()) {
+    if (group.length < 2) continue;
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const a = group[i];
+        const b = group[j];
+        if (!shiftsAreSameVisit(a, b)) continue;
+        const keeper = preferDuplicateKeeper(a, b);
+        const loser = keeper.id === a.id ? b : a;
+        if (deleted.has(loser.id) || loser.id === keeper.id) continue;
+        if (!shiftIsDeletableDuplicate(loser)) continue;
+        deleted.add(loser.id);
+        toDelete.push({ ...loser, _keeper: keeper });
+      }
+    }
+  }
+  return toDelete;
+}
+
+export function cleanupOverlappingSameVisitDuplicates(opts = {}) {
+  const log = opts.log || (() => {});
+  let rows;
+  try {
+    rows = findOverlappingSameVisitDuplicates(opts);
+  } catch (e) {
+    log('overlapping same-visit duplicate cleanup query failed', { message: e?.message || String(e) });
+    return { deleted: 0, ids: [] };
+  }
+
+  const deletedIds = [];
+  for (const row of rows) {
+    try {
+      const r = deleteDuplicateShift(row, row._keeper || row, opts, 'duplicate_same_visit_cleanup');
+      if (r.deleted) deletedIds.push(row.id);
+    } catch (e) {
+      log('same-visit duplicate cleanup delete failed', { id: row.id, message: e?.message || String(e) });
+    }
+  }
+
+  if (deletedIds.length) {
+    log('Removed overlapping same-visit duplicate shifts', { count: deletedIds.length });
+  }
+  return { deleted: deletedIds.length, ids: deletedIds };
+}
+
+/**
+ * After an import writes a completion, remove other unbilled copies of that same visit.
+ * Always keeps `keeperId` (the row just imported).
+ */
+export function collapseOverlappingDuplicatesForShift(keeperId, opts = {}) {
+  const log = opts.log || (() => {});
+  if (!keeperId) return { deleted: 0, ids: [] };
+  const keeper = db
+    .prepare(
+      `
+      SELECT s.*, 
+             CASE WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id) THEN 1 ELSE 0 END AS has_legacy_invoice
+      FROM shifts s WHERE s.id = ?
+    `,
+    )
+    .get(keeperId);
+  if (!keeper || !keeper.participant_id || !keeper.staff_id) return { deleted: 0, ids: [] };
+
+  const date = shiftLocalDate(keeper);
+  const siblings = db
+    .prepare(
+      `
+      SELECT s.*,
+             CASE WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.shift_id = s.id) THEN 1 ELSE 0 END AS has_legacy_invoice
+      FROM shifts s
+      WHERE s.id <> ?
+        AND s.participant_id = ?
+        AND s.staff_id = ?
+        AND substr(REPLACE(s.start_time, ' ', 'T'), 1, 10) = ?
+        AND LOWER(COALESCE(s.status, '')) NOT IN ('cancelled', 'canceled')
+    `,
+    )
+    .all(keeper.id, keeper.participant_id, keeper.staff_id, date);
+
+  const deletedIds = [];
+  for (const sib of siblings) {
+    if (!shiftsAreSameVisit(keeper, sib)) continue;
+    if (!shiftIsDeletableDuplicate(sib)) continue;
+    try {
+      const r = deleteDuplicateShift(sib, keeper, opts, 'import_same_visit_collapse');
+      if (r.deleted) deletedIds.push(sib.id);
+    } catch (e) {
+      log('import same-visit collapse failed', { id: sib.id, message: e?.message || String(e) });
+    }
+  }
+  if (deletedIds.length) {
+    log('Collapsed overlapping same-visit shifts after import', { keeperId, count: deletedIds.length });
+  }
+  return { deleted: deletedIds.length, ids: deletedIds };
+}
+
+/**
+ * Run all duplicate-shift cleanup passes (unworked empties + same-slot copies + overlapping visits).
  * @param {{ orgId?: string|null, now?: Date, log?: Function }} [opts]
  */
 export function cleanupAllDuplicateShifts(opts = {}) {
   const unworked = cleanupDuplicateUnworkedShifts(opts);
   const sameSlot = cleanupDuplicateSameSlotShifts(opts);
+  const sameVisit = cleanupOverlappingSameVisitDuplicates(opts);
   return {
-    deleted: unworked.deleted + sameSlot.deleted,
-    ids: [...unworked.ids, ...sameSlot.ids],
+    deleted: unworked.deleted + sameSlot.deleted + sameVisit.deleted,
+    ids: [...unworked.ids, ...sameSlot.ids, ...sameVisit.ids],
     unworked_removed: unworked.deleted,
     same_slot_removed: sameSlot.deleted,
+    same_visit_removed: sameVisit.deleted,
   };
 }
