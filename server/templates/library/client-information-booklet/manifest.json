@@ -3,26 +3,31 @@
   "display_name": "Client Information Booklet",
   "category": "procedure",
   "form_type": "procedure",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "participant_onboarding",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.email",
-    "org.legal_name",
+    "today_long",
     "org.name",
-    "org.phone"
+    "org.phone",
+    "org.email",
+    "org.postal_address",
+    "org.legal_name",
+    "org.abn",
+    "org.website"
   ],
+  "packs": [
+    "participant_onboarding"
+  ],
+  "pack": "participant_onboarding",
   "required_signer_role": null,
   "signature_count": 0,
   "renewal_days": null,
   "is_active": true,
+  "source_pdf": "Client Information Booklet.pdf",
+  "source_category": "03 - Client Intake & Onboarding",
   "participant_service_types": [
     "all"
-  ],
-  "packs": [
-    "participant_onboarding"
   ]
 }

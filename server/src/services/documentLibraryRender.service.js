@@ -6,7 +6,8 @@
  *                     and a {%org_logo} image placeholder in the header. Rendered with the
  *                     org token map + logo, then converted to PDF (LibreOffice) when available.
  *   - html          : .html template with the same token syntax (returns rendered HTML)
- *   - pdf-acroform  : legacy .pdf with named AcroForm fields (route layer fills via pdf-lib)
+ *   - pdf-acroform  : tokenised fillable PDF; caller fills via fillAcroFormWithTokens
+ *                     (provider chips + participant/staff fields from business details)
  *
  * Branding note: the DOCX tokens are FLAT dotted keys (e.g. `org.abn`), which is exactly what
  * docxtemplater's default parser looks up, so we reuse `buildOrgTokenMap` directly. The org logo

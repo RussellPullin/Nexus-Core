@@ -3,23 +3,25 @@
   "display_name": "Risk Management Policy",
   "category": "policy",
   "form_type": "policy",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "policy_library",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.legal_name",
+    "today_long",
     "org.name",
-    "org.primary_contact.name",
+    "org.legal_name",
+    "org.abn",
     "org.signatory.name"
   ],
+  "packs": [
+    "policy_library"
+  ],
+  "pack": "policy_library",
   "required_signer_role": null,
   "signature_count": 0,
   "renewal_days": null,
   "is_active": true,
-  "packs": [
-    "policy_library"
-  ]
+  "source_pdf": "Risk Management Policy.pdf",
+  "source_category": "06 - Risk, Incidents & Safeguarding"
 }

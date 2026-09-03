@@ -1,0 +1,26 @@
+{
+  "slug": "specialist-support-coordinator",
+  "display_name": "Specialist Support Coordinator",
+  "category": "procedure",
+  "form_type": "procedure",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long"
+  ],
+  "packs": [
+    "staff_onboarding"
+  ],
+  "pack": "staff_onboarding",
+  "required_signer_role": "staff",
+  "signature_count": 2,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Specialist Support Coordinator.pdf",
+  "source_category": "01 - Staff Recruitment & Onboarding",
+  "staff_roles": [
+    "support_coordinator"
+  ]
+}

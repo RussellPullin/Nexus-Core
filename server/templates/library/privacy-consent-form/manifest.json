@@ -1,0 +1,29 @@
+{
+  "slug": "privacy-consent-form",
+  "display_name": "Privacy Consent Form",
+  "category": "contract",
+  "form_type": "contract",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long",
+    "org.legal_name",
+    "org.name",
+    "org.abn"
+  ],
+  "packs": [
+    "participant_onboarding"
+  ],
+  "pack": "participant_onboarding",
+  "required_signer_role": "participant",
+  "signature_count": 3,
+  "renewal_days": 365,
+  "is_active": true,
+  "source_pdf": "Privacy Consent Form.pdf",
+  "source_category": "03 - Client Intake & Onboarding",
+  "participant_service_types": [
+    "all"
+  ]
+}

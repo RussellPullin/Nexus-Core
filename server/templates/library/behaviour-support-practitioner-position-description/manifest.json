@@ -1,0 +1,26 @@
+{
+  "slug": "behaviour-support-practitioner-position-description",
+  "display_name": "Behaviour Support Practitioner Position Description",
+  "category": "guide",
+  "form_type": "guide",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long"
+  ],
+  "packs": [
+    "staff_onboarding"
+  ],
+  "pack": "staff_onboarding",
+  "required_signer_role": "staff",
+  "signature_count": 2,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Behaviour Support Practitioner Position Description.pdf",
+  "source_category": "01 - Staff Recruitment & Onboarding",
+  "staff_roles": [
+    "all"
+  ]
+}

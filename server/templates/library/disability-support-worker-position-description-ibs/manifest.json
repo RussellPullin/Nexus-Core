@@ -1,0 +1,26 @@
+{
+  "slug": "disability-support-worker-position-description-ibs",
+  "display_name": "Disability Support Worker Position Description (IBS)",
+  "category": "guide",
+  "form_type": "guide",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long"
+  ],
+  "packs": [
+    "staff_onboarding"
+  ],
+  "pack": "staff_onboarding",
+  "required_signer_role": "staff",
+  "signature_count": 2,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Disability Support Worker Position Description (IBS).pdf",
+  "source_category": "01 - Staff Recruitment & Onboarding",
+  "staff_roles": [
+    "disability_support_worker"
+  ]
+}

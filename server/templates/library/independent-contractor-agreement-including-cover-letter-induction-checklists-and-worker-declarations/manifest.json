@@ -3,42 +3,27 @@
   "display_name": "Independent Contractor Agreement (including cover letter, induction checklists and worker declarations)",
   "category": "contract",
   "form_type": "contract",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "staff_onboarding",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
+    "today_long",
     "org.legal_name",
-    "org.name",
-    "org.primary_contact.name",
-    "org.signatory.name",
-    "staff.full_name",
-    "staff.address"
+    "org.abn",
+    "org.name"
   ],
-  "admin_fields": [
-    { "key": "commencement_date", "label": "Commencement date", "type": "date", "required": true },
-    { "key": "end_date", "label": "End date (or 'Ongoing')", "type": "text", "required": true },
-    { "key": "org_signature", "label": "Organisation signature (type full name to sign)", "type": "text", "required": true }
+  "packs": [
+    "staff_onboarding"
   ],
-  "signing_layout": {
-    "page_width": 595,
-    "page_height": 842,
-    "page_count": 11,
-    "fields": [
-      { "id": "staff-signature", "page": 1, "x": 72, "y": 610, "width": 250, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
-      { "id": "org-signature", "page": 1, "x": 107, "y": 715, "width": 250, "height": 20, "type": "signature", "merge_key": "org_signature", "label": "Organisation signature", "signer": "org", "required": true }
-    ]
-  },
+  "pack": "staff_onboarding",
   "required_signer_role": "worker",
   "signature_count": 2,
   "renewal_days": 365,
   "is_active": true,
+  "source_pdf": "Independent Contractor Agreement (including cover letter, induction checklists and worker declarations).pdf",
+  "source_category": "01 - Staff Recruitment & Onboarding",
   "staff_roles": [
     "disability_support_worker"
-  ],
-  "packs": [
-    "staff_onboarding"
   ]
 }

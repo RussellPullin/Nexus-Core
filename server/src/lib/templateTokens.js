@@ -121,3 +121,97 @@ export function buildGlobalTokenMap() {
     today_long: long
   };
 }
+
+/**
+ * Flat AcroForm field names used by the tokenised NDIS PDF masters, mapped to registry keys.
+ * Import adds widgets named PROVIDER_SHORT / ABN / c_name / a_sig etc. over de-identified chips.
+ */
+export const ACROFORM_TOKEN_ALIASES = Object.freeze({
+  PROVIDER_NAME: 'org.legal_name',
+  PROVIDER_SHORT: 'org.name',
+  ABN: 'org.abn',
+  NDIS_REG_NO: 'org.ndis_provider_number',
+  PHONE: 'org.phone',
+  EMAIL: 'org.email',
+  COMPLAINTS_EMAIL: 'org.email',
+  WEBSITE: 'org.website',
+  STREET_ADDRESS: 'org.street_address',
+  POSTAL_ADDRESS: 'org.postal_address',
+  GOVERNING_BODY: 'org.legal_name',
+  KMP: 'org.signatory.name',
+  PRINCIPAL: 'org.signatory.name',
+  DOC_OWNER: 'org.signatory.role',
+  APPROVED_BY: 'org.signatory.name',
+  EFFECTIVE_DATE: 'today_long',
+  REVIEW_DATE: 'today_long',
+  provider: 'org.name',
+  trading: 'org.trading_name',
+  legal: 'org.legal_name',
+  abn: 'org.abn',
+  company: 'org.legal_name',
+  org_logo: 'org.branding.logo_path',
+  LOGO: 'org.branding.logo_path',
+  logo: 'org.branding.logo_path',
+  c_name: 'participant.full_name',
+  c_first: 'participant.first_name',
+  c_last: 'participant.last_name',
+  c_dob: 'participant.date_of_birth',
+  c_phone: 'participant.phone',
+  c_email: 'participant.email',
+  c_address: 'participant.address',
+  c_ndis: 'participant.ndis_number',
+  ndis: 'participant.ndis_number',
+  worker_name: 'staff.full_name',
+  first_name: 'staff.full_name',
+  surname: 'staff.full_name'
+});
+
+/**
+ * True when an AcroForm field is a signature box (native signing must leave these empty).
+ * Masters name these `a_sig`, `p_sig`, `sig_prov_sig`, not "signature".
+ */
+export function isSignatureAcroFieldName(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return false;
+  if (/(^|_)sig($|_)/.test(n)) return true;
+  if (/signature/.test(n)) return true;
+  return false;
+}
+
+/**
+ * Expand dotted render tokens into the flat AcroForm names the tokenised PDFs use.
+ * @param {Record<string, string>} tokens
+ * @returns {Record<string, string>}
+ */
+export function buildAcroFormFillMap(tokens = {}) {
+  const out = { ...tokens };
+  for (const [fieldName, registryKey] of Object.entries(ACROFORM_TOKEN_ALIASES)) {
+    const value = tokens[registryKey];
+    if (value != null && value !== '' && (out[fieldName] == null || out[fieldName] === '')) {
+      out[fieldName] = value;
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolve a PDF field name against a fill map, including PROVIDER_SHORT_2 style suffixes.
+ * @param {string} fieldName
+ * @param {Record<string, string>} fillMap
+ * @returns {string|null}
+ */
+export function lookupAcroFormValue(fieldName, fillMap) {
+  if (!fieldName || !fillMap) return null;
+  const direct = fillMap[fieldName];
+  if (direct != null && direct !== '') return String(direct);
+  const base = String(fieldName).replace(/_\d+$/, '');
+  if (base !== fieldName) {
+    const aliased = fillMap[base];
+    if (aliased != null && aliased !== '') return String(aliased);
+  }
+  const registryKey = ACROFORM_TOKEN_ALIASES[fieldName] || ACROFORM_TOKEN_ALIASES[base];
+  if (registryKey && fillMap[registryKey] != null && fillMap[registryKey] !== '') {
+    return String(fillMap[registryKey]);
+  }
+  return null;
+}

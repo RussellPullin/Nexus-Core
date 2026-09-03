@@ -3,23 +3,24 @@
   "display_name": "Disability Support Worker Position Description (Travel and Transport)",
   "category": "guide",
   "form_type": "guide",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "staff_onboarding",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.name"
-  ],
-  "required_signer_role": null,
-  "signature_count": 0,
-  "renewal_days": null,
-  "is_active": true,
-  "staff_roles": [
-    "disability_support_worker"
+    "today_long"
   ],
   "packs": [
     "staff_onboarding"
+  ],
+  "pack": "staff_onboarding",
+  "required_signer_role": "staff",
+  "signature_count": 2,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Disability Support Worker Position Description (Travel and Transport).pdf",
+  "source_category": "01 - Staff Recruitment & Onboarding",
+  "staff_roles": [
+    "disability_support_worker"
   ]
 }

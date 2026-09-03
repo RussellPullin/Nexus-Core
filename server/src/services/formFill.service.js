@@ -1,8 +1,6 @@
 /**
- * Form Fill Service - fills PDF and Word templates with participant and intake data.
- * Service Agreement: PDF with AcroForm fields
- * Support Plan: PDF or Word (when template added)
- * Privacy Consent: Word (handled by consentForm.service.js)
+ * Form Fill Service — fills tokenised library PDFs (and leftover Word templates)
+ * with org / participant / intake data. Signature widgets stay empty for native signing.
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -14,6 +12,11 @@ import PizZip from 'pizzip';
 import { getServiceAgreementTemplatePath, getSupportPlanTemplatePath } from './formTemplatePath.service.js';
 import { db } from '../db/index.js';
 import { composeParticipantLegalName } from '../../../shared/onboardingFieldRegistry.js';
+import {
+  buildAcroFormFillMap,
+  isSignatureAcroFieldName,
+  lookupAcroFormValue
+} from '../lib/templateTokens.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -201,27 +204,86 @@ async function embedCoordinatorSignature(doc, coordinatorSignatureDataUrl) {
 export { getServiceAgreementTemplatePath, getSupportPlanTemplatePath };
 
 /**
- * Fill a PDF AcroForm using a flat token map (field name → value).
- * Fields that are not TextFields (checkboxes, radio, etc.) are silently skipped.
- * The form is flattened after filling so values are embedded as static content.
+ * Fill a PDF AcroForm using dotted org/participant tokens and the tokenised-master aliases
+ * (PROVIDER_SHORT, ABN, c_name, …). Signature widgets are left empty for native signing.
  * @param {Buffer} pdfBytes
  * @param {Record<string, string>} tokens
+ * @param {{ flatten?: boolean, logoBytes?: Buffer|null }} [options]
  * @returns {Promise<Buffer>}
  */
-export async function fillAcroFormWithTokens(pdfBytes, tokens) {
+export async function fillAcroFormWithTokens(pdfBytes, tokens, options = {}) {
+  const flatten = options.flatten === true;
+  const logoBytes = options.logoBytes || null;
+  const fillMap = buildAcroFormFillMap(tokens || {});
   const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const form = doc.getForm();
-  for (const field of form.getFields()) {
-    const name = field.getName();
-    if (name in tokens && tokens[name] != null && tokens[name] !== '') {
+  const pages = doc.getPages();
+
+  let embeddedLogo = null;
+  if (logoBytes && logoBytes.length) {
+    try {
+      embeddedLogo = await doc.embedPng(logoBytes);
+    } catch {
       try {
-        form.getTextField(name).setText(String(tokens[name]));
+        embeddedLogo = await doc.embedJpg(logoBytes);
       } catch {
-        // Not a TextField (checkbox, radio, etc.) — skip
+        embeddedLogo = null;
       }
     }
   }
-  try { form.flatten(); } catch { /* non-fatal if form has no fields */ }
+
+  for (const field of form.getFields()) {
+    const name = field.getName();
+    if (isSignatureAcroFieldName(name)) continue;
+
+    const isLogo = /^(org_logo|logo)$/i.test(name);
+    if (isLogo && embeddedLogo) {
+      try {
+        const widgets = field.acroField.getWidgets();
+        for (const widget of widgets) {
+          let rect;
+          try {
+            rect = widget.getRectangle();
+          } catch {
+            continue;
+          }
+          const pageRef = typeof widget.P === 'function' ? widget.P() : widget.P;
+          let page = pages[0];
+          if (pageRef) {
+            const match = pages.find((p) => p.ref === pageRef || p.ref?.toString() === pageRef?.toString());
+            if (match) page = match;
+          }
+          const maxW = Math.max(24, rect.width);
+          const maxH = Math.max(16, rect.height);
+          const scale = Math.min(maxW / embeddedLogo.width, maxH / embeddedLogo.height, 1);
+          const w = embeddedLogo.width * scale;
+          const h = embeddedLogo.height * scale;
+          page.drawImage(embeddedLogo, {
+            x: rect.x,
+            y: rect.y + Math.max(0, (rect.height - h) / 2),
+            width: w,
+            height: h
+          });
+        }
+        try { form.getTextField(name).setText(''); } catch { /* ignore */ }
+      } catch {
+        /* logo overlay is best-effort */
+      }
+      continue;
+    }
+
+    const value = lookupAcroFormValue(name, fillMap);
+    if (value == null || value === '') continue;
+    try {
+      form.getTextField(name).setText(value);
+    } catch {
+      // Not a TextField (checkbox, radio, etc.) — skip
+    }
+  }
+
+  if (flatten) {
+    try { form.flatten(); } catch { /* non-fatal if form has no fields */ }
+  }
   return Buffer.from(await doc.save());
 }
 

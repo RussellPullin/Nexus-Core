@@ -3,43 +3,25 @@
   "display_name": "Worker Declarations",
   "category": "contract",
   "form_type": "contract",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "staff_onboarding",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.name",
-    "staff.full_name",
-    "staff.supervisor_name"
+    "today_long",
+    "org.name"
   ],
-  "signing_layout": {
-    "page_width": 595,
-    "page_height": 842,
-    "page_count": 3,
-    "fields": [
-      { "id": "staff-signature", "page": 2, "x": 36, "y": 625, "width": 230, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
-      { "id": "staff-date", "page": 2, "x": 315, "y": 625, "width": 150, "height": 20, "type": "date", "merge_key": "signature_date", "signer": "staff", "required": true },
-      { "id": "supervisor-signature", "page": 3, "x": 36, "y": 104, "width": 230, "height": 20, "type": "signature", "merge_key": "supervisor_signature", "label": "Supervisor signature", "signer": "org", "required": true },
-      { "id": "supervisor-date", "page": 3, "x": 315, "y": 104, "width": 150, "height": 20, "type": "date", "merge_key": "supervisor_signature_date", "label": "Supervisor signature date", "signer": "org", "required": true },
-      { "id": "worker-printed-name", "page": 2, "x": 36, "y": 663, "width": 230, "height": 16, "type": "text", "merge_key": "worker_printed_name", "label": "Worker's printed name", "signer": "staff", "fillable": true, "required": true },
-      { "id": "supervisor-printed-name", "page": 3, "x": 36, "y": 142, "width": 230, "height": 16, "type": "text", "merge_key": "supervisor_printed_name", "label": "Supervisor's printed name", "signer": "org", "required": true }
-    ]
-  },
-  "admin_fields": [
-    { "key": "supervisor_signature", "label": "Supervisor signature (type full name to sign)", "type": "text", "required": true },
-    { "key": "supervisor_signature_date", "label": "Date", "type": "date", "required": true },
-    { "key": "supervisor_printed_name", "label": "Supervisor's printed name", "type": "text", "required": true }
+  "packs": [
+    "staff_onboarding"
   ],
+  "pack": "staff_onboarding",
   "required_signer_role": "worker",
   "signature_count": 2,
   "renewal_days": 365,
   "is_active": true,
+  "source_pdf": "Worker Declarations.pdf",
+  "source_category": "01 - Staff Recruitment & Onboarding",
   "staff_roles": [
     "all"
-  ],
-  "packs": [
-    "staff_onboarding"
   ]
 }

@@ -3,25 +3,21 @@
   "display_name": "Business Continuity and Disaster Management Plan",
   "category": "procedure",
   "form_type": "procedure",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "policy_library",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.email",
-    "org.legal_name",
-    "org.name",
-    "org.phone",
-    "org.primary_contact.name",
-    "org.signatory.name"
+    "today_long"
   ],
+  "packs": [
+    "policy_library"
+  ],
+  "pack": "policy_library",
   "required_signer_role": null,
   "signature_count": 0,
   "renewal_days": null,
   "is_active": true,
-  "packs": [
-    "policy_library"
-  ]
+  "source_pdf": "Business Continuity and Disaster Management Plan.pdf",
+  "source_category": "07 - Health, Safety & Environment"
 }

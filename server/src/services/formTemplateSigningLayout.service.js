@@ -8,6 +8,7 @@ import { PDFDocument } from 'pdf-lib';
 import { v4 as uuidv4 } from 'uuid';
 import { extractPdfAcroFieldNames, suggestContractFieldMap } from './contractTemplateAnalyze.service.js';
 import { mergeKeyToHumanLabel } from './formTemplateSignerPreview.service.js';
+import { isSignatureAcroFieldName } from '../lib/templateTokens.js';
 
 const DEFAULT_PAGE_W = 595;
 const DEFAULT_PAGE_H = 842;
@@ -100,15 +101,23 @@ function rectToTopLeft(rect, pageHeight) {
 
 function inferFieldType(fieldName, mergeKey) {
   const n = `${fieldName} ${mergeKey}`.toLowerCase();
-  if (/sign|signature/.test(n)) return 'signature';
+  if (isSignatureAcroFieldName(fieldName) || isSignatureAcroFieldName(mergeKey) || /signature/.test(n)) {
+    return 'signature';
+  }
   if (/date|dob|birth/.test(n)) return 'date';
   if (/check|tick|yes_no/.test(n)) return 'checkbox';
   return 'text';
 }
 
-function inferSigner(mergeKey, workflow) {
-  const k = String(mergeKey || '').toLowerCase();
-  if (/^organisation|^org_|^employer|^abn$|^provider/.test(k) || k === 'organisation_name') return 'org';
+function inferSigner(mergeKey, workflow, fieldName = '') {
+  const k = `${mergeKey} ${fieldName}`.toLowerCase();
+  if (
+    /(^|_)(org|prov|provider|employer|supervisor|sup_sig|s_sig|d_s_sig|sig_s|sig_prov)($|_)/.test(k)
+    || /^organisation/.test(k)
+    || k === 'organisation_name'
+  ) {
+    return 'org';
+  }
   if (workflow === 'staff_onboarding') return 'staff';
   return 'participant';
 }
@@ -189,7 +198,7 @@ export async function suggestSigningLayoutFromPdf(pdfBytes, contractFieldMap, wo
         type,
         merge_key: mergeKey || name.replace(/\W+/g, '_').toLowerCase(),
         label: mergeKeyToHumanLabel(mergeKey || name, wf),
-        signer: inferSigner(mergeKey, wf),
+        signer: inferSigner(mergeKey, wf, name),
         required: type === 'signature',
         api_id: sanitizeApiId(name),
         cover_underlying: defaultCoverUnderlying(type, name, mergeKey)

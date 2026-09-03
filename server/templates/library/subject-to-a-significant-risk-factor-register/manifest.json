@@ -3,21 +3,22 @@
   "display_name": "Subject to a Significant Risk Factor Register",
   "category": "register",
   "form_type": "register",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "compliance_register",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.legal_name",
+    "today_long",
     "org.name"
   ],
+  "packs": [
+    "compliance_register"
+  ],
+  "pack": "compliance_register",
   "required_signer_role": null,
   "signature_count": 0,
   "renewal_days": null,
   "is_active": true,
-  "packs": [
-    "compliance_register"
-  ]
+  "source_pdf": "Subject to a Significant Risk Factor Register.pdf",
+  "source_category": "04 - Client Support & Care"
 }

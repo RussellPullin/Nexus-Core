@@ -1,0 +1,23 @@
+{
+  "slug": "register-for-pbsp-that-contain-a-regulated-restrcitive-practice",
+  "display_name": "Register for PBSP that contain a regulated restrcitive practice",
+  "category": "register",
+  "form_type": "register",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long"
+  ],
+  "packs": [
+    "compliance_register"
+  ],
+  "pack": "compliance_register",
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Register for PBSP that contain a regulated restrcitive practice.pdf",
+  "source_category": "11 - Behaviour Support (Implementing)"
+}

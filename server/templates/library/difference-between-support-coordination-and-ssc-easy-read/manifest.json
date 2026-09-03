@@ -1,0 +1,26 @@
+{
+  "slug": "difference-between-support-coordination-and-ssc-easy-read",
+  "display_name": "Difference between Support Coordination and SSC (Easy Read)",
+  "category": "procedure",
+  "form_type": "procedure",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long"
+  ],
+  "packs": [
+    "participant_onboarding"
+  ],
+  "pack": "participant_onboarding",
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Difference between Support Coordination and SSC (Easy Read).pdf",
+  "source_category": "09 - Support Coordination & SIL",
+  "participant_service_types": [
+    "support_coordination"
+  ]
+}

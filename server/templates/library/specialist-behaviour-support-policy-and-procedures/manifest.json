@@ -1,0 +1,27 @@
+{
+  "slug": "specialist-behaviour-support-policy-and-procedures",
+  "display_name": "Specialist Behaviour Support Policy and Procedures",
+  "category": "policy",
+  "form_type": "policy",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long",
+    "org.name",
+    "org.legal_name",
+    "org.abn",
+    "org.signatory.name"
+  ],
+  "packs": [
+    "policy_library"
+  ],
+  "pack": "policy_library",
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Specialist Behaviour Support Policy and Procedures.pdf",
+  "source_category": "10 - Behaviour Support (Specialist)"
+}

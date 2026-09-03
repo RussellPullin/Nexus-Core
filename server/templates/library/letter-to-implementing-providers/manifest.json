@@ -1,0 +1,24 @@
+{
+  "slug": "letter-to-implementing-providers",
+  "display_name": "Letter to implementing providers",
+  "category": "procedure",
+  "form_type": "procedure",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long",
+    "org.name"
+  ],
+  "packs": [
+    "policy_library"
+  ],
+  "pack": "policy_library",
+  "required_signer_role": null,
+  "signature_count": 1,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Letter to implementing providers.pdf",
+  "source_category": "10 - Behaviour Support (Specialist)"
+}

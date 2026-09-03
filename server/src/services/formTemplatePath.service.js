@@ -22,12 +22,21 @@ export function getDataRoot() {
 }
 
 const TEMPLATES_DIR = join(getDataRoot(), 'forms', 'templates');
+const LIBRARY_DIR = process.env.DOCUMENT_LIBRARY_DIR
+  || join(resolve(__dirname, '../..'), 'templates', 'library');
 
 /** form_type (DB) -> directory name under templates/ */
 const FORM_TYPE_DIR = {
   privacy_consent: 'privacy-consent',
   service_agreement: 'service-agreement',
   support_plan: 'support-plan'
+};
+
+/** Legacy core types now resolve to the tokenised master library when no org upload exists. */
+const LIBRARY_FALLBACK_SLUG = {
+  privacy_consent: 'privacy-consent-form',
+  service_agreement: 'services-agreement',
+  support_plan: 'client-support-plan'
 };
 
 function safeOrgSegment(orgId) {
@@ -99,6 +108,12 @@ export function getTemplatePath(formType, options = {}) {
       const type = chosen.toLowerCase().endsWith('.docx') ? 'docx' : 'pdf';
       return { path: join(dir, chosen), type };
     }
+  }
+
+  const librarySlug = LIBRARY_FALLBACK_SLUG[formType];
+  if (librarySlug) {
+    const libraryPdf = join(LIBRARY_DIR, librarySlug, 'template.pdf');
+    if (existsSync(libraryPdf)) return { path: libraryPdf, type: 'pdf' };
   }
   return null;
 }

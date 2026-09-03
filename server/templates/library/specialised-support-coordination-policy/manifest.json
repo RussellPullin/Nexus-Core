@@ -1,0 +1,27 @@
+{
+  "slug": "specialised-support-coordination-policy",
+  "display_name": "Specialised Support Coordination Policy",
+  "category": "policy",
+  "form_type": "policy",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long",
+    "org.name",
+    "org.legal_name",
+    "org.abn",
+    "org.signatory.name"
+  ],
+  "packs": [
+    "policy_library"
+  ],
+  "pack": "policy_library",
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Specialised Support Coordination Policy.pdf",
+  "source_category": "09 - Support Coordination & SIL"
+}

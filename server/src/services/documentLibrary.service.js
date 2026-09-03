@@ -2,8 +2,8 @@
  * Phase 1: File-based master document library.
  *
  * Authors drop a deidentified document into:
- *   data/forms/templates/library/<slug>/
- *     ├─ template.docx              (or .pdf, .html – per `engine`)
+ *   server/templates/library/<slug>/
+ *     ├─ template.pdf               (tokenised fillable PDF — engine pdf-acroform)
  *     ├─ manifest.json              (metadata + placeholder declarations)
  *     └─ preview.png  (optional)
  *
@@ -15,7 +15,7 @@
  *   "form_type": "policy",                       // matches form_templates.form_type when relevant
  *   "engine": "docxtemplater",                   // docxtemplater | pdf-acroform | html
  *   "version": "1.0.0",
- *   "template_file": "template.docx",
+ *   "template_file": "template.pdf",
  *   "placeholders": ["org.legal_name", "org.abn", "org.signatory.name", "today_long"],
  *   "required_signer_role": "participant",       // optional
  *   "renewal_days": 365,                         // optional
@@ -369,6 +369,15 @@ export async function syncDocumentLibraryFromDisk(rootDir = defaultLibraryRoot) 
       db.prepare("UPDATE document_library_masters SET is_active = 0, updated_at = datetime('now') WHERE slug = ?").run(row.slug);
       result.warnings.push(`Deactivated master no longer on disk: ${row.slug}`);
     }
+  }
+
+  try {
+    const orgs = db.prepare('SELECT id FROM organisations').all();
+    for (const org of orgs) {
+      if (org?.id) cloneAllLibraryMastersForOrg(org.id);
+    }
+  } catch (err) {
+    result.warnings.push(`org clone refresh failed: ${err.message}`);
   }
 
   return result;

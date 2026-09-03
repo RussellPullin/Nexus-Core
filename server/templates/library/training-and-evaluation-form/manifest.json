@@ -1,0 +1,26 @@
+{
+  "slug": "training-and-evaluation-form",
+  "display_name": "Training and Evaluation Form",
+  "category": "form",
+  "form_type": "form",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long"
+  ],
+  "packs": [
+    "staff_onboarding"
+  ],
+  "pack": "staff_onboarding",
+  "required_signer_role": "staff",
+  "signature_count": 2,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Training and Evaluation Form .pdf",
+  "source_category": "02 - Staff HR & Performance",
+  "staff_roles": [
+    "all"
+  ]
+}

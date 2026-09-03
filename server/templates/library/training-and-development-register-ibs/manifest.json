@@ -1,0 +1,23 @@
+{
+  "slug": "training-and-development-register-ibs",
+  "display_name": "Training and Development Register (IBS)",
+  "category": "register",
+  "form_type": "register",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long"
+  ],
+  "packs": [
+    "compliance_register"
+  ],
+  "pack": "compliance_register",
+  "required_signer_role": null,
+  "signature_count": 0,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Training and Development Register (IBS).pdf",
+  "source_category": "02 - Staff HR & Performance"
+}

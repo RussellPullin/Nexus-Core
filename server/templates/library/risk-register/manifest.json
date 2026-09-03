@@ -3,23 +3,23 @@
   "display_name": "Risk Register",
   "category": "register",
   "form_type": "register",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "compliance_register",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.legal_name",
+    "today_long",
     "org.name",
-    "org.primary_contact.name",
     "org.signatory.name"
   ],
+  "packs": [
+    "compliance_register"
+  ],
+  "pack": "compliance_register",
   "required_signer_role": null,
   "signature_count": 0,
   "renewal_days": null,
   "is_active": true,
-  "packs": [
-    "compliance_register"
-  ]
+  "source_pdf": "Risk Register.pdf",
+  "source_category": "06 - Risk, Incidents & Safeguarding"
 }

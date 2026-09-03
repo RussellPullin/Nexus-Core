@@ -3,182 +3,30 @@
   "display_name": "Support Coordination Services Agreement",
   "category": "contract",
   "form_type": "contract",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "participant_onboarding",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.email",
+    "today_long",
     "org.legal_name",
+    "org.abn",
+    "org.postal_address",
     "org.name",
     "org.phone",
-    "org.primary_contact.name",
-    "org.signatory.name"
-  ],
-  "required_signer_role": "participant",
-  "signature_count": 2,
-  "renewal_days": 365,
-  "is_active": true,
-  "participant_service_types": [
-    "support_coordination"
+    "org.email"
   ],
   "packs": [
     "participant_onboarding"
   ],
-  "signing_layout": {
-    "page_width": 595,
-    "page_height": 842,
-    "page_count": 14,
-    "fields": [
-      {
-        "id": "org-signature",
-        "page": 14,
-        "x": 36,
-        "y": 411,
-        "width": 240,
-        "height": 24,
-        "type": "signature",
-        "merge_key": "org_signature",
-        "label": "Organisation signature",
-        "signer": "org",
-        "required": true
-      },
-      {
-        "id": "org-signature-date",
-        "page": 14,
-        "x": 316,
-        "y": 418,
-        "width": 80,
-        "height": 16,
-        "type": "date",
-        "merge_key": "org_signature_date",
-        "label": "Date",
-        "signer": "org"
-      },
-      {
-        "id": "org-printed-name",
-        "page": 14,
-        "x": 36,
-        "y": 450,
-        "width": 380,
-        "height": 16,
-        "type": "text",
-        "merge_key": "org_printed_name",
-        "label": "Organisation signatory name (please print)",
-        "signer": "org",
-        "fillable": true,
-        "required": true
-      },
-      {
-        "id": "client-signature",
-        "page": 14,
-        "x": 36,
-        "y": 528,
-        "width": 240,
-        "height": 24,
-        "type": "signature",
-        "merge_key": "signature",
-        "label": "Client signature",
-        "signer": "participant",
-        "applies_when": "participant",
-        "required": true
-      },
-      {
-        "id": "client-signature-date",
-        "page": 14,
-        "x": 316,
-        "y": 535,
-        "width": 80,
-        "height": 16,
-        "type": "date",
-        "merge_key": "signature_date",
-        "label": "Date",
-        "signer": "participant",
-        "applies_when": "participant"
-      },
-      {
-        "id": "client-printed-name",
-        "page": 14,
-        "x": 36,
-        "y": 567,
-        "width": 380,
-        "height": 16,
-        "type": "text",
-        "merge_key": "printed_name",
-        "label": "Client name (please print)",
-        "signer": "participant",
-        "applies_when": "participant",
-        "fillable": true,
-        "required": true
-      },
-      {
-        "id": "representative-signature",
-        "page": 14,
-        "x": 36,
-        "y": 645,
-        "width": 240,
-        "height": 24,
-        "type": "signature",
-        "merge_key": "signature",
-        "label": "Representative signature",
-        "signer": "participant",
-        "applies_when": "guardian",
-        "required": true
-      },
-      {
-        "id": "representative-signature-date",
-        "page": 14,
-        "x": 316,
-        "y": 652,
-        "width": 80,
-        "height": 16,
-        "type": "date",
-        "merge_key": "signature_date",
-        "label": "Date",
-        "signer": "participant",
-        "applies_when": "guardian"
-      },
-      {
-        "id": "representative-printed-name",
-        "page": 14,
-        "x": 36,
-        "y": 684,
-        "width": 380,
-        "height": 16,
-        "type": "text",
-        "merge_key": "printed_name",
-        "label": "Representative name (please print)",
-        "signer": "participant",
-        "applies_when": "guardian",
-        "fillable": true,
-        "required": true
-      }
-    ]
-  },
-  "admin_fields": [
-    {
-      "key": "signer_type",
-      "label": "Who is completing and signing this document?",
-      "type": "select",
-      "options": [
-        "participant",
-        "guardian"
-      ],
-      "required": true
-    },
-    {
-      "key": "org_signature",
-      "label": "Organisation signature (type full name to sign)",
-      "type": "text",
-      "required": true
-    },
-    {
-      "key": "org_printed_name",
-      "label": "Organisation signatory name (please print)",
-      "type": "text",
-      "required": true
-    }
+  "pack": "participant_onboarding",
+  "required_signer_role": "participant",
+  "signature_count": 3,
+  "renewal_days": 365,
+  "is_active": true,
+  "source_pdf": "Support Coordination Services Agreement.pdf",
+  "source_category": "03 - Client Intake & Onboarding",
+  "participant_service_types": [
+    "support_coordination"
   ]
 }

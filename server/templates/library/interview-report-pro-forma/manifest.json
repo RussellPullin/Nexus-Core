@@ -3,20 +3,21 @@
   "display_name": "Interview Report Pro Forma",
   "category": "procedure",
   "form_type": "procedure",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "policy_library",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.name"
+    "today_long"
   ],
-  "required_signer_role": null,
-  "signature_count": 0,
-  "renewal_days": null,
-  "is_active": true,
   "packs": [
     "policy_library"
-  ]
+  ],
+  "pack": "policy_library",
+  "required_signer_role": null,
+  "signature_count": 1,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Interview Report Pro Forma.pdf",
+  "source_category": "01 - Staff Recruitment & Onboarding"
 }

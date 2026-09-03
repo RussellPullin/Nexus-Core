@@ -8,7 +8,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, isAbsolute } from 'path';
 import { db } from '../db/index.js';
 import { renderLibraryDocument } from './documentLibraryRender.service.js';
 import { fillAcroFormWithTokens } from './formFill.service.js';
@@ -147,11 +147,35 @@ export function validateOnboardingMasterIds(orgId, workflow, masterIds) {
  * Render a single branded library master to an email attachment.
  * @returns {Promise<{ filename: string, content: Buffer, contentType: string }|null>}
  */
-export async function renderLibraryMasterAttachment(master, orgId, { participant = null, staff = null, extra = {} } = {}) {
+function readLogoBytes(tokens) {
+  const raw = String(tokens?.['org.branding.logo_path'] || '').trim();
+  if (!raw) return null;
+  const dataUploads = process.env.DATA_DIR
+    ? join(process.env.DATA_DIR, 'uploads')
+    : join(process.cwd(), 'data', 'uploads');
+  const candidates = isAbsolute(raw)
+    ? [raw]
+    : [
+        join(process.cwd(), raw),
+        join(dataUploads, raw.replace(/^.*[/\\]/, '')),
+        join(dataUploads, raw)
+      ];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      try { return readFileSync(p); } catch { /* next */ }
+    }
+  }
+  return null;
+}
+
+export async function renderLibraryMasterAttachment(master, orgId, { participant = null, staff = null, extra = {}, flatten = false } = {}) {
   const rendered = renderLibraryDocument({ masterId: master.id, orgId, participant, staff, extra });
   let buf = rendered?.buffer;
   if (rendered?.needsAcroFormFill && buf) {
-    buf = await fillAcroFormWithTokens(buf, rendered.tokens);
+    buf = await fillAcroFormWithTokens(buf, rendered.tokens, {
+      flatten,
+      logoBytes: readLogoBytes(rendered.tokens)
+    });
   }
   if (!buf) return null;
   const ext = rendered.mime === 'application/pdf' ? 'pdf' : 'docx';

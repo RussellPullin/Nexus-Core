@@ -3,34 +3,25 @@
   "display_name": "Worker Conflict of Interest Declaration",
   "category": "contract",
   "form_type": "contract",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "staff_onboarding",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
-    "org.legal_name",
+    "today_long",
     "org.name"
   ],
-  "signing_layout": {
-    "page_width": 595,
-    "page_height": 842,
-    "page_count": 1,
-    "fields": [
-      { "id": "conflict-details", "page": 1, "x": 72, "y": 200, "width": 483, "height": 293, "type": "text", "merge_key": "conflict_details", "label": "Conflicts, interests, or matters (state NIL if none)", "signer": "staff", "fillable": true, "required": true },
-      { "id": "staff-signature", "page": 1, "x": 36, "y": 638, "width": 250, "height": 20, "type": "signature", "merge_key": "signature", "signer": "staff", "required": true },
-      { "id": "printed-name", "page": 1, "x": 36, "y": 675, "width": 250, "height": 16, "type": "text", "merge_key": "printed_name", "label": "Full name (please print)", "signer": "staff", "fillable": true, "required": true }
-    ]
-  },
+  "packs": [
+    "staff_onboarding"
+  ],
+  "pack": "staff_onboarding",
   "required_signer_role": "worker",
   "signature_count": 1,
   "renewal_days": 365,
   "is_active": true,
+  "source_pdf": "Worker Conflict of Interest Declaration.pdf",
+  "source_category": "01 - Staff Recruitment & Onboarding",
   "staff_roles": [
     "all"
-  ],
-  "packs": [
-    "staff_onboarding"
   ]
 }

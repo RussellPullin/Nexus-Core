@@ -3,25 +3,27 @@
   "display_name": "Client Intake Form",
   "category": "form",
   "form_type": "form",
-  "engine": "docxtemplater",
-  "version": "1.0.0",
-  "template_file": "template.docx",
-  "pack": "participant_onboarding",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
   "placeholders": [
-    "org.abn",
     "org.branding.logo_path",
+    "today_long",
+    "org.name",
     "org.legal_name",
-    "org.name"
-  ],
-  "required_signer_role": "participant",
-  "signature_count": 1,
-  "renewal_days": null,
-  "is_active": false,
-  "_retired_reason": "Blank docx with zero participant merge fields — nothing for the recipient to fill during e-sign. Superseded by the self-service intake link (participant_intake_tokens / POST /api/participants/:id/intake-token, IntakePage.jsx) which writes real answers into participant_intake_fields and feeds the compliance registers directly.",
-  "participant_service_types": [
-    "all"
+    "org.abn"
   ],
   "packs": [
     "participant_onboarding"
+  ],
+  "pack": "participant_onboarding",
+  "required_signer_role": "participant",
+  "signature_count": 9,
+  "renewal_days": null,
+  "is_active": true,
+  "source_pdf": "Client Intake Form.pdf",
+  "source_category": "03 - Client Intake & Onboarding",
+  "participant_service_types": [
+    "all"
   ]
 }

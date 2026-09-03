@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """
-Nexus Core — NDIS Document Template Preparation
-================================================
-Reads all .docx files from the Spring 2 Health policy library,
-strips all PII (names, phone numbers, emails, ABN, org-specific branding),
-replaces with Nexus token placeholders, writes clean .docx + PDF to
-  data/forms/templates/library/<slug>/
-and generates a manifest.json for each document.
+DEPRECATED — the master library is now the tokenised fillable PDF set.
 
-Run from the nexus core project root:
-  python3 scripts/prepare-ndis-templates.py
+Use:
+  python3 scripts/import-tokenised-pdf-masters.py
+
+This Word/PII script is kept only as a historical reference. It must not be
+run against the live library (it would write obsolete DOCX templates).
+"""
+import sys
+print("prepare-ndis-templates.py is retired. Use scripts/import-tokenised-pdf-masters.py", file=sys.stderr)
+sys.exit(2)
+
+# Original Word/PII pipeline follows (unreachable).
+"""
+Nexus Core — NDIS Document Template Preparation (retired)
+================================================
 """
 
 import os

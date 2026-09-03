@@ -1,0 +1,32 @@
+{
+  "slug": "services-agreement",
+  "display_name": "Services Agreement",
+  "category": "contract",
+  "form_type": "contract",
+  "engine": "pdf-acroform",
+  "version": "2.0.0",
+  "template_file": "template.pdf",
+  "placeholders": [
+    "org.branding.logo_path",
+    "today_long",
+    "org.legal_name",
+    "org.abn",
+    "org.postal_address",
+    "org.name",
+    "org.phone",
+    "org.email"
+  ],
+  "packs": [
+    "participant_onboarding"
+  ],
+  "pack": "participant_onboarding",
+  "required_signer_role": "participant",
+  "signature_count": 3,
+  "renewal_days": 365,
+  "is_active": true,
+  "source_pdf": "Services Agreement.pdf",
+  "source_category": "03 - Client Intake & Onboarding",
+  "participant_service_types": [
+    "all"
+  ]
+}
