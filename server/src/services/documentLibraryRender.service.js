@@ -26,6 +26,7 @@ import { buildOrgTokenMap, getOrgRenderContext } from './orgContext.service.js';
 import { buildGlobalTokenMap } from '../lib/templateTokens.js';
 import { convertDocxToPdf } from './consentForm.service.js';
 import { getOrgFullUploadDocument, listOrgSectionOverrides } from './documentLibrary.service.js';
+import { fillAcroFormWithTokens } from './formFill.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
@@ -117,6 +118,16 @@ function resolveOrgLogoPath(orgId) {
     if (existsSync(p)) return p;
   }
   return null;
+}
+
+function readLogoBytes(orgId) {
+  const logoPath = resolveOrgLogoPath(orgId);
+  if (!logoPath) return null;
+  try {
+    return readFileSync(logoPath);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -373,8 +384,8 @@ export function resolveOverrideStrategy({ overrideMode, hasSectionsJson, hasFull
   return 'default';
 }
 
-export function renderLibraryDocument({ masterId, orgId, participant = null, staff = null, extra = {} }) {
-  const master = db.prepare('SELECT * FROM document_library_masters WHERE id = ?').get(masterId);
+export async function renderLibraryDocument({ masterId, orgId, participant = null, staff = null, extra = {} }) {
+  const master = db.prepare('SELECT * FROM document_library_masters WHERE id = ? OR slug = ?').get(masterId, masterId);
   if (!master) throw new Error(`Document library master ${masterId} not found`);
   if (!master.is_active) throw new Error(`Master ${master.slug} is inactive`);
 
@@ -455,14 +466,21 @@ export function renderLibraryDocument({ masterId, orgId, participant = null, sta
       };
     }
     case 'pdf-acroform': {
-      // Legacy path: PDFs with AcroForm fields are filled at the route layer via pdf-lib.
-      const buffer = readFileSync(master.template_file_path);
+      let buffer = readFileSync(master.template_file_path);
+      try {
+        buffer = await fillAcroFormWithTokens(buffer, tokens, {
+          flatten: extra?.flatten === true,
+          logoBytes: readLogoBytes(orgId)
+        });
+      } catch (err) {
+        console.warn(`[document-library] AcroForm fill failed for "${master.slug}":`, err?.message);
+      }
       return {
         buffer,
         html: null,
         mime: 'application/pdf',
         suggestedFilename: `${baseName}.pdf`,
-        needsAcroFormFill: true,
+        needsAcroFormFill: false,
         tokens
       };
     }

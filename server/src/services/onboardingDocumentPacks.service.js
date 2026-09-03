@@ -169,7 +169,7 @@ function readLogoBytes(tokens) {
 }
 
 export async function renderLibraryMasterAttachment(master, orgId, { participant = null, staff = null, extra = {}, flatten = false } = {}) {
-  const rendered = renderLibraryDocument({ masterId: master.id, orgId, participant, staff, extra });
+  const rendered = await renderLibraryDocument({ masterId: master.id, orgId, participant, staff, extra });
   let buf = rendered?.buffer;
   if (rendered?.needsAcroFormFill && buf) {
     buf = await fillAcroFormWithTokens(buf, rendered.tokens, {

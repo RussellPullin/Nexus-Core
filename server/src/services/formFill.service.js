@@ -281,6 +281,11 @@ export async function fillAcroFormWithTokens(pdfBytes, tokens, options = {}) {
     }
   }
 
+  try {
+    form.updateFieldAppearances();
+  } catch {
+    /* some viewers still show values without appearance streams */
+  }
   if (flatten) {
     try { form.flatten(); } catch { /* non-fatal if form has no fields */ }
   }

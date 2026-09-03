@@ -311,7 +311,7 @@ router.get('/:token/library-doc/:masterId', async (req, res) => {
   const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff.id);
 
   try {
-    const rendered = renderLibraryDocument({ masterId: req.params.masterId, orgId, staff: staffFull });
+    const rendered = await renderLibraryDocument({ masterId: req.params.masterId, orgId, staff: staffFull });
     let buf = rendered?.buffer;
     if (rendered?.needsAcroFormFill && buf) {
       buf = await fillAcroFormWithTokens(buf, rendered.tokens);
