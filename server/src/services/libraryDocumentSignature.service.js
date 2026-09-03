@@ -20,7 +20,7 @@ import {
   resolveOrgSignatoryForDocuSeal
 } from './customFormDocuSealFields.service.js';
 
-const ESIGNATURE_SETTINGS_HINT = 'Enable e-signing under Forms → Onboarding settings.';
+const ESIGNATURE_SETTINGS_HINT = 'Enable e-signing under Settings → Onboarding.';
 
 export function isNativeSignatureEnabledForOrg(orgId) {
   if (!orgId) return hasNativeSignatureConfigured();

@@ -3362,7 +3362,7 @@ export default function ParticipantProfile() {
               <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem' }}>
                 Download to review the full pre-filled agreement, or click <strong>Sign with Nexus Core</strong> to send it for signatures.
                 The Sign button is enabled only once the pre-send checklist above is complete. The PDF goes first to the organisation default signatory, then to the participant — both only sign.
-                Set the default signatory under <Link to="/settings">Settings → Business</Link> and enable signing under Forms → Onboarding settings.
+                Set the default signatory under <Link to="/settings">Settings → Business</Link> and enable signing under Settings → Onboarding.
               </p>
               {saAgreements.length === 0 ? (
                 <p className="empty-state">None yet.</p>

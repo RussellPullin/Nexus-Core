@@ -17,7 +17,7 @@ export const NEXUS_CORE_SIGN_ENV_FALLBACK =
   import.meta.env.VITE_NEXUS_CORE_DROPBOX_SIGN_ENABLED === 'true';
 
 export const NEXUS_CORE_SIGN_COMING_SOON_TITLE =
-  'Sign with Nexus Core is not enabled for this organisation. Ask an admin to turn it on under Forms → Onboarding settings.';
+  'Sign with Nexus Core is not enabled for this organisation. Ask an admin to turn it on under Settings → Onboarding.';
 
 let cachedSignEnabled = NEXUS_CORE_SIGN_ENV_FALLBACK;
 let inflightOrgId = null;

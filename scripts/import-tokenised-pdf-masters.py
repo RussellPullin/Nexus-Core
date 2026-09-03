@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Import tokenised fillable PDF masters into the Nexus Core document library.
 
-Reads the Policy Product Build "Masters (tokenised)" set, turns visible
-⟨ Provider Name ⟩ chips into AcroForm fields, writes
+Reads the Policy Product Build "Masters (licensed - no watermark)" set, turns
+visible ⟨ Provider Name ⟩ chips into AcroForm fields, writes
 server/templates/library/<slug>/{template.pdf,manifest.json}, and removes
 legacy DOCX/prebrand files from each slug folder.
 """
@@ -25,12 +25,12 @@ CATALOGUE_PATH = LIBRARY_OUT / "_catalogue.json"
 SOURCE_DIR = Path(
     "/Users/pristinelifestylesolutions/Library/CloudStorage"
     "/OneDrive-PristineLifestyleSolutions/Spring 2 health"
-    "/Policy Product Build/Masters (tokenised)"
+    "/Policy Product Build/Masters (licensed - no watermark)"
 )
 CATEGORY_DIR = Path(
     "/Users/pristinelifestylesolutions/Library/CloudStorage"
     "/OneDrive-PristineLifestyleSolutions/Spring 2 health"
-    "/Policy Product Build/Masters (tokenised) (by category)"
+    "/Policy Product Build/Masters (licensed - no watermark) (by category)"
 )
 
 CHIP_RE = re.compile(r"[\u27e8⟨]\s*([^⟩\u27e9]+?)\s*[\u27e9⟩]")

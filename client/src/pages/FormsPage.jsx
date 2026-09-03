@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { forms, onboarding, documentLibrary } from '../lib/api';
+import { forms, documentLibrary } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
-import ServiceAgreementTemplateEditor from '../components/ServiceAgreementTemplateEditor';
 import ActivityRiskAssessmentsPanel from '../components/ActivityRiskAssessmentsPanel';
-import CustomFormTemplatesPanel from '../components/CustomFormTemplatesPanel';
 
 const CATEGORY_LABELS = {
   policy:    'Policy',
@@ -26,9 +24,8 @@ const CATEGORY_ICONS = {
 };
 
 export default function FormsPage() {
-  const { user, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
   const prefix = useProductPathPrefix();
-  const orgId = user?.org_id || null;
 
   const [message, setMessage] = useState('');
 
@@ -42,18 +39,6 @@ export default function FormsPage() {
   const [policyBusy, setPolicyBusy] = useState(false);
   const [policyDisplayName, setPolicyDisplayName] = useState('');
   const [policyFile, setPolicyFile] = useState(null);
-
-  // Onboarding settings
-  const [settingsState, setSettingsState] = useState(null);
-  const [settingsForm, setSettingsForm] = useState({
-    onboarding_enabled: false,
-    onboarding_pilot: false,
-    signature_mode: 'hybrid',
-    default_renewal_days: 365,
-    esignature_enabled: false
-  });
-  const [settingsBusy, setSettingsBusy] = useState(false);
-  const [settingsMessage, setSettingsMessage] = useState('');
 
   // ── Load ────────────────────────────────────────────────────────────────
 
@@ -73,30 +58,9 @@ export default function FormsPage() {
       .finally(() => setLibraryLoading(false));
   }, []);
 
-  const reloadSettings = useCallback(() => {
-    if (!orgId || !isAdmin) { setSettingsState(null); return; }
-    onboarding.getProviderSettings(orgId)
-      .then((data) => {
-        setSettingsState(data);
-        const profile = data?.provider_profile || {};
-        setSettingsForm({
-          onboarding_enabled: Boolean(profile.onboarding_enabled),
-          onboarding_pilot: Boolean(profile.onboarding_pilot),
-          signature_mode: profile.signature_mode || 'hybrid',
-          default_renewal_days: Number(profile.default_renewal_days || 365),
-          esignature_enabled: Boolean(
-            data?.config?.esignature_enabled ?? data?.config?.docuseal_enabled ?? data?.config?.dropbox_sign_enabled
-          )
-        });
-      })
-      .catch(() => setSettingsState(null));
-  }, [orgId, isAdmin]);
-
   useEffect(() => {
     reloadPolicyFiles();
-    reloadLibrary();
-    reloadSettings();
-  }, [reloadPolicyFiles, reloadLibrary, reloadSettings]);
+  }, [reloadPolicyFiles]);
 
   // ── Extra document handlers ──────────────────────────────────────────────
 
@@ -130,37 +94,6 @@ export default function FormsPage() {
       setMessage(err.message || 'Delete failed');
     } finally {
       setPolicyBusy(false);
-    }
-  };
-
-  // ── Settings handler ─────────────────────────────────────────────────────
-
-  const handleSaveSettings = async (e) => {
-    e?.preventDefault?.();
-    if (!orgId) return;
-    setSettingsBusy(true);
-    setSettingsMessage('');
-    try {
-      const existingConfig = settingsState?.config || {};
-      const nextConfig = {
-        ...existingConfig,
-        esignature_enabled: Boolean(settingsForm.esignature_enabled),
-        // Keep legacy key in sync so older clients/readers still work during transition.
-        docuseal_enabled: Boolean(settingsForm.esignature_enabled)
-      };
-      await onboarding.providerSettings(orgId, {
-        onboarding_enabled: settingsForm.onboarding_enabled,
-        onboarding_pilot: settingsForm.onboarding_pilot,
-        signature_mode: settingsForm.signature_mode,
-        default_renewal_days: Number(settingsForm.default_renewal_days) || 365,
-        config: nextConfig
-      });
-      setSettingsMessage('Onboarding settings saved.');
-      reloadSettings();
-    } catch (err) {
-      setSettingsMessage(err.message || 'Failed to save settings.');
-    } finally {
-      setSettingsBusy(false);
     }
   };
 
@@ -200,40 +133,40 @@ export default function FormsPage() {
         </div>
       )}
 
-      {/* ── 1. Service Agreement ─────────────────────────────────────────── */}
-      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <div style={{ marginBottom: '1rem' }}>
-          <h2 className="forms-section-heading" style={{ marginBottom: '0.25rem' }}>Service Agreement</h2>
-          <p className="forms-lede" style={{ marginBottom: 0 }}>
-            Set up your organisation's standard services agreement once. Your details auto-fill from your profile.
-            When you generate an agreement for a participant, their information merges in automatically.
-          </p>
-        </div>
-        <ServiceAgreementTemplateEditor onMessage={(msg, isError) => setMessage(isError ? `Error: ${msg}` : msg)} />
-      </section>
-
-      {/* ── 2. Activity Risk Assessments ─────────────────────────────────── */}
+      {/* ── 1. Activity Risk Assessments ─────────────────────────────────── */}
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
         <h2 className="forms-section-heading">Activity risk assessments</h2>
         <ActivityRiskAssessmentsPanel onMessage={(msg) => setMessage(msg)} />
       </section>
 
-      {/* ── 3. Custom forms ───────────────────────────────────────────────── */}
-      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <h2 className="forms-section-heading">Custom forms</h2>
-        <CustomFormTemplatesPanel onMessage={(msg, isError) => setMessage(isError ? `Error: ${msg}` : msg)} />
-      </section>
-
-      {/* ── 4. NDIS Document Library ─────────────────────────────────────── */}
-      <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-        <div className="forms-row" style={{ justifyContent: 'space-between', marginBottom: '0.75rem', alignItems: 'flex-start' }}>
-          <div>
-            <h2 className="forms-section-heading" style={{ marginBottom: '0.25rem' }}>NDIS document library</h2>
-            <p className="forms-lede" style={{ marginBottom: 0 }}>
-              {libraryTemplates.length} compliance documents — policies, procedures, registers, contracts, and guides.
-              Automatically branded with your organisation's details and attached to onboarding emails.
-            </p>
-          </div>
+      {/* ── 2. NDIS Document Library (collapsed until an admin opens it) ── */}
+      <details
+        className="card forms-section settings-collapsible"
+        style={{ marginBottom: '1.25rem' }}
+        onToggle={(e) => {
+          if (!isAdmin) {
+            e.currentTarget.open = false;
+            return;
+          }
+          if (e.currentTarget.open && libraryTemplates.length === 0) reloadLibrary();
+        }}
+      >
+        <summary className="settings-collapsible-summary">
+          <span className="settings-collapsible-summary-main">
+            <span className="forms-section-heading settings-collapsible-title" style={{ marginBottom: 0 }}>
+              NDIS document library
+            </span>
+            <span className="forms-lede settings-collapsible-hint" style={{ marginBottom: 0 }}>
+              {isAdmin
+                ? (libraryTemplates.length
+                    ? `${libraryTemplates.length} compliance documents — branded from business details`
+                    : 'Policies, procedures, registers, contracts, and guides. Open to browse.')
+                : 'Admin only — ask an organisation admin to open the library.'}
+            </span>
+          </span>
+        </summary>
+        <div className="settings-collapsible-body">
+        <div className="forms-row" style={{ justifyContent: 'flex-end', marginBottom: '0.75rem', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0, flexWrap: 'wrap' }}>
             <Link
               to={`${prefix}/forms/automation-mapping`}
@@ -351,9 +284,10 @@ export default function FormsPage() {
             )}
           </p>
         )}
-      </section>
+        </div>
+      </details>
 
-      {/* ── 5. Extra organisation documents (escape hatch) ───────────────── */}
+      {/* ── 4. Extra organisation documents (escape hatch) ───────────────── */}
       <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
         <h2 className="forms-section-heading">Extra organisation documents</h2>
         <p className="forms-lede">
@@ -406,95 +340,6 @@ export default function FormsPage() {
           <p className="forms-muted" style={{ fontSize: '0.85rem' }}>No extra documents uploaded.</p>
         )}
       </section>
-
-      {/* ── 6. Onboarding settings ───────────────────────────────────────── */}
-      {isAdmin && orgId && (
-        <section className="card forms-section" style={{ marginBottom: '1.25rem' }}>
-          <h2 className="forms-section-heading">Onboarding settings</h2>
-          <p className="forms-lede">
-            Toggle onboarding behaviour for this organisation. Pilot mode keeps the workflow available for testing without affecting live participants.
-          </p>
-
-          {settingsState?.readiness && !settingsState.readiness.ready && (
-            <div className="forms-banner" style={{ background: '#fef2f2', color: '#991b1b', marginBottom: '1rem' }}>
-              Not ready to send onboarding yet: {settingsState.readiness.reason}
-            </div>
-          )}
-
-          {settingsState?.readiness?.ready && settingsState.readiness.warning && (
-            <div className="forms-banner" style={{ background: '#eff6ff', color: '#1e3a8a', marginBottom: '1rem' }}>
-              {settingsState.readiness.warning}{' '}
-              <Link to={`${prefix}/forms/automation-mapping`}>Open Automation mapping</Link>.
-            </div>
-          )}
-
-          <form onSubmit={handleSaveSettings} style={{ display: 'grid', gap: '0.75rem', maxWidth: 560 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                checked={settingsForm.onboarding_enabled}
-                onChange={(e) => setSettingsForm((s) => ({ ...s, onboarding_enabled: e.target.checked }))}
-              />
-              Enable onboarding workflow for this organisation
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                checked={settingsForm.onboarding_pilot}
-                onChange={(e) => setSettingsForm((s) => ({ ...s, onboarding_pilot: e.target.checked }))}
-              />
-              Pilot mode (testing — no live notifications)
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                checked={settingsForm.esignature_enabled}
-                onChange={(e) => setSettingsForm((s) => ({ ...s, esignature_enabled: e.target.checked }))}
-              />
-              Enable Sign with Nexus Core
-            </label>
-
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="forms-label" htmlFor="signature_mode">Signature packet mode</label>
-              <select
-                id="signature_mode"
-                className="form-input"
-                value={settingsForm.signature_mode}
-                onChange={(e) => setSettingsForm((s) => ({ ...s, signature_mode: e.target.value }))}
-              >
-                <option value="hybrid">Hybrid — bundle related forms, separate consent</option>
-                <option value="packet">Packet — all forms in a single envelope</option>
-                <option value="separate">Separate — one envelope per form</option>
-              </select>
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="forms-label" htmlFor="default_renewal_days">Default renewal period (days)</label>
-              <input
-                id="default_renewal_days"
-                type="number"
-                min="30"
-                max="3650"
-                className="form-input"
-                value={settingsForm.default_renewal_days}
-                onChange={(e) => setSettingsForm((s) => ({ ...s, default_renewal_days: e.target.value }))}
-                style={{ maxWidth: 160 }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <button type="submit" className="btn btn-primary" disabled={settingsBusy}>
-                {settingsBusy ? 'Saving…' : 'Save settings'}
-              </button>
-              {settingsMessage && (
-                <span style={{ color: settingsMessage.toLowerCase().includes('fail') ? '#991b1b' : '#166534', fontSize: '0.9rem' }}>
-                  {settingsMessage}
-                </span>
-              )}
-            </div>
-          </form>
-        </section>
-      )}
     </div>
   );
 }

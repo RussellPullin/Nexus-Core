@@ -679,7 +679,7 @@ export default function OnboardingPage() {
       alert(
         signEnabled
           ? 'Document updated. Download to sign or use Sign with Nexus Core when ready.'
-          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once enabled in Forms → Onboarding settings.'
+          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once enabled in Settings → Onboarding.'
       );
     } catch (err) {
       alert(err.message);

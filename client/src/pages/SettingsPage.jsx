@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
-import { useSearchParams, useParams } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Link, useSearchParams, useParams } from 'react-router-dom';
 import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
 import { useAuth } from '../context/AuthContext';
-import { staff, learning, settings, auth, microsoftDrive, organisations } from '../lib/api';
+import { staff, learning, settings, auth, microsoftDrive, organisations, onboarding } from '../lib/api';
 import SearchableSelect from '../components/SearchableSelect';
 import SignatureCanvas from '../components/SignatureCanvas';
 import { formatDate } from '../lib/dateUtils';
+import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 
 const SIGNATURE_WIDTH = 300;
 const SIGNATURE_HEIGHT = 120;
@@ -439,6 +440,7 @@ export default function SettingsPage() {
         Boolean(user?.agency_enabled) && <ShifterIntegrationCard />}
       {canManageUsers && <OrgProfileCard />}
       {canManageUsers && <BusinessSetup />}
+      {isAdmin && user?.org_id && <OnboardingSettingsCard orgId={user.org_id} />}
       <LearningSettings />
       </div>
     </div>
@@ -783,6 +785,170 @@ function ShifterIntegrationCard() {
           {copyMsg}
         </div>
       )}
+      </div>
+    </details>
+  );
+}
+
+function OnboardingSettingsCard({ orgId }) {
+  const prefix = useProductPathPrefix();
+  const [settingsState, setSettingsState] = useState(null);
+  const [settingsForm, setSettingsForm] = useState({
+    onboarding_enabled: false,
+    onboarding_pilot: false,
+    signature_mode: 'hybrid',
+    default_renewal_days: 365,
+    esignature_enabled: false
+  });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const reload = useCallback(() => {
+    if (!orgId) {
+      setSettingsState(null);
+      return;
+    }
+    onboarding.getProviderSettings(orgId)
+      .then((data) => {
+        setSettingsState(data);
+        const profile = data?.provider_profile || {};
+        setSettingsForm({
+          onboarding_enabled: Boolean(profile.onboarding_enabled),
+          onboarding_pilot: Boolean(profile.onboarding_pilot),
+          signature_mode: profile.signature_mode || 'hybrid',
+          default_renewal_days: Number(profile.default_renewal_days || 365),
+          esignature_enabled: Boolean(
+            data?.config?.esignature_enabled ?? data?.config?.docuseal_enabled ?? data?.config?.dropbox_sign_enabled
+          )
+        });
+      })
+      .catch(() => setSettingsState(null));
+  }, [orgId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const handleSave = async (e) => {
+    e?.preventDefault?.();
+    if (!orgId) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const existingConfig = settingsState?.config || {};
+      await onboarding.providerSettings(orgId, {
+        onboarding_enabled: settingsForm.onboarding_enabled,
+        onboarding_pilot: settingsForm.onboarding_pilot,
+        signature_mode: settingsForm.signature_mode,
+        default_renewal_days: Number(settingsForm.default_renewal_days) || 365,
+        config: {
+          ...existingConfig,
+          esignature_enabled: Boolean(settingsForm.esignature_enabled),
+          docuseal_enabled: Boolean(settingsForm.esignature_enabled)
+        }
+      });
+      setMessage('Onboarding settings saved.');
+      reload();
+    } catch (err) {
+      setMessage(err.message || 'Failed to save settings.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <details id="settings-section-onboarding" className="card settings-collapsible">
+      <summary className="settings-collapsible-summary">
+        <span className="settings-collapsible-summary-main">
+          <span className="settings-collapsible-title">Onboarding</span>
+          <span className="settings-collapsible-hint">
+            Enable the workflow, Sign with Nexus Core, packet mode, and renewal period
+          </span>
+        </span>
+      </summary>
+      <div className="settings-collapsible-body">
+        <p className="settings-desc">
+          Organisation-level onboarding behaviour. Pilot mode keeps the workflow available for testing without affecting live participants.
+        </p>
+
+        {settingsState?.readiness && !settingsState.readiness.ready && (
+          <div className="settings-error" style={{ marginBottom: '1rem' }}>
+            Not ready to send onboarding yet: {settingsState.readiness.reason}
+          </div>
+        )}
+
+        {settingsState?.readiness?.ready && settingsState.readiness.warning && (
+          <div className="settings-success" style={{ marginBottom: '1rem', background: '#eff6ff', borderColor: '#93c5fd', color: '#1e3a8a' }}>
+            {settingsState.readiness.warning}{' '}
+            <Link to={`${prefix}/forms/automation-mapping`}>Open Automation mapping</Link>.
+          </div>
+        )}
+
+        <form onSubmit={handleSave} className="settings-form">
+          <label className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input
+              type="checkbox"
+              checked={settingsForm.onboarding_enabled}
+              onChange={(e) => setSettingsForm((s) => ({ ...s, onboarding_enabled: e.target.checked }))}
+            />
+            Enable onboarding workflow for this organisation
+          </label>
+          <label className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input
+              type="checkbox"
+              checked={settingsForm.onboarding_pilot}
+              onChange={(e) => setSettingsForm((s) => ({ ...s, onboarding_pilot: e.target.checked }))}
+            />
+            Pilot mode (testing — no live notifications)
+          </label>
+          <label className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input
+              type="checkbox"
+              checked={settingsForm.esignature_enabled}
+              onChange={(e) => setSettingsForm((s) => ({ ...s, esignature_enabled: e.target.checked }))}
+            />
+            Enable Sign with Nexus Core
+          </label>
+
+          <div className="form-group">
+            <label htmlFor="signature_mode">Signature packet mode</label>
+            <select
+              id="signature_mode"
+              className="form-input"
+              value={settingsForm.signature_mode}
+              onChange={(e) => setSettingsForm((s) => ({ ...s, signature_mode: e.target.value }))}
+            >
+              <option value="hybrid">Hybrid — bundle related forms, separate consent</option>
+              <option value="packet">Packet — all forms in a single envelope</option>
+              <option value="separate">Separate — one envelope per form</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="default_renewal_days">Default renewal period (days)</label>
+            <input
+              id="default_renewal_days"
+              type="number"
+              min="30"
+              max="3650"
+              className="form-input"
+              value={settingsForm.default_renewal_days}
+              onChange={(e) => setSettingsForm((s) => ({ ...s, default_renewal_days: e.target.value }))}
+              style={{ maxWidth: 160 }}
+            />
+          </div>
+
+          <div className="settings-buttons">
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? 'Saving…' : 'Save settings'}
+            </button>
+            {message && (
+              <span className={message.toLowerCase().includes('fail') ? 'settings-error' : 'settings-success'} style={{ margin: 0 }}>
+                {message}
+              </span>
+            )}
+          </div>
+        </form>
       </div>
     </details>
   );
@@ -1205,7 +1371,7 @@ function BusinessSetup() {
       <h4 className="settings-subsection-title">Signatures – Nexus Core</h4>
       <p className="settings-desc">
         Participant and staff agreements are signed with Nexus Core&apos;s built-in e-signature —
-        no third-party signing service required. Enable it per organisation under Forms → Onboarding settings.
+        no third-party signing service required. Enable it per organisation under Settings → Onboarding.
       </p>
       <div
         style={{
