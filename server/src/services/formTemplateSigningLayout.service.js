@@ -8,7 +8,7 @@ import { PDFDocument } from 'pdf-lib';
 import { v4 as uuidv4 } from 'uuid';
 import { extractPdfAcroFieldNames, suggestContractFieldMap } from './contractTemplateAnalyze.service.js';
 import { mergeKeyToHumanLabel } from './formTemplateSignerPreview.service.js';
-import { isSignatureAcroFieldName } from '../lib/templateTokens.js';
+import { isSignatureAcroFieldName, isProviderAutofillAcroFieldName } from '../lib/templateTokens.js';
 
 const DEFAULT_PAGE_W = 595;
 const DEFAULT_PAGE_H = 842;
@@ -126,9 +126,10 @@ function inferSigner(mergeKey, workflow, fieldName = '') {
   // never match and always fall through to the primary signer.
   const k = `${mergeKey}_${fieldName}`.toLowerCase().replace(/^_+|_+$/g, '');
   if (
-    /(^|_)(org|prov|provider|employer|supervisor|sup_sig|s_sig|d_s_sig|sig_s|sig_prov)($|_)/.test(k)
+    /(^|_)(org|prov|provider|employer|supervisor)(_|$)/.test(k)
+    // provider-side sign-off block: s_ / sup_ / d_s_ prefix + sig|date|name|print|role
+    || /(^|_)(s|sup|d_s|sig_s|sig_prov)_(sig|date|name|print|role)($|_)/.test(k)
     || /^organisation/.test(k)
-    || k === 'organisation_name'
   ) {
     return 'org';
   }
@@ -188,6 +189,10 @@ export async function suggestSigningLayoutFromPdf(pdfBytes, contractFieldMap, wo
 
   for (const field of fields) {
     const name = field.getName();
+    // Provider / document-control slots (org name, ABN, logo, effective & review
+    // dates, …) are pre-filled from the org's details before the document is sent
+    // — they must never become signer-fillable fields.
+    if (isProviderAutofillAcroFieldName(name)) continue;
     const wfKind = wf === 'staff_onboarding' ? 'staff' : 'participant';
     let mergeKey = map[name] || suggestContractFieldMap([name], wfKind)[name] || '';
     mergeKey = String(mergeKey || '').trim();

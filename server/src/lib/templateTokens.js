@@ -195,6 +195,20 @@ export function buildAcroFormFillMap(tokens = {}) {
 }
 
 /**
+ * True when an AcroForm field is a provider / document-control slot the CRM fills
+ * from the organisation's business details (name, ABN, logo, effective/review
+ * dates, …). These are pre-filled before a document is sent for signature and
+ * must never be surfaced as signer-fillable fields.
+ * @param {string} fieldName
+ */
+export function isProviderAutofillAcroFieldName(fieldName) {
+  const base = String(fieldName || '').replace(/_\d+$/, '');
+  const key = ACROFORM_TOKEN_ALIASES[fieldName] || ACROFORM_TOKEN_ALIASES[base];
+  if (!key) return false;
+  return key.startsWith('org.') || key === 'today' || key === 'today_long';
+}
+
+/**
  * Resolve a PDF field name against a fill map, including PROVIDER_SHORT_2 style suffixes.
  * @param {string} fieldName
  * @param {Record<string, string>} fillMap
