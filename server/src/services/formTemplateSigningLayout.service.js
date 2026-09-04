@@ -120,19 +120,27 @@ function inferFieldType(fieldName, mergeKey) {
   return 'text';
 }
 
-// Employer-provided role details (top of a position description / letter of
-// engagement / contract) — the organisation completes these when preparing the
-// document, not the incoming worker.
+// Fields the document issuer completes when preparing a staff document (position
+// description, letter of engagement, contract) — not the incoming worker. The
+// worker only signs the acceptance / person-in-role block at the end.
 const EMPLOYER_DETAIL_FIELDS = new Set([
-  'employment_type', 'employment_status', 'reports_to', 'pd_date',
-  'award', 'classification', 'work_location', 'position_location'
+  // role details
+  'employment_type', 'employment_status', 'reports_to', 'pd_date', 'position_title',
+  'classification', 'work_location', 'position_location',
+  // letter of engagement — remuneration & terms
+  'award', 'pay_point', 'base_rate', 'casual_loading', 'pay_rate', 'casual_rate',
+  'pay_frequency', 'pay_cycle', 'super_rate', 'hours_indicative', 'allowances',
+  'governing_state', 'return_by', 'letter_date', 'emp_name', 'emp_address',
+  'greeting_name', 'induction_status'
 ]);
 
 function inferSigner(mergeKey, workflow, fieldName = '') {
   const name = String(fieldName || '').toLowerCase().trim();
   if (
     EMPLOYER_DETAIL_FIELDS.has(name)
-    || (workflow === 'staff_onboarding' && /^(location|start_date|hours|pay_rate|salary)$/.test(name))
+    || (workflow === 'staff_onboarding' && /^(location|start_date|hours|salary)$/.test(name))
+    // "Issued by <provider>" block on a letter of engagement
+    || /^iss_(name|position|date|sig)$/.test(name)
   ) {
     return 'org';
   }
@@ -209,7 +217,13 @@ export async function suggestSigningLayoutFromPdf(pdfBytes, contractFieldMap, wo
     // — they must never become signer-fillable fields.
     if (isProviderAutofillAcroFieldName(name)) continue;
     const wfKind = wf === 'staff_onboarding' ? 'staff' : 'participant';
-    let mergeKey = map[name] || suggestContractFieldMap([name], wfKind)[name] || '';
+    const signer = inferSigner('', wf, name);
+    // Org-completed fields are entered individually by the preparer — keep the raw
+    // field name so distinct boxes (base rate / loading / total rate) don't collapse
+    // onto one shared merge key from suggestContractFieldMap.
+    let mergeKey = signer === 'org'
+      ? (map[name] || name)
+      : (map[name] || suggestContractFieldMap([name], wfKind)[name] || '');
     mergeKey = String(mergeKey || '').trim();
     const type = inferFieldType(name, mergeKey);
     const widgets = field.acroField.getWidgets();
@@ -232,7 +246,7 @@ export async function suggestSigningLayoutFromPdf(pdfBytes, contractFieldMap, wo
         type,
         merge_key: mergeKey || name.replace(/\W+/g, '_').toLowerCase(),
         label: mergeKeyToHumanLabel(mergeKey || name, wf),
-        signer: inferSigner(mergeKey, wf, name),
+        signer,
         required: type === 'signature',
         api_id: sanitizeApiId(name),
         cover_underlying: defaultCoverUnderlying(type, name, mergeKey)

@@ -17,8 +17,8 @@
     "staff_onboarding"
   ],
   "pack": "staff_onboarding",
-  "required_signer_role": "staff",
-  "signature_count": 2,
+  "required_signer_role": null,
+  "signature_count": 0,
   "renewal_days": null,
   "is_active": true,
   "source_pdf": "Staff Induction Checklist.pdf",

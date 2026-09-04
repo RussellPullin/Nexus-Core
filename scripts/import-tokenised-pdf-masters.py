@@ -255,7 +255,10 @@ def build_manifest(slug: str, filename: str, folder: str, meta: dict, previous: 
         "placeholders": placeholders,
         "packs": [pack],
         "pack": pack,
-        "required_signer_role": prev.get("required_signer_role") or required_signer(pack, sig_count, category),
+        "required_signer_role": (
+            (prev.get("required_signer_role") or required_signer(pack, sig_count, category))
+            if sig_count > 0 else None
+        ),
         "signature_count": sig_count,
         "renewal_days": prev.get("renewal_days"),
         "is_active": True if prev.get("is_active") is None else bool(prev.get("is_active")),
