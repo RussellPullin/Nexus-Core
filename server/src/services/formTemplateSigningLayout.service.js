@@ -63,8 +63,10 @@ export function parseSigningLayout(mappingJson) {
 }
 
 function findWidgetPageIndex(doc, widget) {
-  const pageRef = typeof widget.P === 'function' ? widget.P() : widget.P;
   const pages = doc.getPages();
+
+  // 1. Trust the widget's own /P entry when the producer set one (pdf-lib, Acrobat, …).
+  const pageRef = typeof widget.P === 'function' ? widget.P() : widget.P;
   if (pageRef) {
     for (let i = 0; i < pages.length; i++) {
       if (pages[i].ref === pageRef || pages[i].ref?.toString() === pageRef?.toString()) {
@@ -72,19 +74,28 @@ function findWidgetPageIndex(doc, widget) {
       }
     }
   }
-  const wRef = widget.ref;
-  if (wRef) {
-    for (let i = 0; i < pages.length; i++) {
-      const annots = pages[i].node.Annots?.();
-      if (!annots) continue;
+
+  // 2. PyMuPDF (the tokenised-master build) omits /P, so match the widget's own
+  //    dictionary against each page's /Annots array. Without this every widget on
+  //    page 2+ collapses onto page 1 and its signing box lands in the wrong place.
+  const widgetDict = widget.dict ?? widget;
+  for (let i = 0; i < pages.length; i++) {
+    const annots = pages[i].node.Annots?.();
+    if (!annots) continue;
+    let arr;
+    try {
+      arr = annots.asArray();
+    } catch {
+      continue;
+    }
+    for (const ref of arr) {
+      let resolved;
       try {
-        const arr = annots.asArray();
-        for (const ref of arr) {
-          if (ref === wRef || ref?.toString() === wRef?.toString()) return i;
-        }
+        resolved = doc.context.lookup(ref);
       } catch {
-        /* skip */
+        continue;
       }
+      if (resolved === widgetDict) return i;
     }
   }
   return 0;
@@ -110,7 +121,10 @@ function inferFieldType(fieldName, mergeKey) {
 }
 
 function inferSigner(mergeKey, workflow, fieldName = '') {
-  const k = `${mergeKey} ${fieldName}`.toLowerCase();
+  // Join with "_" (not a space) so the (^|_) anchors also match the start of the
+  // bare field name when there is no merge key — otherwise "s_sig", "sup_sig" etc.
+  // never match and always fall through to the primary signer.
+  const k = `${mergeKey}_${fieldName}`.toLowerCase().replace(/^_+|_+$/g, '');
   if (
     /(^|_)(org|prov|provider|employer|supervisor|sup_sig|s_sig|d_s_sig|sig_s|sig_prov)($|_)/.test(k)
     || /^organisation/.test(k)
