@@ -76,6 +76,11 @@ function DocumentPreviewPages({ pdfBytes, positionedFields, values, onFieldChang
 
   useEffect(() => {
     let cancelled = false;
+    // Drop the previous document and force the render effect to re-run even when
+    // the next document has the same page count (otherwise its canvases keep the
+    // old page — or go blank — when the admin clicks Next).
+    pdfDocRef.current = null;
+    setPageCount(0);
     if (!pdfBytes) return undefined;
     const loadingTask = getDocument({ data: pdfBytes.slice(0) });
     loadingTask.promise
