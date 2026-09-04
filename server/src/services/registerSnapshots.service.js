@@ -107,6 +107,7 @@ export const REGISTER_CATALOG = [
   { sheetKey: 'Risk Assessment Register', title: 'Risk Assessments', source: 'participant_intake_clinical', defaultVisible: true, defaultEditable: true, key_column_index: 0 },
   { sheetKey: 'Participant Register', title: 'Participants', source: 'participants', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Plan end', status_column: 'Status' },
   { sheetKey: 'Staff Register', title: 'Staff', source: 'staff', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Last shift date', status_column: 'Status' },
+  { sheetKey: 'Staff Induction Register', title: 'Staff Induction', source: 'staff_onboarding', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Onboarding completed', status_column: 'Onboarding status' },
   { sheetKey: 'Complaints', title: 'Complaints', source: 'case_notes', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Contact date' },
   { sheetKey: 'Document Register', title: 'Documents', source: 'onedrive_document_register', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Date recorded' },
   { sheetKey: 'Feedback and complaints', title: 'Feedback', source: 'case_notes', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Contact date' },
@@ -475,6 +476,91 @@ function staffComplianceRows(organizationId) {
   });
 }
 
+const ONBOARDING_STATUS_LABEL = { draft: 'Draft', in_progress: 'In progress', complete: 'Complete' };
+
+/**
+ * One row per staff member, built entirely from what Nexus Core itself records as onboarding
+ * runs — the staff_onboarding row (started/current step/completed), sent/completed e-signature
+ * envelopes, and compliance documents on file. No item here can go missing for a new starter:
+ * every row is generated from live data the moment the staff record and its onboarding exist,
+ * not typed in by hand, so there is nothing to remember to add per person.
+ */
+function staffInductionRows(organizationId) {
+  const staffRows = db
+    .prepare(`SELECT id, name, role, created_at FROM staff WHERE org_id = ? ORDER BY lower(name)`)
+    .all(organizationId);
+
+  const onboardingByStaff = new Map(
+    db
+      .prepare(`SELECT * FROM staff_onboarding so JOIN staff s ON s.id = so.staff_id WHERE s.org_id = ?`)
+      .all(organizationId)
+      .map((r) => [r.staff_id, r])
+  );
+
+  const envelopeRows = db
+    .prepare(
+      `SELECT sse.staff_id, sse.display_name, sse.status, sse.sent_at, sse.completed_at
+       FROM staff_signature_envelopes sse
+       JOIN staff s ON s.id = sse.staff_id
+       WHERE s.org_id = ?`
+    )
+    .all(organizationId);
+  const envelopesByStaff = new Map();
+  for (const e of envelopeRows) {
+    if (!envelopesByStaff.has(e.staff_id)) envelopesByStaff.set(e.staff_id, []);
+    envelopesByStaff.get(e.staff_id).push(e);
+  }
+
+  const docRows = db
+    .prepare(
+      `SELECT scd.*
+       FROM staff_compliance_documents scd
+       JOIN staff s ON s.id = scd.staff_id
+       WHERE s.org_id = ?`
+    )
+    .all(organizationId);
+  const docsByStaff = new Map();
+  for (const doc of docRows) {
+    if (!docsByStaff.has(doc.staff_id)) docsByStaff.set(doc.staff_id, []);
+    docsByStaff.get(doc.staff_id).push(doc);
+  }
+
+  return staffRows.map((s) => {
+    const onboarding = onboardingByStaff.get(s.id);
+    const envelopes = (envelopesByStaff.get(s.id) || []).sort(
+      (a, b) => new Date(b.sent_at || 0).getTime() - new Date(a.sent_at || 0).getTime()
+    );
+    const latestSent = envelopes[0];
+    const completedEnvelopes = envelopes.filter((e) => e.status === 'completed');
+    const latestCompleted = completedEnvelopes.sort(
+      (a, b) => new Date(b.completed_at || 0).getTime() - new Date(a.completed_at || 0).getTime()
+    )[0];
+    const outstanding = envelopes.filter((e) => e.status !== 'completed').length;
+
+    const staffDocs = docsByStaff.get(s.id) || [];
+    const positionDesc = envelopes.some((e) => /position description/i.test(e.display_name || ''));
+    const screening = findLatestDoc(staffDocs, (t) => t.includes('police') || t.includes('screen'));
+    const wwcc = findLatestDoc(staffDocs, (t) => t.includes('wwcc') || t.includes('blue_card') || t.includes('yellow_card') || t.includes('working_with_children'));
+    const firstAid = findLatestDoc(staffDocs, (t) => t.includes('first_aid') || t.includes('firstaid'));
+
+    return [
+      s.name || '',
+      s.role || '',
+      fmtDate(onboarding?.started_at || s.created_at),
+      ONBOARDING_STATUS_LABEL[onboarding?.status] || (onboarding ? onboarding.status || '' : 'Not started'),
+      fmtDate(latestSent?.sent_at),
+      latestCompleted ? fmtDate(latestCompleted.completed_at) : outstanding > 0 ? 'Pending' : '',
+      outstanding ? String(outstanding) : envelopes.length ? '0' : '',
+      positionDesc ? 'On file' : '',
+      docDate(screening),
+      docDate(wwcc),
+      docDate(firstAid),
+      fmtDate(onboarding?.completed_at),
+      ''
+    ];
+  });
+}
+
 function auditIncidentRows(organizationId) {
   const rows = db
     .prepare(
@@ -776,6 +862,21 @@ export const REGISTER_UI_HEADERS = {
     'Status'
   ],
   'Staff Register': ['Name', 'Role', 'Start date', 'Onboarding status', 'Compliance status', 'Last shift date', 'Status'],
+  'Staff Induction Register': [
+    'Staff',
+    'Role',
+    'Onboarding started',
+    'Onboarding status',
+    'Documents last sent',
+    'Documents completed',
+    'Documents outstanding',
+    'Position description',
+    'NDIS Worker Screening / Police Check',
+    'Working With Children Check',
+    'First Aid',
+    'Onboarding completed',
+    'Notes'
+  ],
   Complaints: [
     '#',
     'Ref',
@@ -1030,6 +1131,7 @@ export function buildTemplateDataBySheet(organizationId) {
   const riskRegisterRows = applyOverridesForSheet(organizationId, 'Risk Assessment Register', riskAssessmentRows(organizationId));
   const participantRows = applyOverridesForSheet(organizationId, 'Participant Register', participantRegisterRows(organizationId));
   const staffRows = applyOverridesForSheet(organizationId, 'Staff Register', staffRegisterRows(organizationId, staffCompliance));
+  const staffInduction = applyOverridesForSheet(organizationId, 'Staff Induction Register', staffInductionRows(organizationId));
 
   const riskKeyPlaceholders = RISK_ASSESSMENT_FIELD_KEYS.map(() => '?').join(', ');
   const sigRiskRows = (() => {
@@ -1267,6 +1369,7 @@ export function buildTemplateDataBySheet(organizationId) {
     'Risk Assessment Register': riskRegisterRows,
     'Participant Register': participantRows,
     'Staff Register': staffRows,
+    'Staff Induction Register': staffInduction,
     Complaints: complaintsRows,
     'Document Register': docRows,
     'Feedback and complaints': feedbackRows,
