@@ -2562,6 +2562,22 @@ try {
   } catch (e) {
     console.warn('future-completed shift correction:', e.message);
   }
+
+  // Dynamic import avoids a circular load with this module (db → repair → ndisDay → db).
+  import('../services/shiftInvoiceLink.service.js')
+    .then(({ repairInvalidShiftInvoiceLinks }) => {
+      const repaired = repairInvalidShiftInvoiceLinks({
+        log: (msg, data) => {
+          if (data?.count > 0) console.log(`[migration] ${msg}`, data);
+        },
+      });
+      if (repaired.cleared > 0) {
+        console.log(`[migration] cleared ${repaired.cleared} stale shift invoice link(s) on startup`);
+      }
+    })
+    .catch((e) => {
+      console.warn('shift invoice link repair:', e.message);
+    });
 } catch (err) {
   console.warn('Migration error:', err.message);
 }

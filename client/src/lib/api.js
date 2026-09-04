@@ -890,6 +890,10 @@ export const shifts = {
     }),
   /** Remove empty, past-date duplicate shifts that have a noted counterpart (admin/delegate). */
   cleanupDuplicates: () => fetchApi('/shifts/cleanup-duplicates', { method: 'POST' }),
+  /** List shifts with stale/wrong invoice links (admin/delegate). */
+  invalidInvoiceLinks: () => fetchApi('/shifts/invalid-invoice-links'),
+  /** Clear stale billing_invoice_id on shifts (admin/delegate). */
+  repairInvoiceLinks: () => fetchApi('/shifts/repair-invoice-links', { method: 'POST' }),
   /** Block external shiftId from re-import (admin/delegate). */
   suppressShifterId: (shifterShiftId, nexusOrgId) =>
     fetchApi('/shifts/suppress-shifter-id', {

@@ -10,10 +10,11 @@ import {
   parseSupportDate,
   buildDateTime,
   findMatchingShift,
-  findShiftByShifterShiftId,
+  findShiftByShifterShiftIdForParticipant,
   findShiftByParticipantStaffAndStartTime,
   parseTimeToMinutes
 } from './progressNoteMatcher.js';
+import { canImportMergeIntoShift, repairInvalidShiftInvoiceLinks } from './shiftInvoiceLink.service.js';
 import { recordEvent } from './learningEvent.service.js';
 import { updateAggregatesForShift } from './featureStore.service.js';
 import { scheduleMirrorShiftToNexusSupabase } from './nexusPublicShiftsSync.service.js';
@@ -273,8 +274,8 @@ export function processShifts(shiftsArray, options = {}) {
 
         const expensesVal = Number.isFinite(expenses) ? expenses : 0;
         if (skipUnchanged && shiftId) {
-          const byShifter = findShiftByShifterShiftId(shiftId);
-          if (byShifter && byShifter.participant_id === participant.id && byShifter.staff_id === staff.id) {
+          const byShifter = findShiftByShifterShiftIdForParticipant(shiftId, participant.id, staff.id);
+          if (byShifter) {
             const byTime = findShiftByParticipantStaffAndStartTime(participant.id, staff.id, startDateTime);
             if (!byTime || byTime.id === byShifter.id) {
               const latestPn = db
@@ -313,7 +314,7 @@ export function processShifts(shiftsArray, options = {}) {
         // Prevent duplicate shifts: 1) same participant + staff + date + time (primary), 2) same import ID, 3) scheduled shift overlap.
         let matchingShift = findShiftByParticipantStaffAndStartTime(participant.id, staff.id, startDateTime);
         if (!matchingShift && shiftId) {
-          matchingShift = findShiftByShifterShiftId(shiftId);
+          matchingShift = findShiftByShifterShiftIdForParticipant(shiftId, participant.id, staff.id);
         }
         if (!matchingShift) {
           matchingShift = findMatchingShift({
@@ -324,6 +325,18 @@ export function processShifts(shiftsArray, options = {}) {
             endTime: finishTime,
             shiftId: shiftId || undefined
           });
+        }
+        if (matchingShift && !canImportMergeIntoShift(matchingShift, {
+          participantId: participant.id,
+          staffId: staff.id,
+          startDateTime,
+        })) {
+          log('Import would overwrite billed shift with different participant/day — creating new shift', {
+            shiftId,
+            existing_shift_id: matchingShift.id,
+            billing_invoice_id: matchingShift.billing_invoice_id,
+          });
+          matchingShift = null;
         }
         // Same client/day but a different slot (e.g. 08:00 day vs 18:00 evening) must stay separate.
         if (matchingShift) {
@@ -549,5 +562,17 @@ export function processShifts(shiftsArray, options = {}) {
     processed++;
   }
 
-  return { processed, matched, unmatched, skipped, unchanged };
+  const invoiceRepair = repairInvalidShiftInvoiceLinks({
+    orgId: orgId || null,
+    log: (msg, data) => log(msg, data),
+  });
+
+  return {
+    processed,
+    matched,
+    unmatched,
+    skipped,
+    unchanged,
+    invoice_links_cleared: invoiceRepair.cleared,
+  };
 }

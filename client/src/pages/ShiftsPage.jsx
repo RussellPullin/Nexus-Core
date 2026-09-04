@@ -81,6 +81,7 @@ export default function ShiftsPage() {
   const [duplicatesData, setDuplicatesData] = useState(null);
   const [duplicatesLoading, setDuplicatesLoading] = useState(false);
   const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
+  const [repairingInvoiceLinks, setRepairingInvoiceLinks] = useState(false);
   const [duplicatesStaffId, setDuplicatesStaffId] = useState('');
   const [appShiftsList, setAppShiftsList] = useState([]);
   const [showAppShifts, setShowAppShifts] = useState(true);
@@ -194,6 +195,25 @@ export default function ShiftsPage() {
       alert(e.message || 'Failed to clean up duplicates');
     } finally {
       setCleaningDuplicates(false);
+    }
+  };
+
+  const handleRepairInvoiceLinks = async () => {
+    if (!confirm('Clear invoice badges on shifts that are linked to the wrong invoice (wrong participant or date)? This does not change sent invoices — it only unlinks affected shifts so they can be billed again.')) return;
+    setRepairingInvoiceLinks(true);
+    try {
+      const r = await shifts.repairInvoiceLinks();
+      const n = r?.cleared ?? 0;
+      alert(
+        n === 0
+          ? 'No stale invoice links found.'
+          : `Cleared ${n} stale invoice link${n !== 1 ? 's' : ''}. Those shifts can be added to a new batch.`
+      );
+      if (n > 0) load({ silent: true });
+    } catch (e) {
+      alert(e.message || 'Failed to repair invoice links');
+    } finally {
+      setRepairingInvoiceLinks(false);
     }
   };
 
@@ -743,6 +763,9 @@ export default function ShiftsPage() {
           </button>
           <button type="button" className="btn btn-secondary" onClick={() => { setDuplicatesOpen(true); setDuplicatesData(null); }} title="Find shifts that were imported twice or same staff+client+time">
             Find duplicate shifts
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={handleRepairInvoiceLinks} disabled={repairingInvoiceLinks} title="Remove invoice badges from shifts linked to the wrong invoice (e.g. after Shifter re-import changed participant or date)">
+            {repairingInvoiceLinks ? 'Repairing…' : 'Fix stale invoice links'}
           </button>
           <button type="button" className="btn btn-secondary" onClick={handleCleanupDuplicates} disabled={cleaningDuplicates} title="Delete past, empty ($0 / no notes) shifts when a completed shift with notes exists for the same worker and client at the same time">
             {cleaningDuplicates ? 'Cleaning…' : 'Clean up empty duplicates'}

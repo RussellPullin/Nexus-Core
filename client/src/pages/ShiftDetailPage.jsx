@@ -483,11 +483,11 @@ export default function ShiftDetailPage() {
             </button>
             <h2 style={{ margin: '0.5rem 0 0', display: 'inline-block' }}>
               {shift.participant_name} – {formatDate(shift.start_time)}
-              {shift.billing_invoice_id && (
+              {shift.invoice_number && (
                 <span
                   className="badge badge-sent"
                   style={{ marginLeft: '0.5rem', fontSize: '0.8rem', verticalAlign: 'middle' }}
-                  title="Included on a billing invoice"
+                  title={`Included on invoice ${shift.invoice_number}`}
                 >
                   Invoiced
                 </span>
@@ -514,7 +514,7 @@ export default function ShiftDetailPage() {
             >
               {shift.roster_sent_at ? 'Sent ✓' : 'Send to staff'}
             </button>
-            {shift.billing_invoice_id && (
+            {shift.invoice_number && (
               <Link to="/financial" className="btn btn-primary">
                 View Invoice
               </Link>
@@ -856,10 +856,13 @@ export default function ShiftDetailPage() {
           <strong>Status:</strong><br />
           <span className={`badge badge-${shift.status}`}>{shift.status}</span>
         </p>
-        {shift.billing_invoice_id && (
+        {shift.invoice_number && (
           <p>
             <strong>Invoice:</strong><br />
             <span className="badge badge-sent">Invoiced</span>
+            <span style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.85rem' }}>
+              {shift.invoice_number}
+            </span>
           </p>
         )}
         {shiftReceipts.length > 0 && (
