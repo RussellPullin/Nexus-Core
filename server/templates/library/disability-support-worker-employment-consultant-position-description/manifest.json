@@ -8,7 +8,9 @@
   "template_file": "template.pdf",
   "placeholders": [
     "org.branding.logo_path",
-    "today_long"
+    "today_long",
+    "org.signatory.role",
+    "org.signatory.name"
   ],
   "packs": [
     "staff_onboarding"

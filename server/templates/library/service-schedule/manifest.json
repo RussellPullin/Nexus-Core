@@ -9,6 +9,8 @@
   "placeholders": [
     "org.branding.logo_path",
     "today_long",
+    "org.signatory.role",
+    "org.signatory.name",
     "org.legal_name",
     "org.abn",
     "org.name"

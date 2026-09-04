@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Import tokenised fillable PDF masters into the Nexus Core document library.
 
-Reads the Policy Product Build "Masters (licensed - no watermark)" set, turns
-visible ⟨ Provider Name ⟩ chips into AcroForm fields, writes
-server/templates/library/<slug>/{template.pdf,manifest.json}, and removes
-legacy DOCX/prebrand files from each slug folder.
+Reads the Policy Product Build "Masters (fillable - CRM)" set — these PDFs are
+already built with proper AcroForm fields: shared-name provider slots
+(PROVIDER_SHORT, ABN, EFFECTIVE_DATE, org_logo, …) that the CRM fills from an
+org's business details, plus per-recipient client/staff/signature fields. This
+script just copies each PDF to server/templates/library/<slug>/template.pdf,
+writes a manifest.json describing it, and removes legacy DOCX/prebrand files.
+
+It no longer stamps fields over ⟨ chip ⟩ text — that produced misaligned,
+duplicated widgets. The fields now come from the upstream build
+(_pipeline/build.py, profile "_fillable").
 """
 from __future__ import annotations
 
@@ -12,7 +18,6 @@ import json
 import re
 import shutil
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 import fitz
@@ -25,43 +30,18 @@ CATALOGUE_PATH = LIBRARY_OUT / "_catalogue.json"
 SOURCE_DIR = Path(
     "/Users/pristinelifestylesolutions/Library/CloudStorage"
     "/OneDrive-PristineLifestyleSolutions/Spring 2 health"
-    "/Policy Product Build/Masters (licensed - no watermark)"
+    "/Policy Product Build/Masters (fillable - CRM)"
 )
 CATEGORY_DIR = Path(
     "/Users/pristinelifestylesolutions/Library/CloudStorage"
     "/OneDrive-PristineLifestyleSolutions/Spring 2 health"
-    "/Policy Product Build/Masters (licensed - no watermark) (by category)"
+    "/Policy Product Build/Masters (fillable - CRM) (by category)"
 )
 
-CHIP_RE = re.compile(r"[\u27e8⟨]\s*([^⟩\u27e9]+?)\s*[\u27e9⟩]")
-MARKER_RE = re.compile(r"<<[a-z0-9_]+:[a-z]+(?::[^>]+)?>>", re.I)
-
-CHIP_TO_FIELD = {
-    "logo": "org_logo",
-    "provider name": "PROVIDER_NAME",
-    "provider short": "PROVIDER_SHORT",
-    "abn": "ABN",
-    "ndis reg no": "NDIS_REG_NO",
-    "ndis registration number": "NDIS_REG_NO",
-    "ndis registration number confirm": "NDIS_REG_NO",
-    "ndis registration number — confirm": "NDIS_REG_NO",
-    "phone": "PHONE",
-    "email": "EMAIL",
-    "complaints email": "COMPLAINTS_EMAIL",
-    "website": "WEBSITE",
-    "street address": "STREET_ADDRESS",
-    "postal address": "POSTAL_ADDRESS",
-    "governing body": "GOVERNING_BODY",
-    "kmp": "KMP",
-    "principal": "PRINCIPAL",
-    "doc owner": "DOC_OWNER",
-    "approved by": "APPROVED_BY",
-    "effective date": "EFFECTIVE_DATE",
-    "review date": "REVIEW_DATE",
-}
 
 FIELD_TO_TOKEN = {
     "org_logo": "org.branding.logo_path",
+    "logo": "org.branding.logo_path",
     "PROVIDER_NAME": "org.legal_name",
     "PROVIDER_SHORT": "org.name",
     "ABN": "org.abn",
@@ -117,12 +97,6 @@ def slugify(name: str) -> str:
 
 def display_name(filename: str) -> str:
     return re.sub(r"\.pdf$", "", filename, flags=re.I).replace("_", " ").strip()
-
-
-def normalize_chip(label: str) -> str:
-    text = re.sub(r"[—–\-]+", " ", label.lower())
-    text = re.sub(r"[^a-z0-9 ]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def classify_category(title: str) -> str:
@@ -185,105 +159,38 @@ def required_signer(pack: str, sig_count: int, category: str) -> str | None:
     return None
 
 
-def unique_field(base: str, seen: set[str]) -> str:
-    name = base
-    n = 2
-    while name in seen:
-        name = f"{base}_{n}"
-        n += 1
-    seen.add(name)
-    return name
-
-
-def existing_field_names(doc: fitz.Document) -> set[str]:
-    names = set()
-    for page in doc:
-        for w in page.widgets() or []:
-            if w.field_name:
-                names.add(w.field_name)
-    return names
-
-
 def is_sig_name(name: str) -> bool:
     n = (name or "").lower()
     return bool(re.search(r"(^|_)sig($|_)", n) or "signature" in n)
 
 
-def add_text_widget(page: fitz.Page, name: str, rect: fitz.Rect, fontsize: float = 8) -> None:
-    w = fitz.Widget()
-    w.field_type = fitz.PDF_WIDGET_TYPE_TEXT
-    w.field_name = name
-    w.text_fontsize = fontsize
-    w.fill_color = (1, 1, 1)
-    w.border_color = (0.78, 0.80, 0.82)
-    w.border_width = 0.3
-    w.rect = rect
-    page.add_widget(w)
+def import_pdf(src: Path, dest: Path) -> dict:
+    """Copy a fillable master into the library and read back its field inventory.
 
-
-def tokenise_pdf(src: Path, dest: Path) -> dict:
-    doc = fitz.open(src)
-    seen = existing_field_names(doc)
-    added_fields: list[str] = []
-    chip_counts = defaultdict(int)
-
-    for page in doc:
-        text = page.get_text() or ""
-        # Wipe leftover <<name:type>> marker glyphs that fieldify painted over.
-        for token in set(MARKER_RE.findall(text)):
-            for r in page.search_for(token) or []:
-                page.draw_rect(r + (-0.4, -0.4, 0.4, 0.4), color=None, fill=(1, 1, 1), overlay=True)
-
-        chips = []
-        for m in CHIP_RE.finditer(text):
-            raw = m.group(0)
-            label = normalize_chip(m.group(1))
-            if not label:
-                continue
-            chips.append((raw, label))
-        # De-dupe exact chip strings per page so search_for runs once each.
-        unique_raw = {}
-        for raw, label in chips:
-            unique_raw.setdefault(raw, label)
-
-        for raw, label in unique_raw.items():
-            field_base = CHIP_TO_FIELD.get(label)
-            if not field_base:
-                # Still capture unknown chips so they can be mapped later.
-                field_base = re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_").upper() or "CHIP"
-            hits = page.search_for(raw) or []
-            for r in hits:
-                name = unique_field(field_base, seen)
-                pad = 1.0
-                if field_base == "org_logo":
-                    rect = fitz.Rect(max(20, r.x0 - 8), max(20, r.y0 - 10), r.x1 + 90, r.y1 + 18)
-                else:
-                    rect = fitz.Rect(r.x0 - pad, r.y0 - 1, max(r.x1 + 4, r.x0 + 36), r.y1 + 1)
-                page.draw_rect(r + (-0.5, -0.5, 0.5, 0.5), color=None, fill=(1, 1, 1), overlay=True)
-                add_text_widget(page, name, rect, fontsize=7 if field_base != "org_logo" else 1)
-                added_fields.append(name)
-                chip_counts[field_base] += 1
-
+    The PDF already carries every AcroForm field it needs (shared-name provider
+    slots, per-recipient client/staff fields, signature widgets) from the
+    upstream build, so nothing is added or removed here."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".tmp.pdf")
-    doc.save(tmp, garbage=4, deflate=True)
-    doc.close()
-    shutil.move(tmp, dest)
+    shutil.copyfile(src, dest)
 
-    # Re-open to count signature widgets on the written file.
-    saved = fitz.open(dest)
+    doc = fitz.open(dest)
+    field_names: list[str] = []
+    provider_fields: list[str] = []
     sig_count = 0
-    field_names = []
-    for page in saved:
+    for page in doc:
         for w in page.widgets() or []:
-            if w.field_name:
-                field_names.append(w.field_name)
-                if is_sig_name(w.field_name):
-                    sig_count += 1
-    saved.close()
+            name = w.field_name
+            if not name:
+                continue
+            field_names.append(name)
+            if is_sig_name(name):
+                sig_count += 1
+            base = re.sub(r"_\d+$", "", name)
+            if base in FIELD_TO_TOKEN and base not in provider_fields:
+                provider_fields.append(base)
+    doc.close()
     return {
-        "added_chip_fields": added_fields,
-        "chip_counts": dict(chip_counts),
+        "provider_fields": provider_fields,
         "signature_count": sig_count,
         "field_names": field_names,
     }
@@ -326,8 +233,7 @@ def build_manifest(slug: str, filename: str, folder: str, meta: dict, previous: 
 
     sig_count = int(meta.get("signature_count") or 0)
     placeholders = []
-    for field in meta.get("added_chip_fields") or []:
-        base = re.sub(r"_\d+$", "", field)
+    for base in meta.get("provider_fields") or []:
         token = FIELD_TO_TOKEN.get(base)
         if token and token not in placeholders:
             placeholders.append(token)
@@ -394,7 +300,7 @@ def main() -> int:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_pdf = dest_dir / "template.pdf"
         print(f"  {pdf.name} -> {slug}/")
-        meta = tokenise_pdf(pdf, dest_pdf)
+        meta = import_pdf(pdf, dest_pdf)
         folder = cat_map.get(slug, "")
         manifest = build_manifest(slug, pdf.name, folder, meta, previous.get(slug))
         (dest_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -402,7 +308,7 @@ def main() -> int:
         kept_slugs.add(slug)
         catalogue.append(manifest)
         stats["imported"] += 1
-        stats["chips"] += len(meta.get("added_chip_fields") or [])
+        stats["chips"] += len(meta.get("provider_fields") or [])
         stats["signatures"] += manifest["signature_count"]
 
     # Remove old library slugs that are no longer in the master set.
@@ -417,7 +323,7 @@ def main() -> int:
     CATALOGUE_PATH.write_text(json.dumps(catalogue, indent=2) + "\n")
     print(
         f"\nImported {stats['imported']} masters, "
-        f"{stats['chips']} provider-chip fields, "
+        f"{stats['chips']} provider fields wired, "
         f"{stats['signatures']} signature widgets."
     )
     return 0

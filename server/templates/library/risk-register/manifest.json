@@ -9,8 +9,9 @@
   "placeholders": [
     "org.branding.logo_path",
     "today_long",
-    "org.name",
-    "org.signatory.name"
+    "org.signatory.role",
+    "org.signatory.name",
+    "org.name"
   ],
   "packs": [
     "compliance_register"

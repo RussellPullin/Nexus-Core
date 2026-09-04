@@ -9,10 +9,11 @@
   "placeholders": [
     "org.branding.logo_path",
     "today_long",
+    "org.signatory.role",
+    "org.signatory.name",
     "org.name",
     "org.legal_name",
-    "org.abn",
-    "org.signatory.name"
+    "org.abn"
   ],
   "packs": [
     "policy_library"

@@ -467,8 +467,23 @@ export async function renderLibraryDocument({ masterId, orgId, participant = nul
     }
     case 'pdf-acroform': {
       let buffer = readFileSync(master.template_file_path);
+      // The tokenised masters carry their own document-control date fields
+      // (EFFECTIVE_DATE / REVIEW_DATE). Effective = adoption date (today); review =
+      // effective + the master's renewal period. Set explicitly so they don't both
+      // fall back to today via ACROFORM_TOKEN_ALIASES.
+      const longDate = (d) => d.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+      const effectiveOn = new Date();
+      const renewalDays = Number.isFinite(master.renewal_days) && master.renewal_days > 0
+        ? master.renewal_days
+        : 365;
+      const reviewBy = new Date(effectiveOn.getTime() + renewalDays * 24 * 60 * 60 * 1000);
+      const acroTokens = {
+        ...tokens,
+        EFFECTIVE_DATE: longDate(effectiveOn),
+        REVIEW_DATE: longDate(reviewBy)
+      };
       try {
-        buffer = await fillAcroFormWithTokens(buffer, tokens, {
+        buffer = await fillAcroFormWithTokens(buffer, acroTokens, {
           flatten: extra?.flatten === true,
           logoBytes: readLogoBytes(orgId)
         });
@@ -481,7 +496,7 @@ export async function renderLibraryDocument({ masterId, orgId, participant = nul
         mime: 'application/pdf',
         suggestedFilename: `${baseName}.pdf`,
         needsAcroFormFill: false,
-        tokens
+        tokens: acroTokens
       };
     }
     default:
