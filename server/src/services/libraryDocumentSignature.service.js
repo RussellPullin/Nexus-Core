@@ -51,6 +51,21 @@ export function getProviderSignatureMode(orgId) {
 }
 
 /**
+ * Staff onboarding always bundles every selected signature form into one envelope so the
+ * worker gets a single email and one signature that applies to all documents. Participant
+ * onboarding keeps the org's configured hybrid/packet/separate setting.
+ */
+export function resolveLibrarySignatureMode(workflow, signatureMode) {
+  if (workflow === 'staff_onboarding') return 'packet';
+  return signatureMode || 'hybrid';
+}
+
+function publicSigningUrl(rawToken) {
+  const baseUrl = (process.env.FRONTEND_BASE_URL || process.env.BASE_URL || 'http://localhost:5174').replace(/\/$/, '');
+  return `${baseUrl}/sign/${rawToken}`;
+}
+
+/**
  * Group library form masters into signature packets (hybrid / packet / separate).
  * @param {object[]} formMasters
  * @param {'hybrid'|'packet'|'separate'} signatureMode
@@ -185,13 +200,25 @@ function resolvePrimaryRecipient({ workflow, staff, participant, signerTypeOverr
  * form_templates pipeline, so the client can render the same "fill your part" wizard step.
  * @param {{ masterId: string, orgId: string, workflow: string }} params
  */
-export async function getLibraryMasterOrgFields({ masterId, orgId, workflow }) {
+export async function getLibraryMasterOrgFields({ masterId, orgId, workflow, staff = null, participant = null }) {
   const master = listOnboardingLibraryMasters(orgId, workflow).find((m) => m.id === masterId);
   if (!master) return [];
-  const fromManifest = parseManifestSigningLayout(master.manifest);
-  if (!fromManifest) return [];
-  const layout = ensureMultiSignerLayout(fromManifest, master, workflow);
-  return layout.fields.filter((f) => f.signer === 'org');
+  try {
+    const att = await renderLibraryMasterAttachment(master, orgId, { staff, participant, extra: {} });
+    if (att?.content && att.contentType === 'application/pdf') {
+      const layout = await resolveSigningLayout(master, att.content, workflow);
+      return layout.fields.filter((f) => f.signer === 'org');
+    }
+  } catch (err) {
+    console.warn('[getLibraryMasterOrgFields] layout from PDF failed:', err?.message);
+  }
+  const fromManifest = parseManifestSigningLayout(master.manifest) || {
+    page_width: 595,
+    page_height: 842,
+    page_count: 1,
+    fields: []
+  };
+  return ensureMultiSignerLayout(fromManifest, master, workflow).fields.filter((f) => f.signer === 'org');
 }
 
 async function prepareMasterDocument(master, orgId, workflow, { staff, participant, adminFieldValuesByMasterId = {}, recipientRole = null }) {
@@ -240,7 +267,7 @@ async function prepareMasterDocument(master, orgId, workflow, { staff, participa
   };
 }
 
-async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, participant, orgName, adminFieldValuesByMasterId = {} }) {
+async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, participant, orgName, adminFieldValuesByMasterId = {}, notify = true }) {
   // Any master in this packet can declare a `signer_type` admin_field — if the sender set one,
   // it decides who the whole packet is sent to (a guardian signing on your behalf signs
   // everything in that send, not a mix).
@@ -261,30 +288,30 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
     );
   }
 
-  let signers = prepared.find((p) => p.signers?.length)?.signers || null;
-  if (!signers) {
-    signers = [{ name: recipient.name, email: recipient.email }];
-  } else {
-    const orgEmail = (signers[0]?.email || '').trim();
-    const primaryEmail = (signers[1]?.email || recipient.email || '').trim();
-    if (!orgEmail) {
-      const err = new Error('Set the default signatory email in Settings → Business before sending multi-signer forms.');
-      err.code = 'ORG_SIGNATORY_MISSING';
-      throw err;
+  // Organisation sections are completed and signed in Nexus Core before send
+  // (prepareMasterDocument bakes and strips org fields). The remaining signer is
+  // always the worker / participant — never a second email to the admin.
+  let signers = [{ name: recipient.name, email: recipient.email, role: workflow === 'staff_onboarding' ? 'Staff' : 'Participant' }];
+  if (workflow !== 'staff_onboarding') {
+    const preparedSigners = prepared.find((p) => p.signers?.length)?.signers || null;
+    if (preparedSigners?.length) {
+      const orgEmail = (preparedSigners[0]?.email || '').trim();
+      const primaryEmail = (preparedSigners[1]?.email || recipient.email || '').trim();
+      if (!orgEmail) {
+        const err = new Error('Set the default signatory email in Settings → Business before sending multi-signer forms.');
+        err.code = 'ORG_SIGNATORY_MISSING';
+        throw err;
+      }
+      if (!primaryEmail) {
+        const err = new Error('Add a participant (or guardian) email before sending for signature.');
+        err.code = 'SIGNER_EMAIL_MISSING';
+        throw err;
+      }
+      signers = [
+        { ...preparedSigners[0], email: orgEmail },
+        { ...preparedSigners[1], email: primaryEmail, name: preparedSigners[1]?.name || recipient.name }
+      ];
     }
-    if (!primaryEmail) {
-      const err = new Error(
-        workflow === 'staff_onboarding'
-          ? 'Staff member has no email address for signature.'
-          : 'Add a participant (or guardian) email before sending for signature.'
-      );
-      err.code = 'SIGNER_EMAIL_MISSING';
-      throw err;
-    }
-    signers = [
-      { ...signers[0], email: orgEmail },
-      { ...signers[1], email: primaryEmail, name: signers[1]?.name || recipient.name }
-    ];
   }
 
   if (!signers[0]?.email?.trim()) {
@@ -314,9 +341,12 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
       filename: p.filename,
       formFields: p.formFields
     })),
-    envelopeId
+    envelopeId,
+    notify
   });
   const externalEnvelopeId = sendResult?.envelopeId || envelopeId;
+  const workerSigner = (sendResult?.signers || []).find((s) => s.raw_token) || null;
+  const signUrl = workerSigner?.raw_token ? publicSigningUrl(workerSigner.raw_token) : null;
 
   // Staff onboarding envelopes never get a signature_envelopes row (see nativeSignature.service.js's
   // comment), so track it here instead — this is what makes it visible on Staff Profile.
@@ -327,18 +357,22 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
     ).run(uuidv4(), envelopeId, staff.id, orgId, docNames);
   }
 
-  return prepared.map((p) => ({
-    master_id: p.master.id,
-    envelope_id: envelopeId,
-    external_envelope_id: externalEnvelopeId,
-    status: 'sent',
-    display_name: p.master.display_name || p.master.slug
-  }));
+  return {
+    signatureRequests: prepared.map((p) => ({
+      master_id: p.master.id,
+      envelope_id: envelopeId,
+      external_envelope_id: externalEnvelopeId,
+      status: 'sent',
+      display_name: p.master.display_name || p.master.slug
+    })),
+    sign_url: signUrl,
+    envelope_id: envelopeId
+  };
 }
 
 /**
  * Send library form masters via native Nexus Core e-signature.
- * @returns {Promise<Array<{ master_id: string, envelope_id: string, external_envelope_id: string, status: string, display_name: string }>>}
+ * @returns {Promise<{ signatureRequests: Array<{ master_id: string, envelope_id: string, external_envelope_id: string, status: string, display_name: string }>, sign_url: string|null, envelope_id: string|null }>}
  */
 export async function sendLibraryMastersForSignature({
   orgId,
@@ -348,18 +382,31 @@ export async function sendLibraryMastersForSignature({
   participant = null,
   signatureMode = 'hybrid',
   orgName = null,
-  adminFieldValuesByMasterId = {}
+  adminFieldValuesByMasterId = {},
+  notify = true
 }) {
-  if (!formMasters?.length) return [];
+  if (!formMasters?.length) return { signatureRequests: [], sign_url: null, envelope_id: null };
   assertNativeSignatureReady(orgId);
 
-  const packets = computeLibrarySignaturePackets(formMasters, signatureMode);
+  const packets = computeLibrarySignaturePackets(formMasters, resolveLibrarySignatureMode(workflow, signatureMode));
   const signatureRequests = [];
+  let sign_url = null;
+  let envelope_id = null;
   for (const packet of packets) {
-    const results = await sendSignaturePacket(orgId, workflow, packet, { staff, participant, orgName, adminFieldValuesByMasterId });
-    signatureRequests.push(...results);
+    const result = await sendSignaturePacket(orgId, workflow, packet, {
+      staff,
+      participant,
+      orgName,
+      adminFieldValuesByMasterId,
+      notify
+    });
+    signatureRequests.push(...result.signatureRequests);
+    if (!sign_url && result.sign_url) {
+      sign_url = result.sign_url;
+      envelope_id = result.envelope_id;
+    }
   }
-  return signatureRequests;
+  return { signatureRequests, sign_url, envelope_id };
 }
 
 export { splitOnboardingMasters };

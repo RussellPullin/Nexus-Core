@@ -167,6 +167,7 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
   const [error, setError] = useState('');
   const [signingField, setSigningField] = useState(null);
   const signatureCanvasRef = useRef(null);
+  const lastSignatureRef = useRef(null);
 
   const loadPreview = useCallback(
     async (fieldValues) => {
@@ -190,6 +191,7 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
     if (!doc) return;
     let cancelled = false;
     setPdfBytes(null);
+    setOrgFields([]);
     api
       .orgFields(recipientId, doc.id)
       .then((res) => {
@@ -205,15 +207,52 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc?.id]);
 
+  useEffect(() => {
+    if (!doc || !orgFields.length) return;
+    if (!lastSignatureRef.current) {
+      for (const perDoc of Object.values(values || {})) {
+        for (const val of Object.values(perDoc || {})) {
+          if (typeof val === 'string' && val.startsWith('data:image')) {
+            lastSignatureRef.current = val;
+          }
+        }
+      }
+    }
+    const sig = lastSignatureRef.current;
+    if (!sig) return;
+    for (const f of orgFields) {
+      if (f.type === 'signature' && !String((values[doc.id] || {})[f.merge_key] || '').trim()) {
+        onChange(doc.id, f.merge_key, sig);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id, orgFields]);
+
   if (!doc) return null;
 
   const positionedKeys = new Set(orgFields.map((f) => f.merge_key));
-  const plainFields = (doc.admin_fields || []).filter((f) => !positionedKeys.has(f.key));
-  const positionedAdminFields = orgFields.filter((f) => (doc.admin_fields || []).some((af) => af.key === f.merge_key));
+  const plainFields = (doc.admin_fields || []).filter((f) => !positionedKeys.has(f.key) && f.type !== 'signature');
+  const unpositionedSignatures = (doc.admin_fields || []).filter((f) => f.type === 'signature' && !positionedKeys.has(f.key));
+  const needsFallbackOrgSig =
+    Boolean(staffId) &&
+    Number(doc.signature_count) >= 2 &&
+    !orgFields.some((f) => f.type === 'signature') &&
+    !unpositionedSignatures.some((f) => f.key === 'org_signature');
+  if (needsFallbackOrgSig) {
+    unpositionedSignatures.push({
+      key: 'org_signature',
+      merge_key: 'org_signature',
+      label: 'Organisation signature',
+      type: 'signature',
+      required: true
+    });
+  }
+  const positionedAdminFields = orgFields;
 
   const allRequiredKeys = [
     ...plainFields.filter((f) => f.required).map((f) => f.key),
-    ...positionedAdminFields.filter((f) => f.required).map((f) => f.merge_key)
+    ...positionedAdminFields.filter((f) => f.required).map((f) => f.merge_key),
+    ...unpositionedSignatures.filter((f) => f.required).map((f) => f.key)
   ];
   const missingRequired = allRequiredKeys.some((key) => !String(docValues[key] || '').trim());
 
@@ -232,19 +271,22 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
   const saveSignature = () => {
     const dataUrl = signatureCanvasRef.current?.getDataUrl();
     if (!dataUrl) return;
-    onChange(doc.id, signingField.merge_key, dataUrl);
+    lastSignatureRef.current = dataUrl;
+    onChange(doc.id, signingField.merge_key || signingField.key, dataUrl);
     setSigningField(null);
   };
 
   return (
     <div>
       <p className="forms-muted" style={{ marginTop: 0 }}>
-        Prepare document {index + 1} of {docs.length} before it's sent to the {recipientLabel} — fill in your part and
-        sign directly on the document below.
+        Prepare document {index + 1} of {docs.length} in Nexus Core — complete the organisation sections and sign below.
+        {index === docs.length - 1
+          ? ` Then one email is sent to the ${recipientLabel} to complete and sign${docs.length > 1 ? ' (one signature covers every form)' : ''}.`
+          : ` Your signature is reused on the remaining documents.`}
       </p>
 
       <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        {plainFields.length > 0 ? (
+        {plainFields.length > 0 || unpositionedSignatures.length > 0 ? (
           <div style={{ flex: '0 0 260px', border: '1px solid #e2e8f0', borderRadius: 6, padding: '0.75rem 1rem' }}>
             <h4 style={{ marginTop: 0 }}>{doc.display_name}</h4>
             {plainFields.map((f) => (
@@ -252,6 +294,19 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
                 {f.label}{f.required ? ' *' : ''}
                 <AdminFieldInput field={f} value={docValues[f.key]} onChange={(v) => handlePlainChange(f.key, v)} />
               </label>
+            ))}
+            {unpositionedSignatures.map((f) => (
+              <div key={f.key} style={{ marginBottom: '0.5rem' }}>
+                <div className="forms-label">{f.label || 'Organisation signature'}{f.required ? ' *' : ''}</div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => openSignModal(f)}
+                  style={{ width: '100%' }}
+                >
+                  {docValues[f.key] ? 'Update signature' : 'Click to sign'}
+                </button>
+              </div>
             ))}
             <button
               type="button"

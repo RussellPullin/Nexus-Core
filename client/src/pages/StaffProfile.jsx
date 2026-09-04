@@ -393,11 +393,11 @@ export default function StaffProfile() {
       const sigCount = result?.signature_request_count ?? result?.signature_requests?.length ?? 0;
       let message;
       if (policyCount > 0 && sigCount > 0) {
-        message = `Email sent with ${policyCount} policy PDF${policyCount === 1 ? '' : 's'}. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Nexus Core.`;
+        message = `One email sent with ${policyCount} policy PDF${policyCount === 1 ? '' : 's'} and ${sigCount} form${sigCount === 1 ? '' : 's'} to sign (one signature covers all forms).`;
       } else if (policyCount > 0) {
         message = `Onboarding email sent with ${policyCount} policy PDF attachment${policyCount === 1 ? '' : 's'}.`;
       } else if (sigCount > 0) {
-        message = `Onboarding email sent. ${sigCount} form${sigCount === 1 ? ' was' : 's were'} sent for signature via Nexus Core.`;
+        message = `One onboarding email sent with ${sigCount} form${sigCount === 1 ? '' : 's'} to sign${sigCount > 1 ? ' (one signature covers all of them)' : ''}.`;
       } else {
         message = 'Onboarding email sent (form link only, no attachments).';
       }

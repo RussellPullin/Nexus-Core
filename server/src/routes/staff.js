@@ -1035,7 +1035,13 @@ router.get('/:id/onboarding-org-fields/:masterId', requireAdminOrDelegate, async
     if (!s) return res.status(404).json({ error: 'Staff not found' });
     const master = listOnboardingLibraryMasters(orgId, 'staff_onboarding').find((m) => m.id === req.params.masterId);
     if (!master) return res.status(404).json({ error: 'Document not found' });
-    const fields = await getLibraryMasterOrgFields({ masterId: master.id, orgId, workflow: 'staff_onboarding' });
+    const staffFull = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
+    const fields = await getLibraryMasterOrgFields({
+      masterId: master.id,
+      orgId,
+      workflow: 'staff_onboarding',
+      staff: staffFull
+    });
     res.json({ fields });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1150,6 +1156,8 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
 
     let allAttachments = [];
     let signatureRequests = [];
+    let signUrl = null;
+    let signatureEnvelopeId = null;
     try {
       const splitSend = await prepareSplitOnboardingSend({
         orgId: profile?.organisation_id,
@@ -1159,10 +1167,14 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
         staff: staffFull,
         includeExtraPdfs,
         orgName,
-        adminFieldValuesByMasterId
+        adminFieldValuesByMasterId,
+        signatureMode: 'packet',
+        notifySigners: false
       });
-      allAttachments = splitSend.policyAttachments;
-      signatureRequests = splitSend.signatureRequests;
+      allAttachments = splitSend.policyAttachments || [];
+      signatureRequests = splitSend.signatureRequests || [];
+      signUrl = splitSend.sign_url || null;
+      signatureEnvelopeId = splitSend.envelope_id || null;
 
       if (
         !allAttachments.length &&
@@ -1183,7 +1195,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
       if (err.code === 'ESIGNATURE_NOT_ENABLED' || err.code === 'DOCUSEAL_NOT_ENABLED') {
         return res.status(400).json({ error: err.message, code: err.code });
       }
-      if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING') {
+      if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING' || err.code === 'ORG_FIELDS_REQUIRED') {
         return res.status(400).json({ error: err.message, code: err.code });
       }
       console.warn('[start-onboarding] onboarding send failed:', err?.message);
@@ -1217,8 +1229,12 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
       console.warn('[start-onboarding] contract auto-attach skipped:', err?.message);
     }
 
-    if (signatureRequests.length) {
-      text += `\n\n${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you separately for e-signature via Nexus Core. Check your inbox for signing requests.\n`;
+    if (signUrl) {
+      text +=
+        `\n\nPlease review and sign your onboarding document${signatureRequests.length === 1 ? '' : 's'}` +
+        `${signatureRequests.length > 1 ? ' — one signature signs all of them' : ''}:\n${signUrl}\n`;
+    } else if (signatureRequests.length) {
+      text += `\n\n${signatureRequests.length} form${signatureRequests.length === 1 ? ' has' : 's have'} been sent to you for e-signature via Nexus Core.\n`;
     }
     if (allAttachments.length) {
       text += `\nPolicy and information documents are attached to this email.\n`;
@@ -1229,6 +1245,13 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
       content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content
     }));
     await sendEmailViaRelay(userId, s.email, subject, text, null, attachmentsForEmail, orgName);
+
+    if (signatureEnvelopeId) {
+      db.prepare(
+        `UPDATE signature_envelope_signers SET sent_at = datetime('now'), updated_at = datetime('now')
+         WHERE envelope_id = ? AND sent_at IS NULL`
+      ).run(signatureEnvelopeId);
+    }
 
     // Best-effort Shifter access enablement — never blocks the send. Skips quietly if the
     // org has no linked Shifter org or the email doesn't match a Shifter worker yet (they
@@ -1253,6 +1276,7 @@ router.post('/:id/start-onboarding', requireAdminOrDelegate, async (req, res) =>
       contract_attached: contractAttached,
       signature_requests: signatureRequests,
       signature_request_count: signatureRequests.length,
+      sign_url: signUrl,
       shifter_status: shifterStatus,
       resent: alreadyComplete
     });

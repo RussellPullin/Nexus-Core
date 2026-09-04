@@ -92,9 +92,10 @@ export async function sendOnboardingSignatureForms({
   participant = null,
   signatureMode = null,
   orgName = null,
-  adminFieldValuesByMasterId = {}
+  adminFieldValuesByMasterId = {},
+  notify = true
 }) {
-  if (!formMasters?.length) return [];
+  if (!formMasters?.length) return { signatureRequests: [], sign_url: null, envelope_id: null };
   assertNativeSignatureReady(orgId);
   const mode = signatureMode || getProviderSignatureMode(orgId);
   return sendLibraryMastersForSignature({
@@ -105,7 +106,8 @@ export async function sendOnboardingSignatureForms({
     participant,
     signatureMode: mode,
     orgName,
-    adminFieldValuesByMasterId
+    adminFieldValuesByMasterId,
+    notify
   });
 }
 
@@ -123,7 +125,8 @@ export async function prepareSplitOnboardingSend({
   includeExtraPdfs = true,
   signatureMode = null,
   orgName = null,
-  adminFieldValuesByMasterId = {}
+  adminFieldValuesByMasterId = {},
+  notifySigners = true
 }) {
   const split = resolveOnboardingSendSplit(orgId, workflow, masterIds);
   if (split.formMasters.length) {
@@ -138,7 +141,7 @@ export async function prepareSplitOnboardingSend({
     includeExtraPdfs
   });
 
-  const signatureRequests = await sendOnboardingSignatureForms({
+  const sent = await sendOnboardingSignatureForms({
     orgId,
     workflow,
     formMasters: split.formMasters,
@@ -146,14 +149,17 @@ export async function prepareSplitOnboardingSend({
     participant,
     signatureMode,
     orgName,
-    adminFieldValuesByMasterId: withWorkerDeclarationsPolicyList(split, adminFieldValuesByMasterId, providerProfileId, includeExtraPdfs)
+    adminFieldValuesByMasterId: withWorkerDeclarationsPolicyList(split, adminFieldValuesByMasterId, providerProfileId, includeExtraPdfs),
+    notify: notifySigners
   });
 
   return {
     ...split,
     policyAttachments,
-    signatureRequests,
+    signatureRequests: sent.signatureRequests,
+    sign_url: sent.sign_url,
+    envelope_id: sent.envelope_id,
     attachment_count: policyAttachments.length,
-    signature_request_count: signatureRequests.length
+    signature_request_count: sent.signatureRequests.length
   };
 }

@@ -119,7 +119,8 @@ export function listOnboardingPackDocumentsForSelection(orgId, workflow, { parti
       participant_service_types: master.manifest.participant_service_types || ['all'],
       staff_roles: master.manifest.staff_roles || ['all'],
       suggested: manifestMatchesOnboardingContext(master.manifest, ctx),
-      admin_fields: adminFields
+      admin_fields: adminFields,
+      needs_admin_prepare: adminFields.length > 0 || signatureCount >= 2
     };
   });
 }

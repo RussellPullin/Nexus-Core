@@ -232,7 +232,14 @@ export default function OnboardingDocumentSelectPanel({
       );
       if (!proceed) return;
     }
-    const docsNeedingInput = documents.filter((d) => selectedIds.has(d.id) && d.admin_fields?.length);
+    const docsNeedingInput = documents.filter((d) => {
+      if (!selectedIds.has(d.id)) return false;
+      if (d.admin_fields?.length) return true;
+      // Staff multi-signer forms have organisation sections to complete and sign in Nexus Core
+      // before the worker is emailed — even when the manifest has no admin_fields array.
+      if (!isParticipant && (d.needs_admin_prepare || Number(d.signature_count) >= 2)) return true;
+      return false;
+    });
     if (docsNeedingInput.length) {
       // Pre-fill from each field's server-supplied default (e.g. the org's signatory name on
       // file) so the sender isn't retyping it every time — still editable before sending.
@@ -324,8 +331,10 @@ export default function OnboardingDocumentSelectPanel({
       <p className="forms-muted" style={{ marginTop: 0 }}>
         Choose {isParticipant ? 'service type' : 'role'} and which documents to send for{' '}
         <strong>{recipientName || recipientEmail}</strong>
-        {recipientEmail ? ` (${recipientEmail})` : ''}. Forms requiring signature are sent via Nexus Core e-signature;
-        policies and information documents are attached as PDFs in the email.
+        {recipientEmail ? ` (${recipientEmail})` : ''}.
+        {isParticipant
+          ? ' Forms requiring signature are sent via Nexus Core e-signature; policies and information documents are attached as PDFs in the email.'
+          : ' After you fill and sign the organisation sections in Nexus Core, the staff member receives one email to complete and sign — one signature covers every selected form. Policies are attached as PDFs.'}
       </p>
 
       <div style={{ marginBottom: '1rem' }}>
@@ -400,7 +409,7 @@ export default function OnboardingDocumentSelectPanel({
                     Forms are sent via Nexus Core for e-signature — not as PDF attachments.
                     {isParticipant
                       ? ' Participant or guardian receives a separate signing request.'
-                      : ' The staff member receives a separate signing request.'}
+                      : ' The staff member receives one signing link for all selected forms.'}
                   </p>
                   <DocumentChecklist
                     docs={signatureDocs}
