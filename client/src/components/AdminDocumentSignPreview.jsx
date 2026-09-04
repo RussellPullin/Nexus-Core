@@ -166,6 +166,7 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
   const recipientId = participantId || staffId;
   const recipientLabel = participantId ? 'participant' : 'staff member';
 
+  const rootRef = useRef(null);
   const [orgFields, setOrgFields] = useState([]);
   const [pdfBytes, setPdfBytes] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -195,6 +196,10 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
   useEffect(() => {
     if (!doc) return;
     let cancelled = false;
+    // Moving to the next document — scroll back to the top so the preparer can
+    // see which document they are about to complete and sign.
+    rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
     setPdfBytes(null);
     setOrgFields([]);
     api
@@ -282,7 +287,7 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
   };
 
   return (
-    <div>
+    <div ref={rootRef}>
       <p className="forms-muted" style={{ marginTop: 0 }}>
         Prepare document {index + 1} of {docs.length} in Nexus Core — complete the organisation sections and sign below.
         {index === docs.length - 1

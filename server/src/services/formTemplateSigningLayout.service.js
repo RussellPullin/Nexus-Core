@@ -120,7 +120,22 @@ function inferFieldType(fieldName, mergeKey) {
   return 'text';
 }
 
+// Employer-provided role details (top of a position description / letter of
+// engagement / contract) — the organisation completes these when preparing the
+// document, not the incoming worker.
+const EMPLOYER_DETAIL_FIELDS = new Set([
+  'employment_type', 'employment_status', 'reports_to', 'pd_date',
+  'award', 'classification', 'work_location', 'position_location'
+]);
+
 function inferSigner(mergeKey, workflow, fieldName = '') {
+  const name = String(fieldName || '').toLowerCase().trim();
+  if (
+    EMPLOYER_DETAIL_FIELDS.has(name)
+    || (workflow === 'staff_onboarding' && /^(location|start_date|hours|pay_rate|salary)$/.test(name))
+  ) {
+    return 'org';
+  }
   // Join with "_" (not a space) so the (^|_) anchors also match the start of the
   // bare field name when there is no merge key — otherwise "s_sig", "sup_sig" etc.
   // never match and always fall through to the primary signer.
