@@ -73,6 +73,10 @@ CATEGORY_RULES = [
 ]
 
 PACK_NAME_RULES = [
+    # "Conflict of Interest Declaration" (not "Worker Conflict of Interest ...") is
+    # the client declaration used when the provider foresees a conflict — e.g.
+    # delivering support coordination and other supports to the same participant.
+    (re.compile(r"^conflict\s+of\s+interest\s+declaration", re.I), "participant_onboarding"),
     (re.compile(r"(services?\s+agreement|client\s+intake|privacy\s+consent|client\s+induction|service\s+schedule|support\s+coordination\s+services|change\s+of\s+supports|exit\s+and\s+transition|advocacy|client\s+information|sda.*sil)", re.I), "participant_onboarding"),
     (re.compile(r"(staff\s+induction|worker\s+declaration|letter\s+of\s+engagement|contractor\s+agreement|position\s+description|reference\s+check|pre.?employment|interview\s+report|staff\s+file|staff\s+exit|exit\s+interview)", re.I), "staff_onboarding"),
     (re.compile(r"register", re.I), "compliance_register"),
