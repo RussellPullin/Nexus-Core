@@ -22,6 +22,28 @@ import {
 } from './activityRiskAssessmentPdf.service.js';
 import { assertNativeSignatureReady } from './libraryDocumentSignature.service.js';
 import { sendMultiDocumentAgreement } from './nativeSignature.service.js';
+import { buildRenderTokenMap, readLogoBytes } from './documentLibraryRender.service.js';
+import { fillAcroFormWithTokens } from './formFill.service.js';
+
+/** Brand a rendered risk-assessment PDF with the org's provider details + logo. */
+async function brandActivityRiskPdf(buffer, orgId) {
+  if (!orgId) return buffer;
+  try {
+    const tokens = buildRenderTokenMap({ orgId });
+    const longDate = (d) =>
+      d.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+    const effectiveOn = new Date();
+    const reviewBy = new Date(effectiveOn.getTime() + 365 * 24 * 60 * 60 * 1000);
+    return await fillAcroFormWithTokens(
+      buffer,
+      { ...tokens, EFFECTIVE_DATE: longDate(effectiveOn), REVIEW_DATE: longDate(reviewBy) },
+      { logoBytes: readLogoBytes(orgId) }
+    );
+  } catch (err) {
+    console.warn('[activityRiskAssessments] provider branding skipped:', err?.message);
+    return buffer;
+  }
+}
 
 const DEFAULT_ACTIVITY_NAME = 'Health & Safety Risk Assessment (blank)';
 
@@ -233,7 +255,7 @@ export async function assignActivityRiskAssessmentToParticipant(participantId, t
   const sourcePath = templateFilePath(orgId, template.stored_filename);
   if (!existsSync(sourcePath)) throw new Error('Template file is missing on disk.');
 
-  const buffer = readFileSync(sourcePath);
+  const buffer = await brandActivityRiskPdf(readFileSync(sourcePath), orgId);
   const datePart = new Date().toISOString().slice(0, 10);
   const activitySlug = slugifyActivity(template.activity_name);
   const participantSlug = slugifyActivity(participant.name || 'participant');
@@ -491,6 +513,7 @@ export async function generateActivityRiskRecordPdfBuffer(orgId, recordId) {
   }
   const blank = await masterPdfBuffer();
   let buffer = await fillActivityRiskPdfFields(blank, record.field_values);
+  buffer = await brandActivityRiskPdf(buffer, orgId);
   if (record.admin_signature_data) {
     const schema = await getActivityRiskFieldSchema();
     buffer = await embedAdminSignatureInActivityRiskPdf(buffer, record.admin_signature_data, schema);

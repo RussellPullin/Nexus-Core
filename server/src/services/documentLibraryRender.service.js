@@ -120,7 +120,7 @@ function resolveOrgLogoPath(orgId) {
   return null;
 }
 
-function readLogoBytes(orgId) {
+export function readLogoBytes(orgId) {
   const logoPath = resolveOrgLogoPath(orgId);
   if (!logoPath) return null;
   try {
