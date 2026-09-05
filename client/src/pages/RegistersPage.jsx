@@ -1,9 +1,40 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
-import { registers, documentLibrary, participants as participantsApi, staff as staffApi, organisations } from '../lib/api.js';
+import { registers, documentLibrary, participants as participantsApi, staff as staffApi, organisations, onboarding } from '../lib/api.js';
+import { PARTICIPANT_INTAKE_FIELD_DEFS } from '@nexus-shared/onboardingFieldRegistry.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import DocumentPreviewModal from '../components/DocumentPreviewModal';
 import '../App.css';
+
+const RISK_ASSESSMENT_FIELDS = PARTICIPANT_INTAKE_FIELD_DEFS.filter((d) => d.section === 'clinical');
+const EMPTY_RISK_FORM = Object.fromEntries(RISK_ASSESSMENT_FIELDS.map((d) => [d.key, '']));
+const RISK_FIELD_HELP = {
+  risks_at_home: 'Risks at home (access, safety, hazards)',
+  triggers_stressors: 'Known triggers or stressors',
+  current_supports_strategies: 'Current supports or strategies',
+  functional_assistance_needs: 'Functional assistance needs (daily living areas)',
+  living_arrangements: 'Living arrangements (who do you live with)',
+  mental_health_summary: 'Mental health summary'
+};
+
+function emptyRiskForm() {
+  return { ...EMPTY_RISK_FORM };
+}
+
+function riskAssessmentIsEmpty(fields) {
+  return RISK_ASSESSMENT_FIELDS.every((d) => !String(fields?.[d.key] ?? '').trim());
+}
+
+function riskRowIsEmpty(row) {
+  return (row || []).slice(1).every((v) => !String(v ?? '').trim() || String(v).trim() === 'Not recorded');
+}
+
+function truncateCell(value, max = 72) {
+  const text = String(value ?? '');
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
 
 const EMPTY_INCIDENT_FORM = {
   incident_date: '',
@@ -83,6 +114,17 @@ export default function RegistersPage() {
   const [catalogDraft, setCatalogDraft] = useState([]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
+  const [organisationId, setOrganisationId] = useState(null);
+  const [riskPanel, setRiskPanel] = useState({
+    open: false,
+    participantId: '',
+    participantName: '',
+    fields: emptyRiskForm(),
+    isEmpty: true,
+    loading: false,
+    error: ''
+  });
+  const [savingRisk, setSavingRisk] = useState(false);
   const canManageIncidents = isAdmin || canAccessCaseTasks;
   const canEditRegisters = isAdmin || canAccessCaseTasks;
 
@@ -106,6 +148,7 @@ export default function RegistersPage() {
         setIncidentEntries(incidents?.entries || []);
         setParticipantsList(participantRows || []);
         setStaffList(staffRows || []);
+        if (profile?.organisation_id) setOrganisationId(profile.organisation_id);
         if (profile?.branding) {
           setBranding({
             primaryColor: profile.branding.primaryColor || '#1d4ed8',
@@ -141,6 +184,7 @@ export default function RegistersPage() {
         if (item.id !== viewId) return item;
         const next = { ...item, ...patch };
         if (patch.visible === false) next.editable = false;
+        if (patch.visible === true && item.supports_inline_edit) next.editable = true;
         return next;
       })
     );
@@ -176,7 +220,8 @@ export default function RegistersPage() {
       .filter(({ col }) => !['Manual ID', 'Shift ID'].includes(col));
   }, [active]);
 
-  const isEditableView = !!active?.editable && canEditRegisters;
+  const isRiskAssessmentView = active?.id === 'risk_assessment_register' || active?.row_mode === 'risk_assessment';
+  const isEditableView = !isRiskAssessmentView && canEditRegisters && (active?.supports_inline_edit !== false) && !!active?.editable;
   const keyColIndex = active?.key_column_index ?? 0;
 
   const filteredRowEntries = useMemo(() => {
@@ -185,7 +230,8 @@ export default function RegistersPage() {
     const statusIdx = active.status_column ? getColumnIndex(active, active.status_column) : -1;
     const entries = (active.rows || []).map((row, index) => ({
       row,
-      rowKey: String(active.row_keys?.[index] ?? row[keyColIndex] ?? '').trim()
+      rowKey: String(active.row_keys?.[index] ?? row[keyColIndex] ?? '').trim(),
+      rowRef: active.row_refs?.[index] || null
     }));
     const filtered = entries.filter(({ row }) => {
       if (activeFilter.status && statusIdx >= 0 && row[statusIdx] !== activeFilter.status) return false;
@@ -373,6 +419,100 @@ export default function RegistersPage() {
     if (status) setFilters((prev) => ({ ...prev, [viewId]: { ...(prev[viewId] || {}), status } }));
   };
 
+  const resolveRiskParticipantId = (row, rowRef) => {
+    if (rowRef?.participant_id) return String(rowRef.participant_id);
+    const name = String(row?.[0] ?? '').trim().toLowerCase();
+    if (!name) return '';
+    const match = participantsList.find((p) => String(p.name || '').trim().toLowerCase() === name);
+    return match?.id || '';
+  };
+
+  const closeRiskPanel = () => {
+    setRiskPanel({
+      open: false,
+      participantId: '',
+      participantName: '',
+      fields: emptyRiskForm(),
+      isEmpty: true,
+      loading: false,
+      error: ''
+    });
+  };
+
+  const openRiskAssessment = async (row, rowRef) => {
+    const participantId = resolveRiskParticipantId(row, rowRef);
+    const participantName = String(row?.[0] ?? '').trim() || 'Participant';
+    if (!participantId) {
+      setRiskPanel({
+        open: true,
+        participantId: '',
+        participantName,
+        fields: emptyRiskForm(),
+        isEmpty: true,
+        loading: false,
+        error: 'Could not find this participant. Open them from Participants and try again.'
+      });
+      return;
+    }
+    setRiskPanel({
+      open: true,
+      participantId,
+      participantName,
+      fields: emptyRiskForm(),
+      isEmpty: true,
+      loading: true,
+      error: ''
+    });
+    try {
+      let data = await onboarding.get(participantId).catch(() => null);
+      if (!data) {
+        data = await onboarding.initialize(participantId, organisationId);
+      }
+      const fields = emptyRiskForm();
+      for (const def of RISK_ASSESSMENT_FIELDS) {
+        fields[def.key] = String(data?.intake_fields?.[def.key] ?? '');
+      }
+      setRiskPanel({
+        open: true,
+        participantId,
+        participantName,
+        fields,
+        isEmpty: riskAssessmentIsEmpty(fields),
+        loading: false,
+        error: ''
+      });
+    } catch (err) {
+      setRiskPanel({
+        open: true,
+        participantId,
+        participantName,
+        fields: emptyRiskForm(),
+        isEmpty: true,
+        loading: false,
+        error: err.message || 'Could not load risk assessment'
+      });
+    }
+  };
+
+  const saveRiskAssessment = async (e) => {
+    e.preventDefault();
+    if (!riskPanel.participantId) return;
+    setSavingRisk(true);
+    try {
+      const existing = await onboarding.get(riskPanel.participantId).catch(() => null);
+      if (!existing) {
+        await onboarding.initialize(riskPanel.participantId, organisationId);
+      }
+      await onboarding.updateIntakeFields(riskPanel.participantId, riskPanel.fields);
+      await reloadRegisters();
+      closeRiskPanel();
+    } catch (err) {
+      setRiskPanel((prev) => ({ ...prev, error: err.message || 'Could not save risk assessment' }));
+    } finally {
+      setSavingRisk(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="content">
@@ -415,10 +555,11 @@ export default function RegistersPage() {
           <div style={{ color: '#64748b', fontSize: '0.85rem' }}>Incidents this month</div>
           <strong style={{ fontSize: '1.5rem' }}>{data?.summary?.incidents_this_month ?? 0}</strong>
         </div>
-        <div className="card" style={{ padding: '1rem', borderLeft: `4px solid ${branding.accentColor}` }}>
+        <button type="button" className="card" onClick={() => jumpTo('risk_assessment_register')} style={{ textAlign: 'left', padding: '1rem', border: '1px solid #e2e8f0', borderLeft: `4px solid ${branding.accentColor}`, cursor: 'pointer' }}>
           <div style={{ color: '#64748b', fontSize: '0.85rem' }}>Participants missing risk assessment</div>
           <strong style={{ fontSize: '1.5rem' }}>{data?.summary?.participants_missing_risk_assessment ?? 0}</strong>
-        </div>
+          <div style={{ color: '#94a3b8', fontSize: '0.8rem' }}>Click to open Risk Assessments</div>
+        </button>
         <div className="card" style={{ padding: '1rem', borderLeft: `4px solid ${branding.accentColor}` }}>
           <div style={{ color: '#64748b', fontSize: '0.85rem' }}>Plans expiring soon</div>
           <strong style={{ fontSize: '1.5rem' }}>{data?.summary?.participants_plan_expiring_60_days ?? 0}</strong>
@@ -432,7 +573,7 @@ export default function RegistersPage() {
             <div>
               <h2 style={{ margin: 0, fontSize: '1.05rem' }}>Register layout</h2>
               <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-                Choose which registers appear in the live view above and which allow inline cell editing.
+                Choose which registers appear in the live view. Visible registers can be edited cell-by-cell. Incidents and Risk Assessments use a form.
               </p>
             </div>
             <button type="button" className="btn btn-secondary" onClick={() => setSettingsOpen((v) => !v)}>
@@ -478,7 +619,7 @@ export default function RegistersPage() {
                               aria-label={`Allow inline editing for ${item.title}`}
                             />
                           ) : (
-                            <span style={{ color: '#94a3b8', fontSize: '0.78rem' }} title="Uses dedicated form (e.g. Log Incident)">Form</span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.78rem' }} title="Uses a dedicated form (Incidents, Risk Assessments)">Form</span>
                           )}
                         </td>
                         <td style={{ color: '#64748b' }}>{item.row_count ?? 0}</td>
@@ -539,6 +680,11 @@ export default function RegistersPage() {
                     Click any cell to edit, or use Add row when the register is empty. Manual edits sync to the register files.
                   </p>
                 )}
+                {isRiskAssessmentView && (
+                  <p style={{ margin: '0.2rem 0 0', color: branding.accentColor, fontSize: '0.8rem' }}>
+                    Click a participant to view their risk assessment, or complete it if it is empty.
+                  </p>
+                )}
               </div>
               {active.id === 'incident_register' && canManageIncidents && (
                 <button type="button" className="btn btn-primary" onClick={openNewIncident}>Log Incident</button>
@@ -584,7 +730,7 @@ export default function RegistersPage() {
                         {col}{sort?.viewId === active.id && sort.index === index ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
                       </th>
                     ))}
-                    {(active.id === 'incident_register' || (isEditableView && active.id !== 'incident_register')) && (
+                    {(isRiskAssessmentView || active.id === 'incident_register' || (isEditableView && active.id !== 'incident_register')) && (
                       <th style={{ position: 'sticky', top: 0, background: branding.primaryColor, color: '#fff', zIndex: 1 }}>Actions</th>
                     )}
                   </tr>
@@ -592,7 +738,7 @@ export default function RegistersPage() {
                 <tbody>
                   {filteredRowEntries.length === 0 ? (
                     <tr>
-                      <td colSpan={visibleColumnIndexes.length + (isEditableView || active.id === 'incident_register' ? 1 : 0)} style={{ color: '#64748b', padding: '1rem' }}>
+                      <td colSpan={visibleColumnIndexes.length + (isEditableView || isRiskAssessmentView || active.id === 'incident_register' ? 1 : 0)} style={{ color: '#64748b', padding: '1rem' }}>
                         {isEditableView && active.id !== 'incident_register' && !(activeFilter.search || activeFilter.from || activeFilter.to || activeFilter.status) ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                             <span>No rows yet.</span>
@@ -606,14 +752,23 @@ export default function RegistersPage() {
                       </td>
                     </tr>
                   ) : (
-                    filteredRowEntries.map(({ row, rowKey }, ri) => {
+                    filteredRowEntries.map(({ row, rowKey, rowRef }, ri) => {
                       const sourceIdx = getColumnIndex(active, 'Source');
                       const manualIdIdx = getColumnIndex(active, 'Manual ID');
                       const source = sourceIdx >= 0 ? row[sourceIdx] : '';
                       const manualId = manualIdIdx >= 0 ? row[manualIdIdx] : '';
                       const canEditRow = isEditableView && !!rowKey;
+                      const emptyRisk = isRiskAssessmentView && riskRowIsEmpty(row);
                       return (
-                        <tr key={`${rowKey || ri}-${row.join('|')}`} style={{ background: ri % 2 ? '#f8fafc' : '#fff' }}>
+                        <tr
+                          key={`${rowKey || ri}-${row.join('|')}`}
+                          onClick={isRiskAssessmentView ? () => openRiskAssessment(row, rowRef) : undefined}
+                          style={{
+                            background: ri % 2 ? '#f8fafc' : '#fff',
+                            cursor: isRiskAssessmentView ? 'pointer' : undefined
+                          }}
+                          title={isRiskAssessmentView ? (emptyRisk ? 'Click to complete risk assessment' : 'Click to view risk assessment') : undefined}
+                        >
                           {visibleColumnIndexes.map(({ index }) => {
                             const editing = isEditableView && editCell && editCell.rowKey === rowKey && editCell.colIndex === index;
                             if (editing) {
@@ -635,17 +790,32 @@ export default function RegistersPage() {
                                 </td>
                               );
                             }
+                            const display = statusBadge(row[index] ?? '');
                             return (
                               <td
                                 key={index}
                                 onClick={() => canEditRow && beginEditCell(rowKey, index, row[index])}
-                                title={canEditRow ? 'Click to edit' : undefined}
-                                style={{ cursor: canEditRow ? 'text' : 'default' }}
+                                title={canEditRow ? 'Click to edit' : (isRiskAssessmentView ? String(row[index] ?? '') : undefined)}
+                                style={{ cursor: canEditRow ? 'text' : (isRiskAssessmentView ? 'pointer' : 'default') }}
                               >
-                                {statusBadge(row[index] ?? '')}
+                                {isRiskAssessmentView && index > 0 && typeof display === 'string' ? truncateCell(display) : display}
                               </td>
                             );
                           })}
+                          {isRiskAssessmentView && (
+                            <td>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openRiskAssessment(row, rowRef);
+                                }}
+                              >
+                                {emptyRisk ? 'Complete' : 'View'}
+                              </button>
+                            </td>
+                          )}
                           {isEditableView && active.id !== 'incident_register' && (
                             <td>
                               {rowKey.startsWith('@manual:') ? (
@@ -730,6 +900,67 @@ export default function RegistersPage() {
             <label className="form-group"><span>Reported to</span><input className="form-input" value={incidentForm.reported_to} onChange={(e) => setIncidentForm({ ...incidentForm, reported_to: e.target.value })} /></label>
             <label className="form-group"><span>Outcome</span><textarea className="form-input" rows={3} value={incidentForm.outcome} onChange={(e) => setIncidentForm({ ...incidentForm, outcome: e.target.value })} /></label>
             <button type="submit" className="btn btn-primary" disabled={savingIncident}>{savingIncident ? 'Saving...' : 'Save incident'}</button>
+          </form>
+        </div>
+      )}
+
+      {riskPanel.open && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.35)', zIndex: 50, display: 'flex', justifyContent: 'flex-end' }}>
+          <form onSubmit={saveRiskAssessment} className="card" style={{ width: 'min(560px, 100%)', height: '100%', overflowY: 'auto', padding: '1rem', borderRadius: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
+              <h2 style={{ margin: 0 }}>{riskPanel.isEmpty ? 'Complete risk assessment' : 'Risk assessment'}</h2>
+              <button type="button" className="btn btn-secondary" onClick={closeRiskPanel}>Close</button>
+            </div>
+            <p style={{ margin: '0.5rem 0 1rem', color: '#64748b' }}>
+              {riskPanel.participantName}
+              {riskPanel.isEmpty
+                ? ' — no risk assessment recorded yet. Complete the fields below.'
+                : ' — review the full assessment and update it if needed.'}
+            </p>
+            {riskPanel.error && <p style={{ color: '#b91c1c' }}>{riskPanel.error}</p>}
+            {riskPanel.loading ? (
+              <p>Loading risk assessment...</p>
+            ) : (
+              <>
+                {RISK_ASSESSMENT_FIELDS.map((def) => (
+                  <label key={def.key} className="form-group">
+                    <span>{RISK_FIELD_HELP[def.key] || def.label}</span>
+                    {def.key === 'living_arrangements' ? (
+                      <input
+                        className="form-input"
+                        value={riskPanel.fields[def.key] || ''}
+                        disabled={!canEditRegisters}
+                        onChange={(e) => setRiskPanel((prev) => ({
+                          ...prev,
+                          fields: { ...prev.fields, [def.key]: e.target.value }
+                        }))}
+                      />
+                    ) : (
+                      <textarea
+                        className="form-input"
+                        rows={3}
+                        value={riskPanel.fields[def.key] || ''}
+                        disabled={!canEditRegisters}
+                        onChange={(e) => setRiskPanel((prev) => ({
+                          ...prev,
+                          fields: { ...prev.fields, [def.key]: e.target.value }
+                        }))}
+                      />
+                    )}
+                  </label>
+                ))}
+                {canEditRegisters && riskPanel.participantId && (
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button type="submit" className="btn btn-primary" disabled={savingRisk}>
+                      {savingRisk ? 'Saving...' : (riskPanel.isEmpty ? 'Save risk assessment' : 'Update risk assessment')}
+                    </button>
+                    <Link to={`${pathPrefix}/onboarding/${riskPanel.participantId}`} style={{ fontSize: '0.85rem' }}>
+                      Open full intake
+                    </Link>
+                  </div>
+                )}
+              </>
+            )}
           </form>
         </div>
       )}

@@ -100,27 +100,28 @@ export function sheetKeyToViewId(sheetKey) {
 /**
  * All registers Nexus can populate. Orgs choose which appear in the live UI via org_register_settings.
  * incident_register uses form CRUD instead of inline cell editing even when marked editable.
+ * risk_assessment_register opens a participant risk-assessment form on row click.
  */
 export const REGISTER_CATALOG = [
   { sheetKey: 'Staff Compliance Register', title: 'Staff Compliance', source: 'staff_compliance_documents', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Next expiry', status_column: 'Status' },
   { sheetKey: 'Incident register', title: 'Incidents', source: 'progress_notes_audit_events_manual_incidents', defaultVisible: true, defaultEditable: false, date_column: 'When', source_column: 'Source', manual_id_column: 'Manual ID', inline_edit: false },
-  { sheetKey: 'Risk Assessment Register', title: 'Risk Assessments', source: 'participant_intake_clinical', defaultVisible: true, defaultEditable: true, key_column_index: 0 },
+  { sheetKey: 'Risk Assessment Register', title: 'Risk Assessments', source: 'participant_intake_clinical', defaultVisible: true, defaultEditable: true, key_column_index: 0, inline_edit: false, row_mode: 'risk_assessment' },
   { sheetKey: 'Participant Register', title: 'Participants', source: 'participants', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Plan end', status_column: 'Status' },
   { sheetKey: 'Staff Register', title: 'Staff', source: 'staff', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Last shift date', status_column: 'Status' },
   { sheetKey: 'Staff Induction Register', title: 'Staff Induction', source: 'staff_onboarding', defaultVisible: true, defaultEditable: true, key_column_index: 0, date_column: 'Onboarding completed', status_column: 'Onboarding status' },
-  { sheetKey: 'Complaints', title: 'Complaints', source: 'case_notes', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Contact date' },
-  { sheetKey: 'Document Register', title: 'Documents', source: 'onedrive_document_register', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Date recorded' },
-  { sheetKey: 'Feedback and complaints', title: 'Feedback', source: 'case_notes', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Contact date' },
-  { sheetKey: 'HR role register', title: 'HR Roles', source: 'staff', defaultVisible: false, defaultEditable: false, key_column_index: 0 },
-  { sheetKey: 'Significant risk factor', title: 'Significant Risk', source: 'participant_intake_clinical', defaultVisible: false, defaultEditable: false, key_column_index: 0 },
-  { sheetKey: 'Risk register', title: 'Risk Register', source: 'participant_documents', defaultVisible: false, defaultEditable: false, key_column_index: 0 },
-  { sheetKey: 'Training and Development', title: 'Training', source: 'staff_compliance_documents', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Expiry', status_column: 'Status' },
-  { sheetKey: 'Policy register', title: 'Policies', source: 'company_policy_files', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Effective date' },
-  { sheetKey: 'Conflict of interest register', title: 'Conflict of Interest', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 1, date_column: 'Date of Notification' },
-  { sheetKey: 'Collection and storage of Med', title: 'Medication Storage', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Date' },
-  { sheetKey: 'Continuous improvment', title: 'Continuous Improvement', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 0, status_column: 'Status', date_column: 'Due date' },
-  { sheetKey: 'Emergency test register', title: 'Emergency Tests', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Test date' },
-  { sheetKey: 'Waste removal Register', title: 'Waste Removal', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: false, key_column_index: 0, date_column: 'Date added' }
+  { sheetKey: 'Complaints', title: 'Complaints', source: 'case_notes', defaultVisible: false, defaultEditable: true, key_column_index: 0, date_column: 'Contact date' },
+  { sheetKey: 'Document Register', title: 'Documents', source: 'onedrive_document_register', defaultVisible: false, defaultEditable: true, key_column_index: 0, date_column: 'Date recorded' },
+  { sheetKey: 'Feedback and complaints', title: 'Feedback', source: 'case_notes', defaultVisible: false, defaultEditable: true, key_column_index: 0, date_column: 'Contact date' },
+  { sheetKey: 'HR role register', title: 'HR Roles', source: 'staff', defaultVisible: false, defaultEditable: true, key_column_index: 0 },
+  { sheetKey: 'Significant risk factor', title: 'Significant Risk', source: 'participant_intake_clinical', defaultVisible: false, defaultEditable: true, key_column_index: 0 },
+  { sheetKey: 'Risk register', title: 'Risk Register', source: 'participant_documents', defaultVisible: false, defaultEditable: true, key_column_index: 0 },
+  { sheetKey: 'Training and Development', title: 'Training', source: 'staff_compliance_documents', defaultVisible: false, defaultEditable: true, key_column_index: 0, date_column: 'Expiry', status_column: 'Status' },
+  { sheetKey: 'Policy register', title: 'Policies', source: 'company_policy_files', defaultVisible: false, defaultEditable: true, key_column_index: 0, date_column: 'Effective date' },
+  { sheetKey: 'Conflict of interest register', title: 'Conflict of Interest', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: true, key_column_index: 1, date_column: 'Date of Notification' },
+  { sheetKey: 'Collection and storage of Med', title: 'Medication Storage', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: true, key_column_index: 0, date_column: 'Date' },
+  { sheetKey: 'Continuous improvment', title: 'Continuous Improvement', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: true, key_column_index: 0, status_column: 'Status', date_column: 'Due date' },
+  { sheetKey: 'Emergency test register', title: 'Emergency Tests', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: true, key_column_index: 0, date_column: 'Test date' },
+  { sheetKey: 'Waste removal Register', title: 'Waste Removal', source: 'onedrive_register_workbook', defaultVisible: false, defaultEditable: true, key_column_index: 0, date_column: 'Date added' }
 ];
 
 export const REGISTER_CATALOG_BY_VIEW_ID = Object.fromEntries(
@@ -165,7 +166,9 @@ export function isRegisterEditableForOrg(organizationId, viewId) {
   const def = REGISTER_CATALOG_BY_VIEW_ID[viewId];
   if (!def || def.inline_edit === false) return false;
   const settings = getOrgRegisterSettings(organizationId);
-  return !!settings[viewId]?.editable;
+  const setting = settings[viewId];
+  // Visible live registers that support inline edit are writable for coordinators.
+  return !!(setting?.editable || setting?.visible);
 }
 
 export function saveOrgRegisterSettings(organizationId, items = []) {
@@ -695,9 +698,8 @@ function incidentRows(organizationId) {
   return out.sort((a, b) => new Date(b[0] || b[11] || 0).getTime() - new Date(a[0] || a[11] || 0).getTime());
 }
 
-function riskAssessmentRows(organizationId) {
-  if (RISK_ASSESSMENT_FIELD_KEYS.length === 0) return [];
-  const participants = db
+function listOrgParticipantsForRisk(organizationId) {
+  return db
     .prepare(
       `SELECT p.id, p.name, po.id AS onboarding_id
        FROM participants p
@@ -707,6 +709,11 @@ function riskAssessmentRows(organizationId) {
        ORDER BY lower(p.name)`
     )
     .all(organizationId);
+}
+
+function riskAssessmentRows(organizationId) {
+  if (RISK_ASSESSMENT_FIELD_KEYS.length === 0) return [];
+  const participants = listOrgParticipantsForRisk(organizationId);
   const ids = participants.map((p) => p.onboarding_id).filter(Boolean);
   const fieldsByOnboarding = new Map();
   if (ids.length) {
@@ -734,6 +741,10 @@ function riskAssessmentRows(organizationId) {
       })
     ];
   });
+}
+
+export function riskAssessmentRowRefs(organizationId) {
+  return listOrgParticipantsForRisk(organizationId).map((p) => ({ participant_id: p.id }));
 }
 
 function participantRegisterRows(organizationId) {
@@ -1439,9 +1450,11 @@ function viewMetadataFromCatalog(def, viewId, orgSettings) {
     status_column: def.status_column || null,
     source_column: def.source_column || null,
     manual_id_column: def.manual_id_column || null,
-    key_column_index: def.key_column_index ?? 0
+    key_column_index: def.key_column_index ?? 0,
+    supports_inline_edit: def.inline_edit !== false,
+    row_mode: def.row_mode || (def.inline_edit === false ? 'form' : 'cells')
   };
-  if (def.inline_edit !== false && orgSettings[viewId]?.editable) {
+  if (def.inline_edit !== false && (orgSettings[viewId]?.editable || orgSettings[viewId]?.visible)) {
     meta.editable = true;
   }
   return meta;
@@ -1480,6 +1493,10 @@ export function buildRegisterSnapshotForOrg(organizationId) {
       row_keys: merged.row_keys,
       ...viewMetadataFromCatalog(def, id, orgSettings)
     };
+    if (id === 'risk_assessment_register') {
+      const refs = riskAssessmentRowRefs(organizationId);
+      view.row_refs = merged.row_keys.map((_, index) => refs[index] || {});
+    }
     catalog.push({
       id,
       title: def.title,
@@ -1488,8 +1505,9 @@ export function buildRegisterSnapshotForOrg(organizationId) {
       roadmap_note: view.roadmap_note,
       row_count: rows.length,
       visible: !!setting.visible,
-      editable: !!setting.editable,
-      supports_inline_edit: def.inline_edit !== false
+      editable: def.inline_edit === false ? false : !!(setting.editable || setting.visible),
+      supports_inline_edit: def.inline_edit !== false,
+      row_mode: view.row_mode
     });
     if (setting.visible) views.push(view);
   }
