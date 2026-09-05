@@ -5,51 +5,21 @@ import { onboarding, participants, organisations, ndis, smartDefaults, forms } f
 import AddressAutocomplete from '../components/AddressAutocomplete';
 import OnboardingDocumentSelectModal from '../components/OnboardingDocumentSelectModal.jsx';
 import { inferParticipantServiceType } from '@nexus-shared/onboardingDocumentContext.js';
-import { formatDate } from '../lib/dateUtils';
 import {
   participantFieldLabels,
   participantEmptyIntake,
   composeParticipantLegalName,
   splitParticipantNameFromFull
 } from '@nexus-shared/onboardingFieldRegistry.js';
-import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useSignEnabled } from '../lib/featureFlags.js';
-import ServiceAgreementOnboardingBlock from '../components/ServiceAgreementOnboardingBlock.jsx';
 
 const PARTICIPANT_LABELS = participantFieldLabels();
 
-function FormPreviewReadable({ snapshot }) {
-  if (!snapshot) return <p style={{ color: '#64748b' }}>No preview data available.</p>;
-  const { participant, plan, intake, template } = snapshot;
-  const skipKeys = new Set(['id', 'template', 'mapping', 'generated_at', 'prefill_fields']);
-
-  const renderSection = (title, data) => {
-    if (!data || typeof data !== 'object') return null;
-    const entries = Object.entries(data)
-      .filter(([k, v]) => !skipKeys.has(k) && v != null && String(v).trim() !== '');
-    if (entries.length === 0) return null;
-    return (
-      <div key={title} style={{ marginBottom: '1.5rem' }}>
-        <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1rem', color: '#334155' }}>{title}</h4>
-        <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.9rem' }}>
-          {entries.map(([key, value]) => (
-            <div key={key} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '0.5rem', alignItems: 'baseline' }}>
-              <span style={{ color: '#64748b', fontWeight: 500 }}>{PARTICIPANT_LABELS[key] || key.replace(/_/g, ' ')}</span>
-              <span style={{ wordBreak: 'break-word' }}>{String(value)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const sections = [renderSection('Participant', participant), renderSection('Plan', plan), renderSection('Intake / Service details', intake)].filter(Boolean);
-  if (sections.length === 0) return <p style={{ color: '#64748b' }}>No preview data available.</p>;
-
-  return (
-    <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: 8, maxWidth: 640 }}>
-      {sections}
-    </div>
-  );
+function agreementPackSlugsForServiceType(serviceType) {
+  const slugs = ['privacy-consent-form', 'service-schedule', 'core:service_agreement', 'service_agreement'];
+  if (serviceType === 'sil') slugs.push('services-agreement-sil');
+  else if (serviceType === 'support_coordination') slugs.push('support-coordination-services-agreement', 'conflict-of-interest-declaration');
+  else slugs.push('services-agreement');
+  return slugs;
 }
 
 /** Parse hours per week from frequency string (e.g. "6 hrs/week", "2 hours per week"). Returns number or null. */
@@ -123,18 +93,12 @@ export default function OnboardingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const idRef = useRef(id);
   idRef.current = id;
-  const signEnabled = useSignEnabled();
   const [participant, setParticipant] = useState(null);
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
-  const [privacyConsentSigner, setPrivacyConsentSigner] = useState({});
-  const [preparingConsentSigner, setPreparingConsentSigner] = useState(null);
   const [intake, setIntake] = useState(participantEmptyIntake());
   const [providerOrgId, setProviderOrgId] = useState('');
-  const [previewFormId, setPreviewFormId] = useState(null);
-  const [previewSnapshot, setPreviewSnapshot] = useState(null);
-  const [documentPreviewUrl, setDocumentPreviewUrl] = useState(null);
   const [orgs, setOrgs] = useState([]);
   const [supportCategories, setSupportCategories] = useState(FALLBACK_SUPPORT_CATEGORIES);
   const [additionalEmailInput, setAdditionalEmailInput] = useState('');
@@ -146,9 +110,13 @@ export default function OnboardingPage() {
     km: [],
     time: []
   });
-  const [intakeSavedAt, setIntakeSavedAt] = useState(0);
   const [showPackModal, setShowPackModal] = useState(false);
   const [extraPdfCount, setExtraPdfCount] = useState(null);
+  const [intakeToken, setIntakeToken] = useState(null);
+  const [intakeSendMode, setIntakeSendMode] = useState('participant');
+  const [intakeSendEmail, setIntakeSendEmail] = useState('');
+  const [intakeLinkMessage, setIntakeLinkMessage] = useState('');
+  const openedReturnedIntakeRef = useRef(false);
 
   useEffect(() => {
     organisations.list('', 'plan_manager').then(setOrgs).catch(() => []);
@@ -157,9 +125,8 @@ export default function OnboardingPage() {
       .catch(() => setSupportCategories(FALLBACK_SUPPORT_CATEGORIES));
   }, []);
 
-  // "Onboard Participant" (ParticipantProfile) runs the orchestrator then lands here with
-  // ?autoOpenPack=1 so the document picker opens immediately instead of requiring a second
-  // manual click on this page too. Strip the param once handled so a reload doesn't re-fire it.
+  // Optional deep-link: ?autoOpenPack=1 opens the agreement picker after intake is already done.
+  // Strip the param once handled so a reload does not re-open it.
   useEffect(() => {
     if (!participant || searchParams.get('autoOpenPack') !== '1') return;
     setSearchParams((prev) => {
@@ -170,6 +137,17 @@ export default function OnboardingPage() {
     handleSendParticipantPolicyPack();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [participant, searchParams]);
+
+  useEffect(() => {
+    if (!participant || !intakeToken || intakeToken.status !== 'completed') return;
+    if (openedReturnedIntakeRef.current) return;
+    const completedAt = Date.parse(intakeToken.completed_at || '');
+    const recent = Number.isFinite(completedAt) && Date.now() - completedAt < 24 * 60 * 60 * 1000;
+    if (!recent) return;
+    openedReturnedIntakeRef.current = true;
+    openAgreementPack();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [participant, intakeToken]);
 
   // Load NDIS line items for schedule dropdown (filtered by selected support categories; hourly items)
   useEffect(() => {
@@ -352,13 +330,19 @@ export default function OnboardingPage() {
       return [];
     };
     try {
-      const [participantData, onboardingData] = await Promise.all([
+      let [participantData, onboardingData, tokenData] = await Promise.all([
         participants.get(id),
-        onboarding.get(id).catch(() => null)
+        onboarding.get(id).catch(() => null),
+        onboarding.getIntakeToken(id).catch(() => null)
       ]);
+      if (!onboardingData && participantData) {
+        await onboarding.initialize(id, participantData.plan_manager_id || null).catch(() => null);
+        onboardingData = await onboarding.get(id).catch(() => null);
+      }
       if (idRef.current !== runId) return;
       setParticipant(participantData);
       setProviderOrgId((prev) => prev || participantData?.plan_manager_id || '');
+      setIntakeToken(tokenData?.token_record || null);
       if (onboardingData) {
         setState(onboardingData);
         const fields = onboardingData.intake_fields || {};
@@ -479,7 +463,12 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleSaveIntake = async () => {
+  const handleSaveIntake = async (options = {}) => {
+    const sendAgreements = options?.sendAgreements === true;
+    if (!composeParticipantLegalName(intake) || !(intake.email || participant?.email || '').trim()) {
+      alert('Add the participant name and email address first.');
+      return;
+    }
     setWorking(true);
     try {
       const participantData = {
@@ -522,8 +511,11 @@ export default function OnboardingPage() {
         contacts: contactsData
       });
       await refresh();
-      setIntakeSavedAt(Date.now());
-      alert('Intake form saved. Participant profile updated.');
+      if (sendAgreements) {
+        await openAgreementPack();
+      } else {
+        alert('Intake saved. When it is complete, send the service agreement, service schedule, privacy consent, and conflict of interest if needed.');
+      }
     } catch (err) {
       alert(err.message);
     } finally {
@@ -531,9 +523,10 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleSendParticipantPolicyPack = async () => {
-    if (!participant?.email?.trim()) {
-      alert('Add a participant email address before sending the onboarding documents.');
+  const openAgreementPack = async () => {
+    const email = (intake.email || participant?.email || '').trim();
+    if (!email) {
+      alert('Add a participant email address before sending agreements.');
       return;
     }
     try {
@@ -544,6 +537,53 @@ export default function OnboardingPage() {
     }
     setShowPackModal(true);
   };
+
+  const handleSendIntakeLink = async () => {
+    const participantEmail = (intake.email || participant?.email || '').trim();
+    const sendTo = intakeSendMode === 'participant' ? participantEmail : intakeSendEmail.trim();
+    if (!composeParticipantLegalName(intake) && !participant?.name) {
+      alert('Add the participant name first.');
+      return;
+    }
+    if (!sendTo) {
+      alert(intakeSendMode === 'participant'
+        ? 'Add a participant email address first.'
+        : 'Enter the coordinator or recipient email.');
+      return;
+    }
+    setWorking(true);
+    setIntakeLinkMessage('');
+    try {
+      if (!state) await onboarding.initialize(id, providerOrgId || null);
+      await onboarding.saveIntake(id, {
+        participant: {
+          name: composeParticipantLegalName(intake) || participant?.name,
+          email: participantEmail || sendTo
+        },
+        intake: { ...intake, email: participantEmail || sendTo },
+        contacts: []
+      });
+      const body = { send_to_email: sendTo };
+      if (intakeSendMode === 'other') body.send_to_note = 'Coordinator';
+      const res = await onboarding.issueIntakeToken(id, body);
+      await refresh();
+      if (res?.email_sent) {
+        setIntakeLinkMessage(`Intake form emailed to ${res.send_to_email || sendTo}.`);
+      } else if (res?.url) {
+        setIntakeLinkMessage(res.email_error
+          ? `Link created but email failed: ${res.email_error}`
+          : `Intake link created. Share it: ${res.url}`);
+      } else {
+        setIntakeLinkMessage('Intake link created.');
+      }
+    } catch (err) {
+      alert(err.message || 'Could not send intake form');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const handleSendParticipantPolicyPack = () => openAgreementPack();
 
   const handleConfirmSendParticipantPack = async (payload) => {
     setWorking(true);
@@ -568,140 +608,6 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleGenerateForms = async () => {
-    setWorking(true);
-    try {
-      await onboarding.generateFormPack(id);
-      await refresh();
-      alert('Support Plan and Privacy Consent generated from intake data. Use the Service Agreement section below for the participant agreement PDF.');
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  const handleChangePrivacyConsentSigner = async (formInstanceId, signerType) => {
-    setPrivacyConsentSigner((prev) => ({ ...prev, [formInstanceId]: signerType }));
-    setPreparingConsentSigner(formInstanceId);
-    try {
-      await onboarding.setPrivacyConsentSigner(id, formInstanceId, signerType);
-      await refresh();
-    } catch (err) {
-      alert(
-        err.message ||
-          (signerType === 'guardian'
-            ? 'Could not switch to guardian — check the participant has a guardian email on their intake form.'
-            : 'Could not update signer')
-      );
-    } finally {
-      setPreparingConsentSigner(null);
-    }
-  };
-
-  const handleSendForm = async (formInstanceId) => {
-    setWorking(true);
-    try {
-      await onboarding.sendFormForSignature(id, formInstanceId);
-      await refresh();
-      alert('Form sent via Nexus Core for signature.');
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  const handleViewDocument = async (formInstanceId, openInNewTab = true) => {
-    setWorking(true);
-    try {
-      const blob = await onboarding.getFormDocumentBlob(id, formInstanceId);
-      const url = URL.createObjectURL(blob);
-      if (openInNewTab) {
-        window.open(url, '_blank', 'noopener');
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-      } else {
-        setDocumentPreviewUrl(url);
-      }
-    } catch (err) {
-      alert(err.message || 'Could not load document. Generate the form first, or add a template to data/forms/participant-packet/.');
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  const handleDownloadFormDocument = async (formInstanceId, displayName, formType) => {
-    setWorking(true);
-    try {
-      const blob = await onboarding.getFormDocumentBlob(id, formInstanceId);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const base = (displayName || formType || 'form').replace(/[^a-zA-Z0-9._-]+/g, '_');
-      const ext =
-        blob.type.includes('wordprocessingml') || blob.type.includes('officedocument.wordprocessingml')
-          ? 'docx'
-          : 'pdf';
-      a.download = `${base}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      alert(err.message || 'Could not download document.');
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  const closeDocumentPreview = () => {
-    if (documentPreviewUrl) URL.revokeObjectURL(documentPreviewUrl);
-    setDocumentPreviewUrl(null);
-  };
-
-
-  const handleViewPreview = async (formInstanceId) => {
-    try {
-      const { snapshot } = await onboarding.prefillSnapshot(id, formInstanceId);
-      setPreviewSnapshot(snapshot);
-      setPreviewFormId(formInstanceId);
-    } catch (err) {
-      alert(err.message);
-    }
-  };
-
-  const handleUploadRevised = async (formInstanceId, file) => {
-    if (!file) return;
-    setWorking(true);
-    try {
-      await onboarding.uploadFormDocument(id, formInstanceId, file);
-      await refresh();
-      alert(
-        signEnabled
-          ? 'Document updated. Download to sign or use Sign with Nexus Core when ready.'
-          : 'Document updated. Use Download to sign; Sign with Nexus Core will be available once enabled in Settings → Onboarding.'
-      );
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  const handleDeleteForm = async (formInstanceId) => {
-    if (!confirm('Delete this form? You can regenerate it from the intake data.')) return;
-    setWorking(true);
-    try {
-      await onboarding.deleteForm(id, formInstanceId);
-      await refresh();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  const signatureForms = state?.forms?.filter((f) => ['service_agreement', 'support_plan', 'privacy_consent'].includes(f.form_type)) || [];
   const hasIntakeData =
     composeParticipantLegalName(intake) ||
     intake.email ||
@@ -743,9 +649,11 @@ export default function OnboardingPage() {
           </div>
         ) : (
           <>
-            {/* Step 1: Intake form */}
-            <h4>1. Intake Form</h4>
-            <p style={{ color: '#64748b', marginBottom: '1rem' }}>Fill in the intake form. Save to update the participant profile. Service Agreement and Support Plan will be auto-filled from this data.</p>
+            <h4>Start with name and email</h4>
+            <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+              Add the participant name and email first. Complete the intake here, or email the form to the participant or a coordinator.
+              When the intake is saved or returned, send the service agreement, service schedule, privacy consent, and conflict of interest if needed.
+            </p>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <div className="form-group">
@@ -801,6 +709,48 @@ export default function OnboardingPage() {
                   placeholder="Start typing an address..."
                 />
               </div>
+            </div>
+
+            <div style={{ marginTop: '1.25rem', padding: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+              <h5 style={{ margin: '0 0 0.35rem 0' }}>Email the intake form</h5>
+              <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: '#64748b' }}>
+                Send a secure link to the participant or a coordinator. When they submit it, you will be notified to send the service agreement, service schedule, privacy consent, and conflict of interest if needed.
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}>
+                <div className="form-group" style={{ margin: 0, minWidth: 180 }}>
+                  <label>Send to</label>
+                  <select value={intakeSendMode} onChange={(e) => setIntakeSendMode(e.target.value)}>
+                    <option value="participant">Participant email</option>
+                    <option value="other">Coordinator or other email</option>
+                  </select>
+                </div>
+                {intakeSendMode === 'other' && (
+                  <div className="form-group" style={{ margin: 0, minWidth: 240, flex: 1 }}>
+                    <label>Recipient email</label>
+                    <input
+                      type="email"
+                      value={intakeSendEmail}
+                      onChange={(e) => setIntakeSendEmail(e.target.value)}
+                      placeholder="coordinator@example.com"
+                    />
+                  </div>
+                )}
+                <button type="button" className="btn btn-secondary" onClick={handleSendIntakeLink} disabled={working}>
+                  {intakeSendMode === 'participant' ? 'Email intake to participant' : 'Email intake to recipient'}
+                </button>
+              </div>
+              {intakeToken && (
+                <p style={{ margin: '0.75rem 0 0', fontSize: '0.85rem', color: intakeToken.status === 'completed' ? '#166534' : '#64748b' }}>
+                  Latest intake link: {intakeToken.status === 'completed' ? 'returned' : intakeToken.status}
+                  {intakeToken.status === 'active' && intakeToken.expires_at
+                    ? ` · expires ${new Date(intakeToken.expires_at).toLocaleDateString('en-AU')}`
+                    : ''}
+                  {intakeToken.status === 'completed' ? ' · send agreements next' : ''}
+                </p>
+              )}
+              {intakeLinkMessage && (
+                <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', color: '#166534' }}>{intakeLinkMessage}</p>
+              )}
             </div>
 
             <h5 style={{ marginTop: '1.5rem' }}>Representative / Advocate (for legal documents)</h5>
@@ -1405,158 +1355,28 @@ export default function OnboardingPage() {
             </div>
 
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <button className="btn btn-primary" onClick={handleSaveIntake} disabled={working || !hasIntakeData}>
-                Save intake form
+              <button type="button" className="btn btn-secondary" onClick={() => handleSaveIntake()} disabled={working || !hasIntakeData}>
+                Save intake
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => handleSaveIntake({ sendAgreements: true })}
+                disabled={working || !hasIntakeData}
+              >
+                Save intake and send agreements
               </button>
             </div>
 
             <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
-              <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '1rem' }}>Onboarding documents</h4>
+              <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '1rem' }}>After intake is complete</h4>
               <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: '#78350f' }}>
-                Email the branded participant onboarding documents from your organisation&apos;s NDIS document
-                library, plus any extra PDFs you&apos;ve uploaded under <strong>Forms</strong>. Participant must have an
-                email; connect yours in Settings.
+                Send the service agreement, service schedule, and privacy consent. Conflict of interest is included when the participant needs support coordination.
               </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}>
-                <button type="button" className="btn btn-secondary" onClick={handleSendParticipantPolicyPack} disabled={working}>
-                  Email onboarding documents to participant
-                </button>
-              </div>
-            </div>
-
-            {/* Step 2: Service Agreement & Support Plan */}
-            <h4 style={{ marginTop: '2rem' }}>2. Service Agreement, Support Plan & Privacy Consent</h4>
-            <p style={{ color: '#64748b', marginBottom: '1rem' }}>
-              Save the intake form first. The <strong>participant</strong> is the client on the service agreement. Support Plan and Privacy Consent use your legacy templates; the service agreement PDF uses your organisation template from{' '}
-              <Link to={`${pathPrefix}/forms`}>Forms</Link>.
-            </p>
-
-            <ServiceAgreementOnboardingBlock
-              participantId={id}
-              intake={intake}
-              pathPrefix={pathPrefix}
-              working={working}
-              setWorking={setWorking}
-              intakeSavedAt={intakeSavedAt}
-            />
-
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', marginTop: '1rem' }}>
-              <button className="btn btn-secondary" onClick={handleGenerateForms} disabled={working || !hasIntakeData}>
-                Generate support plan & privacy consent
+              <button type="button" className="btn btn-primary" onClick={handleSendParticipantPolicyPack} disabled={working}>
+                Send service agreement and consents
               </button>
             </div>
-
-            {signatureForms.length > 0 && (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Form</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {signatureForms.map((f) => (
-                    <tr key={f.id}>
-                      <td>{f.display_name}</td>
-                      <td>{f.status}</td>
-                      <td style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                        {['generated', 'draft'].includes(f.status) && (
-                          <>
-                            {f.form_type === 'privacy_consent' && (
-                              <select
-                                className="form-input"
-                                style={{ padding: '0.2rem 0.4rem', fontSize: '0.8rem', width: 'auto' }}
-                                value={privacyConsentSigner[f.id] || 'participant'}
-                                disabled={working || preparingConsentSigner === f.id}
-                                onChange={(e) => handleChangePrivacyConsentSigner(f.id, e.target.value)}
-                                title="Who is completing and signing this consent form?"
-                              >
-                                <option value="participant">Participant signs</option>
-                                <option value="guardian">Guardian/rep signs</option>
-                              </select>
-                            )}
-                            <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => handleViewDocument(f.id, false)} title="View filled document in CRM">View document</button>
-                            <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => handleViewPreview(f.id)} title="View prefill data">View data</button>
-                            <label className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', margin: 0, cursor: 'pointer' }}>
-                              Upload revised
-                              <input type="file" accept=".pdf,.docx" style={{ display: 'none' }} onChange={(e) => { const file = e.target.files?.[0]; if (file) handleUploadRevised(f.id, file); e.target.value = ''; }} />
-                            </label>
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-                              onClick={() => handleDownloadFormDocument(f.id, f.display_name, f.form_type)}
-                              disabled={working}
-                              title="Save the filled PDF or Word file to sign outside Nexus Core"
-                            >
-                              Download to sign
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-primary"
-                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-                              onClick={() => handleSendForm(f.id)}
-                              disabled={working || !signEnabled || preparingConsentSigner === f.id}
-                              title={
-                                signEnabled
-                                  ? 'Send for signature via Nexus Core'
-                                  : NEXUS_CORE_SIGN_COMING_SOON_TITLE
-                              }
-                            >
-                              Sign with Nexus Core
-                            </button>
-                            <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', color: '#dc2626' }} onClick={() => handleDeleteForm(f.id)} disabled={working} title="Delete form (can regenerate)">Delete</button>
-                          </>
-                        )}
-                        {['sent', 'viewed', 'signed'].includes(f.status) && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-                            onClick={() => handleDownloadFormDocument(f.id, f.display_name, f.form_type)}
-                            disabled={working}
-                            title="Download the filled document copy"
-                          >
-                            Download copy
-                          </button>
-                        )}
-                        {f.status === 'signed' && <span style={{ color: 'green' }}>Signed {f.signed_at ? formatDate(f.signed_at) : ''}</span>}
-                        {['sent', 'viewed'].includes(f.status) && <span style={{ color: '#64748b' }}>Awaiting signature</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-
-            {/* Privacy consent is now in step 2 with other forms */}
-
-            {/* Document preview modal - view PDF/Word in CRM */}
-            {documentPreviewUrl && (
-              <div className="modal-overlay" onClick={closeDocumentPreview}>
-                <div className="modal modal-wide" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '90vh', height: '80vh', display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                    <h3>Document preview</h3>
-                    <button className="btn btn-secondary" onClick={closeDocumentPreview}>Close</button>
-                  </div>
-                  <iframe src={documentPreviewUrl} title="Document" style={{ flex: 1, width: '100%', border: '1px solid #e2e8f0', borderRadius: 8 }} />
-                </div>
-              </div>
-            )}
-
-            {/* Form data preview modal (for viewing intake data) */}
-            {previewSnapshot && (
-              <div className="modal-overlay" onClick={() => setPreviewSnapshot(null)}>
-                <div className="modal modal-wide" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '90vh', overflow: 'auto' }}>
-                  <h3>Form preview – {previewSnapshot?.template?.display_name || 'Auto-filled from intake'}</h3>
-                  <FormPreviewReadable snapshot={previewSnapshot} />
-                  <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
-                    <button className="btn btn-secondary" onClick={() => setPreviewSnapshot(null)}>Close</button>
-                  </div>
-                </div>
-              </div>
-            )}
           </>
         )}
       </div>
@@ -1568,6 +1388,7 @@ export default function OnboardingPage() {
         recipientEmail={participant?.email?.trim() || ''}
         recipientName={participant?.name || ''}
         defaultContextValue={inferParticipantServiceType(intake)}
+        preferredSlugs={agreementPackSlugsForServiceType(inferParticipantServiceType(intake))}
         extraPdfCount={extraPdfCount}
         onClose={() => setShowPackModal(false)}
         onSend={handleConfirmSendParticipantPack}

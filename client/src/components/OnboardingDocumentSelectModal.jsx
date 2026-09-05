@@ -13,7 +13,8 @@ export default function OnboardingDocumentSelectModal({
   defaultContextValue = 'all',
   onClose,
   onSend,
-  extraPdfCount = null
+  extraPdfCount = null,
+  preferredSlugs = null
 }) {
   if (!open) return null;
 
@@ -28,7 +29,7 @@ export default function OnboardingDocumentSelectModal({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 680 }}>
         <h3 style={{ marginTop: 0 }}>
-          {isParticipant ? 'Send participant onboarding documents' : 'Send staff onboarding documents'}
+          {isParticipant ? 'Send service agreement and consents' : 'Send staff onboarding documents'}
         </h3>
         <OnboardingDocumentSelectPanel
           mode={mode}
@@ -38,6 +39,7 @@ export default function OnboardingDocumentSelectModal({
           recipientName={recipientName}
           defaultContextValue={defaultContextValue}
           extraPdfCount={extraPdfCount}
+          preferredSlugs={preferredSlugs}
           active={open}
           onCancel={onClose}
           onSend={handleSend}

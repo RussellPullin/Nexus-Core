@@ -15,7 +15,6 @@ import {
   completeIntakeToken
 } from '../services/participantIntakeToken.service.js';
 import { getOrgRenderContext } from '../services/orgContext.service.js';
-import { buildOnboardingAttachments } from '../services/onboardingDocumentPacks.service.js';
 import { sendEmailViaRelay } from '../services/notification.service.js';
 
 const router = Router();
@@ -75,8 +74,7 @@ router.post('/:token/submit', (req, res) => {
     const result = completeIntakeToken(req.params.token);
     res.json({ ok: true, ...result });
 
-    // Fire-and-forget: send policy pack to participant + notify admin
-    sendIntakePoliciesAndNotify(result.participant_id, result.organisation_id).catch((err) => {
+    notifyAdminIntakeReturned(result.participant_id, result.organisation_id).catch((err) => {
       console.warn('[intake-submit] background notification failed:', err?.message);
     });
   } catch (err) {
@@ -85,28 +83,19 @@ router.post('/:token/submit', (req, res) => {
 });
 
 /**
- * After a participant submits their intake form:
- *  1. Send the org's participant onboarding policy pack to the participant.
- *  2. Notify the org admin that the intake is complete.
- *
- * Both send from the first org admin user who has email OAuth connected.
- * Failures are logged but do not affect the participant's submission response.
+ * After a participant or coordinator submits the intake form, notify the org
+ * that agreements are ready to send. Do not email unsigned pack PDFs here —
+ * Service Agreement, Service Schedule, Privacy Consent, and Conflict of Interest
+ * go through the onboarding picker / native sign flow.
  */
-async function sendIntakePoliciesAndNotify(participantId, organisationId) {
+async function notifyAdminIntakeReturned(participantId, organisationId) {
   if (!organisationId || !participantId) return;
 
   const participant = db
     .prepare('SELECT id, name, email FROM participants WHERE id = ?')
     .get(participantId);
-  if (!participant?.email?.trim()) return;
+  if (!participant) return;
 
-  // Find the org's provider profile (has default pack ID)
-  const profile = db
-    .prepare('SELECT * FROM provider_profiles WHERE organisation_id = ?')
-    .get(organisationId);
-  if (!profile) return;
-
-  // Find any org admin with email OAuth connected
   const adminUser = db
     .prepare(`
       SELECT id, name, email FROM users
@@ -124,60 +113,15 @@ async function sendIntakePoliciesAndNotify(participantId, organisationId) {
     .prepare('SELECT trading_name, name FROM organisations WHERE id = ?')
     .get(organisationId);
   const orgName = org?.trading_name?.trim() || org?.name?.trim() || 'Your service provider';
+  const participantName = participant.name || 'A participant';
 
-  // ── 1. Gather all participant onboarding attachments ─────────────────────
-  // Single source: branded, workflow-tagged library documents + the org's
-  // uploaded extra PDFs (escape hatch).
-  const allAttachments = [];
   try {
-    const fullParticipant = db.prepare('SELECT * FROM participants WHERE id = ?').get(participantId);
-    const { attachments } = await buildOnboardingAttachments(
-      organisationId,
-      profile.id,
-      'participant_onboarding',
-      { participant: fullParticipant }
-    );
-    allAttachments.push(...attachments);
-  } catch (err) {
-    console.warn('[intake-submit] onboarding attachments build failed:', err?.message);
-  }
-
-  // ── 2. Send participant email with all attachments ────────────────────────
-  if (allAttachments.length > 0) {
-    try {
-      const attachmentsForEmail = allAttachments.map((a) => ({
-        ...a,
-        content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content
-      }));
-      const subject = `${orgName}: welcome — your onboarding documents`;
-      const text =
-        `Hi ${participant.name || 'there'},\n\n` +
-        `Thank you for completing your intake form with ${orgName}.\n\n` +
-        `Please find attached your onboarding documents. Take a moment to read through them ` +
-        `and keep them for your records.\n\n` +
-        `Your coordinator will be in touch shortly to finalise your Service Agreement.\n\n` +
-        `If you have any questions please reply to this email.\n`;
-
-      await sendEmailViaRelay(adminUser.id, participant.email.trim(), subject, text, null, attachmentsForEmail, orgName);
-      console.log(`[intake-submit] onboarding docs sent to ${participant.email} (${allAttachments.length} attachments)`);
-    } catch (err) {
-      console.warn('[intake-submit] participant email send failed:', err?.message);
-    }
-  } else {
-    console.log('[intake-submit] no onboarding attachments found — skipping participant email');
-  }
-
-  // ── 3. Notify admin that intake is complete ───────────────────────────────
-  try {
-    const participantName = participant.name || 'A participant';
     const subject = `Nexus: ${participantName} completed their intake form`;
     const text =
-      `${participantName} has submitted their intake form and is ready to progress.\n\n` +
-      `Next steps:\n` +
-      `  1. Review their intake details in Nexus\n` +
-      `  2. Add a service schedule (plan allocations) for the participant\n` +
-      `  3. Generate and send the Service Agreement for signature\n\n` +
-      `Log in to Nexus to continue the onboarding process.\n`;
+      `${participantName} has submitted their intake form and is ready for agreements.\n\n` +
+      `Next: open their onboarding page and send the Service Agreement, Service Schedule, ` +
+      `Privacy Consent, and Conflict of Interest if support coordination applies.\n\n` +
+      `Log in to Nexus to continue.\n`;
 
     await sendEmailViaRelay(adminUser.id, adminUser.email, subject, text, null, null, orgName);
     console.log(`[intake-submit] admin notification sent to ${adminUser.email}`);

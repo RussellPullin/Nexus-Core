@@ -1171,13 +1171,12 @@ export default function ParticipantProfile() {
     }
   };
 
-  // "Onboard Participant" — single entry point that runs the orchestrator, then jumps straight
-  // into the document picker on the onboarding page (still a manual choice) instead of making
-  // the admin click "Run onboarding" here and separately hunt down the send action there.
+  // "Onboard Participant" — initialise onboarding, then open the intake page.
+  // Agreements are sent after intake is saved or returned, not on this click.
   const handleOnboardParticipant = async () => {
     const { ok } = await handleRunOnboarding();
     if (ok) {
-      navigate(`${pathPrefix}/onboarding/${id}?autoOpenPack=1`);
+      navigate(`${pathPrefix}/onboarding/${id}`);
     }
   };
 
@@ -1636,7 +1635,7 @@ export default function ParticipantProfile() {
                     title={
                       onboardingReadiness?.ready === false
                         ? onboardingReadiness?.reason
-                        : 'Initialise onboarding, generate every required form, then choose documents and send in one step'
+                        : 'Start onboarding from the participant name and email, then complete or send the intake form'
                     }
                   >
                     {orchestratorBusy ? 'Preparing…' : 'Onboard Participant'}
@@ -1804,7 +1803,7 @@ export default function ParticipantProfile() {
                   </div>
                 </div>
               ) : (
-                <p style={{ color: '#64748b' }}>Onboarding has not been initialised yet — click "Run onboarding" to do it in one step.</p>
+                <p style={{ color: '#64748b' }}>Onboarding has not been started yet — click Onboard Participant to begin with name, email, and the intake form.</p>
               )}
             </div>
           </div>

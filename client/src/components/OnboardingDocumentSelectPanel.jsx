@@ -120,6 +120,7 @@ export default function OnboardingDocumentSelectPanel({
   recipientName,
   defaultContextValue = 'all',
   extraPdfCount = null,
+  preferredSlugs = null,
   active = true,
   automationMappingHref = null,
   onCancel,
@@ -153,7 +154,17 @@ export default function OnboardingDocumentSelectPanel({
         const result = await documentLibrary.onboardingPackDocuments(workflow, params);
         const docs = Array.isArray(result?.documents) ? result.documents : [];
         setDocuments(docs);
-        setSelectedIds(new Set(docs.filter((d) => d.suggested).map((d) => d.id)));
+        const preferred = Array.isArray(preferredSlugs) ? preferredSlugs.filter(Boolean) : [];
+        if (preferred.length) {
+          const hasCoreSa = docs.some((d) => d.id === 'core:service_agreement' && (preferred.includes('core:service_agreement') || preferred.includes('service_agreement')));
+          const librarySa = new Set(['services-agreement', 'services-agreement-sil', 'support-coordination-services-agreement']);
+          setSelectedIds(new Set(docs.filter((d) => {
+            if (hasCoreSa && librarySa.has(d.slug)) return false;
+            return preferred.includes(d.slug) || preferred.includes(d.id);
+          }).map((d) => d.id)));
+        } else {
+          setSelectedIds(new Set(docs.filter((d) => d.suggested).map((d) => d.id)));
+        }
       } catch (err) {
         setError(err.message || 'Could not load documents');
         setDocuments([]);
@@ -162,7 +173,7 @@ export default function OnboardingDocumentSelectPanel({
         setLoading(false);
       }
     },
-    [isParticipant, workflow]
+    [isParticipant, workflow, preferredSlugs]
   );
 
   useEffect(() => {
@@ -354,8 +365,9 @@ export default function OnboardingDocumentSelectPanel({
           ))}
         </select>
         <p className="forms-muted" style={{ fontSize: '0.85rem', margin: '0.35rem 0 0' }}>
-          Documents tagged for <strong>{contextLabel}</strong> are pre-selected. You can change any selection before
-          sending.
+          {Array.isArray(preferredSlugs) && preferredSlugs.length
+            ? 'Service agreement, service schedule, and privacy consent are pre-selected. Conflict of interest is included for support coordination. You can change any selection before sending.'
+            : <>Documents tagged for <strong>{contextLabel}</strong> are pre-selected. You can change any selection before sending.</>}
         </p>
       </div>
 
