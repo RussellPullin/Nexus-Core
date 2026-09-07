@@ -57,6 +57,29 @@ function ShifterStatusBadge({ status }) {
   );
 }
 
+function RegistrationReadyBadge({ readiness }) {
+  if (!readiness?.applicable) return <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>—</span>;
+  const ready = !!readiness.ready;
+  return (
+    <span
+      title={readiness.summary || ''}
+      style={{
+        display: 'inline-block',
+        fontSize: '0.7rem',
+        fontWeight: 600,
+        letterSpacing: '0.02em',
+        padding: '0.15rem 0.45rem',
+        borderRadius: '999px',
+        background: ready ? '#d1fae5' : '#fee2e2',
+        color: ready ? '#065f46' : '#991b1b',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {ready ? 'Registration ready' : 'Not ready'}
+    </span>
+  );
+}
+
 export default function StaffPage() {
   const pathPrefix = useProductPathPrefix();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -470,6 +493,7 @@ export default function StaffPage() {
                     )}
                     <th>Name</th>
                     <th>Role</th>
+                    <th>Registration</th>
                     <th>Email</th>
                     <th>Phone</th>
                     <th>Notifications</th>
@@ -495,6 +519,7 @@ export default function StaffPage() {
                         {s.archived_at && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#64748b' }}>(archived)</span>}
                       </td>
                       <td>{s.role || '-'}</td>
+                      <td><RegistrationReadyBadge readiness={s.registration_readiness} /></td>
                       <td>{s.email || '-'}</td>
                       <td>{s.phone || '-'}</td>
                       <td>
@@ -572,6 +597,7 @@ export default function StaffPage() {
                 <select value={form.employment_type} onChange={(e) => setForm({ ...form, employment_type: e.target.value })}>
                   <option value="employee">Employee</option>
                   <option value="subcontractor">Subcontractor</option>
+                  <option value="independent_support_worker">Independent support worker</option>
                 </select>
               </div>
               <div className="form-group">

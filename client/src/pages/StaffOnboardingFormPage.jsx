@@ -178,7 +178,7 @@ export default function StaffOnboardingFormPage() {
       }
       if (step === 2) {
         const required = ['role', 'hourly_rate', 'bank_bsb', 'bank_account'];
-        if (step2.employment_type === 'subcontractor') required.push('abn');
+        if (step2.employment_type === 'subcontractor' || step2.employment_type === 'independent_support_worker') required.push('abn');
         assertRequired(step2, required, STAFF_LABELS);
         await saveStep(2, step2);
       }
@@ -389,13 +389,14 @@ export default function StaffOnboardingFormPage() {
               <select className="form-input" value={step2.employment_type} onChange={(e) => setStep2({ ...step2, employment_type: e.target.value })}>
                 <option value="employee">Employee</option>
                 <option value="subcontractor">Subcontractor</option>
+                <option value="independent_support_worker">Independent support worker</option>
               </select>
             </div>
             <div className="form-group">
               <label>{STAFF_LABELS.hourly_rate} *</label>
               <input type="number" step="0.01" min="0" className="form-input" value={step2.hourly_rate} onChange={(e) => setStep2({ ...step2, hourly_rate: e.target.value })} />
             </div>
-            {step2.employment_type === 'subcontractor' && (
+            {(step2.employment_type === 'subcontractor' || step2.employment_type === 'independent_support_worker') && (
               <div className="form-group">
                 <label>{STAFF_LABELS.abn}</label>
                 <input className="form-input" value={step2.abn} onChange={(e) => setStep2({ ...step2, abn: e.target.value })} placeholder="e.g. 12 345 678 901" />

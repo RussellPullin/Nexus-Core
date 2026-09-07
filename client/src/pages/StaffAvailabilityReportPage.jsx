@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { formatDate } from '../lib/dateUtils';
-import { reports } from '../lib/api';
+import { reports, admin } from '../lib/api';
 
 function getDefaultRange() {
   const start = new Date();
@@ -21,27 +21,46 @@ function getDefaultRange() {
   return { start: toY(monday), end: toY(end) };
 }
 
+function conflictTable(data) {
+  const columns = ['Staff', 'Participant', 'Start', 'End', 'Message'];
+  const rows = (data.conflicts || []).map((c) => [
+    c.staff_name || '',
+    c.participant_name || '',
+    c.start_time || '',
+    c.end_time || '',
+    c.message || ''
+  ]);
+  return { columns, rows };
+}
+
 function downloadCsv(data) {
-  const rows = data.conflicts || [];
-  const header = ['staff_name', 'participant_name', 'start_time', 'end_time', 'message'];
-  const lines = [header.join(',')];
-  for (const c of rows) {
-    const esc = (s) => {
-      if (s == null) return '';
-      const t = String(s);
-      if (/[",\n]/.test(t)) return `"${t.replace(/"/g, '""')}"`;
-      return t;
-    };
-    lines.push(
-      [esc(c.staff_name), esc(c.participant_name), esc(c.start_time), esc(c.end_time), esc(c.message)].join(',')
-    );
-  }
+  const { columns, rows } = conflictTable(data);
+  const esc = (s) => {
+    if (s == null) return '';
+    const t = String(s);
+    if (/[",\n]/.test(t)) return `"${t.replace(/"/g, '""')}"`;
+    return t;
+  };
+  const lines = [columns.map(esc).join(',')];
+  for (const row of rows) lines.push(row.map(esc).join(','));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `staff-availability-${data.start}-to-${data.end}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+async function downloadReadable(data, format) {
+  const { columns, rows } = conflictTable(data);
+  await admin.exportTable({
+    title: 'Staff availability conflicts',
+    subtitle: `${data.start} to ${data.end}`,
+    columns,
+    rows,
+    format,
+    filename: `staff-availability-${data.start}-to-${data.end}`
+  });
 }
 
 export default function StaffAvailabilityReportPage() {
@@ -95,9 +114,17 @@ export default function StaffAvailabilityReportPage() {
             {loading ? 'Loading…' : 'Run report'}
           </button>
           {data?.conflicts?.length > 0 && (
-            <button type="button" className="btn btn-secondary" onClick={() => downloadCsv(data)}>
-              Download CSV
-            </button>
+            <>
+              <button type="button" className="btn btn-secondary" onClick={() => downloadReadable(data, 'xlsx').catch((e) => alert(e.message))}>
+                Download Excel
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => downloadReadable(data, 'pdf').catch((e) => alert(e.message))}>
+                Download PDF
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => downloadCsv(data)}>
+                Download CSV
+              </button>
+            </>
           )}
         </div>
         {error && <p style={{ color: '#b91c1c', marginTop: '0.75rem' }}>{error}</p>}
@@ -123,20 +150,24 @@ export default function StaffAvailabilityReportPage() {
                     <th>Participant</th>
                     <th>Start</th>
                     <th>End</th>
-                    <th>Detail</th>
+                    <th>Issue</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.conflicts.map((c) => (
                     <tr key={c.shift_id}>
-                      <td>{c.staff_name}</td>
-                      <td>{c.participant_name}</td>
-                      <td>{formatDate(c.start_time)} {c.start_time?.slice(11, 16)}</td>
-                      <td>{c.end_time?.slice(11, 16)}</td>
-                      <td style={{ fontSize: '0.85rem' }}>{c.message}</td>
                       <td>
-                        <Link to={`${pathPrefix}/shifts/${c.shift_id}`} className="btn btn-secondary btn-sm">View</Link>
+                        <Link to={`${pathPrefix}/staff/${c.staff_id}`}>{c.staff_name}</Link>
+                      </td>
+                      <td>{c.participant_name}</td>
+                      <td>{c.start_time ? formatDate(c.start_time) : '—'}</td>
+                      <td>{c.end_time ? formatDate(c.end_time) : '—'}</td>
+                      <td style={{ color: '#b45309' }}>{c.message || 'Outside availability'}</td>
+                      <td>
+                        <Link to={`${pathPrefix}/shifts/${c.shift_id}`} className="btn btn-secondary" style={{ fontSize: '0.8rem' }}>
+                          Open shift
+                        </Link>
                       </td>
                     </tr>
                   ))}

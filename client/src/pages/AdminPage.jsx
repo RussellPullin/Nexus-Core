@@ -176,6 +176,14 @@ export default function AdminPage() {
     });
   }, [payFilteredRows, staffList]);
 
+  const independentPayRows = useMemo(() => {
+    return payFilteredRows.filter((r) => {
+      const s = staffList.find((x) => String(x.id) === String(r.staff_id));
+      const t = String(s?.employment_type || '');
+      return t === 'independent_support_worker' || t === 'independent';
+    });
+  }, [payFilteredRows, staffList]);
+
   const employeePayRows = useMemo(() => {
     return payFilteredRows.filter((r) => {
       const s = staffList.find((x) => String(x.id) === String(r.staff_id));
@@ -183,69 +191,57 @@ export default function AdminPage() {
     });
   }, [payFilteredRows, staffList]);
 
-  const downloadPayCsv = () => {
-    const headers = [
-      'Staff Name',
-      'Nexus staff ID',
-      'Pay period start',
-      'Pay period end',
-      'Total hours',
-      'Weekday hours',
-      'Saturday hours',
-      'Sunday hours',
-      'Public holiday hours',
-      'Evening hours',
-      'Total expenses',
-      'Total km',
-    ];
-    const lines = [headers.map(escapeCsvCell).join(',')];
-    payFilteredRows.forEach((r) => {
-      const vals = [
-        r.staffName,
-        r.staff_id ?? '',
-        r.periodStart,
-        r.periodEnd,
-        getPayCell(r, 'totalHours'),
-        getPayCell(r, 'weekdayHours'),
-        getPayCell(r, 'saturdayHours'),
-        getPayCell(r, 'sundayHours'),
-        getPayCell(r, 'holidayHours'),
-        getPayCell(r, 'eveningHours'),
-        getPayCell(r, 'totalExpenses'),
-        getPayCell(r, 'totalKm'),
-      ];
-      lines.push(vals.map(escapeCsvCell).join(','));
-    });
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pay-summary-xero-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const PAY_SUMMARY_HEADERS = [
+    'Staff Name',
+    'Nexus staff ID',
+    'Pay period start',
+    'Pay period end',
+    'Total hours',
+    'Weekday hours',
+    'Saturday hours',
+    'Sunday hours',
+    'Public holiday hours',
+    'Evening hours',
+    'Total expenses',
+    'Total km',
+  ];
 
-  /** Labor = sum of hours per bucket × matching pay rate from the staff profile (default weekday + optional overrides). */
-  const downloadLaborPayCsv = (payRows, filenamePrefix) => {
-    const headers = [
-      'Staff Name',
-      'Nexus staff ID',
-      'Pay period start',
-      'Pay period end',
-      'Total hours',
-      'Weekday hours',
-      'Saturday hours',
-      'Sunday hours',
-      'Public holiday hours',
-      'Evening hours',
-      'Base hourly ($)',
-      'Labor ($)',
-      'Expenses ($)',
-      'Total pay ($)',
-      'Total km',
-    ];
-    const lines = [headers.map(escapeCsvCell).join(',')];
-    payRows.forEach((r) => {
+  const LABOR_PAY_HEADERS = [
+    'Staff Name',
+    'Nexus staff ID',
+    'Pay period start',
+    'Pay period end',
+    'Total hours',
+    'Weekday hours',
+    'Saturday hours',
+    'Sunday hours',
+    'Public holiday hours',
+    'Evening hours',
+    'Base hourly ($)',
+    'Labor ($)',
+    'Expenses ($)',
+    'Total pay ($)',
+    'Total km',
+  ];
+
+  const buildPaySummaryRows = (sourceRows) =>
+    sourceRows.map((r) => [
+      r.staffName,
+      r.staff_id ?? '',
+      r.periodStart,
+      r.periodEnd,
+      getPayCell(r, 'totalHours'),
+      getPayCell(r, 'weekdayHours'),
+      getPayCell(r, 'saturdayHours'),
+      getPayCell(r, 'sundayHours'),
+      getPayCell(r, 'holidayHours'),
+      getPayCell(r, 'eveningHours'),
+      getPayCell(r, 'totalExpenses'),
+      getPayCell(r, 'totalKm'),
+    ]);
+
+  const buildLaborPayRows = (payRows) =>
+    payRows.map((r) => {
       const st = staffList.find((x) => String(x.id) === String(r.staff_id));
       const baseRate = st?.hourly_rate;
       const rateNum = baseRate != null && baseRate !== '' ? Number(baseRate) : NaN;
@@ -261,7 +257,7 @@ export default function AdminPage() {
       const expVal = getPayCell(r, 'totalExpenses');
       const expNum = Number.isFinite(expVal) ? expVal : 0;
       const totalPay = Math.round((labor + expNum) * 100) / 100;
-      const vals = [
+      return [
         r.staffName,
         r.staff_id ?? '',
         r.periodStart,
@@ -278,8 +274,11 @@ export default function AdminPage() {
         totalPay,
         getPayCell(r, 'totalKm'),
       ];
-      lines.push(vals.map(escapeCsvCell).join(','));
     });
+
+  const downloadTableCsv = (headers, rows, filenamePrefix) => {
+    const lines = [headers.map(escapeCsvCell).join(',')];
+    rows.forEach((vals) => lines.push(vals.map(escapeCsvCell).join(',')));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -289,9 +288,46 @@ export default function AdminPage() {
     URL.revokeObjectURL(url);
   };
 
-  const downloadSubcontractorPayCsv = () => downloadLaborPayCsv(subcontractorPayRows, 'subcontractor-pay');
-  const downloadEmployeePayCsv = () => downloadLaborPayCsv(employeePayRows, 'employee-pay');
+  const downloadPayExport = async (format) => {
+    const rows = buildPaySummaryRows(payFilteredRows);
+    const filename = `pay-summary-${new Date().toISOString().slice(0, 10)}`;
+    if (format === 'csv') {
+      downloadTableCsv(PAY_SUMMARY_HEADERS, rows, 'pay-summary-xero');
+      return;
+    }
+    try {
+      await admin.exportTable({
+        title: 'Staff pay summary',
+        subtitle: 'Hours, expenses and travel by pay period',
+        columns: PAY_SUMMARY_HEADERS,
+        rows,
+        format,
+        filename,
+      });
+    } catch (e) {
+      alert(e.message || 'Export failed');
+    }
+  };
 
+  const downloadLaborPayExport = async (payRows, filenamePrefix, title, format) => {
+    const rows = buildLaborPayRows(payRows);
+    if (format === 'csv') {
+      downloadTableCsv(LABOR_PAY_HEADERS, rows, filenamePrefix);
+      return;
+    }
+    try {
+      await admin.exportTable({
+        title,
+        subtitle: 'Labour calculated from staff pay rates × hours',
+        columns: LABOR_PAY_HEADERS,
+        rows,
+        format,
+        filename: `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}`,
+      });
+    } catch (e) {
+      alert(e.message || 'Export failed');
+    }
+  };
   const handleSetRole = async (userId, role) => {
     try {
       await users.setRole(userId, role);
@@ -688,7 +724,8 @@ export default function AdminPage() {
           </p>
           <p style={{ color: '#64748b', marginBottom: '1rem', fontSize: '0.9rem', maxWidth: '48rem' }}>
             Download CSV for a spreadsheet-friendly file you can adjust and then use in Xero (manual timesheets or your payroll import).{' '}
-            <strong>Subcontractor CSV</strong> and <strong>Employee CSV</strong> include only staff with that employment type; hour columns are exported to two decimal places. <strong>Labor ($)</strong> is hourly rate from their
+            <strong>Subcontractor / Independent / Employee Excel</strong> include only staff with that employment type; hour columns are exported to two decimal places. <strong>Labor ($)</strong> is hourly rate from their
+            profile × hours. Use <strong>Download Excel</strong> or <strong>Download PDF</strong> for a clearer layout than CSV.
             profile × hours by bucket, and <strong>Total pay ($)</strong> adds expenses (reimbursements) on top.
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
@@ -717,13 +754,19 @@ export default function AdminPage() {
             <button type="button" className="btn btn-secondary" onClick={loadPaySummary} disabled={paySummaryLoading}>
               Refresh
             </button>
-            <button type="button" className="btn btn-primary" onClick={downloadPayCsv} disabled={paySummaryLoading || !payFilteredRows.length}>
+            <button type="button" className="btn btn-primary" onClick={() => downloadPayExport('xlsx')} disabled={paySummaryLoading || !payFilteredRows.length}>
+              Download Excel
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => downloadPayExport('pdf')} disabled={paySummaryLoading || !payFilteredRows.length}>
+              Download PDF
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => downloadPayExport('csv')} disabled={paySummaryLoading || !payFilteredRows.length}>
               Download CSV
             </button>
             <button
               type="button"
               className="btn btn-primary"
-              onClick={downloadSubcontractorPayCsv}
+              onClick={() => downloadLaborPayExport(subcontractorPayRows, 'subcontractor-pay', 'Subcontractor pay', 'xlsx')}
               disabled={paySummaryLoading || !subcontractorPayRows.length}
               title={
                 !subcontractorPayRows.length
@@ -731,12 +774,25 @@ export default function AdminPage() {
                   : undefined
               }
             >
-              Download subcontractor CSV ($)
+              Subcontractor Excel ($)
             </button>
             <button
               type="button"
               className="btn btn-primary"
-              onClick={downloadEmployeePayCsv}
+              onClick={() => downloadLaborPayExport(independentPayRows, 'independent-worker-pay', 'Independent support worker pay', 'xlsx')}
+              disabled={paySummaryLoading || !independentPayRows.length}
+              title={
+                !independentPayRows.length
+                  ? 'No independent support worker rows in the current filter.'
+                  : undefined
+              }
+            >
+              Independent Excel ($)
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => downloadLaborPayExport(employeePayRows, 'employee-pay', 'Employee pay', 'xlsx')}
               disabled={paySummaryLoading || !employeePayRows.length}
               title={
                 !employeePayRows.length
@@ -744,7 +800,7 @@ export default function AdminPage() {
                   : undefined
               }
             >
-              Download employee CSV ($)
+              Employee Excel ($)
             </button>
             {payAdjustMode && Object.keys(payEdits).length > 0 && (
               <button

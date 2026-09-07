@@ -345,6 +345,63 @@ router.get('/pay-summary', (req, res) => {
 });
 
 /**
+ * Download a readable table as Excel or PDF (pay summaries and similar admin exports).
+ * Body: { title, subtitle?, columns: string[], rows: any[][], format: 'xlsx'|'pdf', filename? }
+ */
+router.post('/export-table', async (req, res) => {
+  try {
+    const {
+      buildReadableExcelBuffer,
+      buildReadablePdfBuffer
+    } = await import('../services/readableTableExport.service.js');
+    const title = String(req.body?.title || 'Export').slice(0, 200);
+    const subtitle = String(req.body?.subtitle || '').slice(0, 300);
+    const columns = Array.isArray(req.body?.columns) ? req.body.columns.map((c) => String(c ?? '')) : [];
+    const rows = Array.isArray(req.body?.rows)
+      ? req.body.rows.map((row) => (Array.isArray(row) ? row.map((c) => (c == null ? '' : c)) : []))
+      : [];
+    if (!columns.length) return res.status(400).json({ error: 'columns are required' });
+    if (rows.length > 5000) return res.status(400).json({ error: 'Too many rows (max 5000)' });
+    const format = String(req.body?.format || 'xlsx').toLowerCase() === 'pdf' ? 'pdf' : 'xlsx';
+    const safeBase = String(req.body?.filename || title)
+      .replace(/[^a-zA-Z0-9-_]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 80) || 'export';
+    const metaLines = [
+      `Generated ${new Date().toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}`,
+      `${rows.length} row${rows.length === 1 ? '' : 's'}`
+    ];
+    if (format === 'pdf') {
+      const out = await buildReadablePdfBuffer({
+        title,
+        subtitle,
+        metaLines,
+        columns,
+        rows,
+        landscape: columns.length > 4
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeBase}.pdf"`);
+      return res.send(out);
+    }
+    const out = await buildReadableExcelBuffer({
+      title,
+      subtitle,
+      metaLines,
+      columns,
+      rows,
+      sheetName: title.slice(0, 31)
+    });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeBase}.xlsx"`);
+    return res.send(out);
+  } catch (err) {
+    console.error('[admin export-table]', err);
+    res.status(500).json({ error: err.message || 'Export failed' });
+  }
+});
+
+/**
  * Import historical case notes from a CSV (e.g. legacy CRM export).
  * Form fields: file (required), default_participant_id (optional), dry_run (optional "1" or "true") — preview only, no insert.
  * Recognises columns: participant_id / ndis_number, date, notes, optional contact_type. Semicolon- or comma-separated.

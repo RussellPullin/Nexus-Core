@@ -20,6 +20,11 @@ import {
   payRateFormFieldsFromRow,
   payRateOverridesFromFormFields,
 } from '../lib/payrollRates.js';
+import {
+  EMPLOYMENT_TYPE_OPTIONS,
+  employmentTypeLabel,
+  STAFF_COMPLIANCE_DOCUMENT_SHORT_LABELS,
+} from '@nexus-shared/staffComplianceDocs.js';
 
 const PAYROLL_SHIFT_STATUSES = ['completed', 'completed_by_admin'];
 
@@ -86,6 +91,7 @@ export default function StaffProfile() {
   const [newDocType, setNewDocType] = useState('first_aid');
   const [newDocFile, setNewDocFile] = useState(null);
   const [newDocExpiry, setNewDocExpiry] = useState('');
+  const [newDocDisplayName, setNewDocDisplayName] = useState('');
   const [editingExpiryDocId, setEditingExpiryDocId] = useState(null);
   const [editingExpiryValue, setEditingExpiryValue] = useState('');
   const [editForm, setEditForm] = useState(() => staffEditFormFromRow({}));
@@ -472,17 +478,7 @@ export default function StaffProfile() {
     }
   };
 
-  const docTypeLabel = (type) => {
-    const labels = {
-      drivers_licence_front: "Driver's licence (front)",
-      drivers_licence_back: "Driver's licence (back)",
-      blue_card: 'Blue Card',
-      yellow_card: 'Yellow Card',
-      first_aid: 'First Aid',
-      car_insurance: 'Car insurance'
-    };
-    return labels[type] || type;
-  };
+  const docTypeLabel = (type) => STAFF_COMPLIANCE_DOCUMENT_SHORT_LABELS[type] || type;
 
   const formatIntakeValue = (field) => {
     const raw = field?.value;
@@ -515,17 +511,29 @@ export default function StaffProfile() {
     { value: 'blue_card', label: 'Blue Card' },
     { value: 'yellow_card', label: 'Yellow Card' },
     { value: 'first_aid', label: 'First Aid Certificate' },
-    { value: 'car_insurance', label: 'Car insurance' }
+    { value: 'car_insurance', label: 'Car insurance' },
+    { value: 'other', label: 'Other certificate' },
   ];
 
   const handleUploadCompliance = async (e) => {
     e.preventDefault();
     if (!newDocFile) { alert('Choose a file.'); return; }
+    if (newDocType === 'other' && !newDocDisplayName.trim()) {
+      alert('Please name this certificate (e.g. CPR, Manual Handling).');
+      return;
+    }
     setComplianceUploading(true);
     try {
-      await staff.uploadComplianceDocument(id, newDocFile, newDocType, newDocExpiry || undefined);
+      await staff.uploadComplianceDocument(
+        id,
+        newDocFile,
+        newDocType,
+        newDocExpiry || undefined,
+        newDocType === 'other' ? newDocDisplayName.trim() : undefined
+      );
       setNewDocFile(null);
       setNewDocExpiry('');
+      setNewDocDisplayName('');
       if (e.target?.reset) e.target.reset();
       load();
     } catch (err) {
@@ -752,7 +760,7 @@ export default function StaffProfile() {
             <p><strong>Email:</strong> {data.email || '—'}</p>
             <p><strong>Phone:</strong> {data.phone || '—'}</p>
             <p><strong>Role:</strong> {data.role || '—'}</p>
-            <p><strong>Employment type:</strong> {data.employment_type === 'subcontractor' ? 'Subcontractor' : (data.employment_type === 'employee' ? 'Employee' : (data.employment_type || '—'))}</p>
+            <p><strong>Employment type:</strong> {employmentTypeLabel(data.employment_type)}</p>
             {data.pay_frequency && <p><strong>Pay frequency:</strong> {data.pay_frequency.charAt(0).toUpperCase() + data.pay_frequency.slice(1)}</p>}
             {data.governing_state && <p><strong>Governing state:</strong> {data.governing_state}</p>}
             {data.supervisor_name && <p><strong>Supervisor:</strong> {data.supervisor_name}</p>}
@@ -819,8 +827,9 @@ export default function StaffProfile() {
             <div className="form-group">
               <label>Employment type</label>
               <select value={editForm.employment_type} onChange={(e) => setEditForm({ ...editForm, employment_type: e.target.value })}>
-                <option value="employee">Employee</option>
-                <option value="subcontractor">Subcontractor</option>
+                {EMPLOYMENT_TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
             </div>
             <div className="form-group">
@@ -1177,7 +1186,47 @@ export default function StaffProfile() {
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h3>Compliance documents</h3>
-        <p style={{ color: '#64748b', marginBottom: '1rem' }}>Documents uploaded during onboarding. Expiry dates are checked daily; reminders are sent at 60, 30 and 7 days before expiry.</p>
+        <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+          Store Yellow Card, Blue Card, First Aid, licences, and other certificates. Expiry dates are checked daily; reminder emails go out at 60, 30 and 7 days before expiry (and when a document is already past due).
+        </p>
+        {data?.registration_readiness?.applicable && (
+          <div
+            style={{
+              marginBottom: '1rem',
+              padding: '0.85rem 1rem',
+              borderRadius: 8,
+              border: `1px solid ${data.registration_readiness.ready ? '#86efac' : '#fecaca'}`,
+              background: data.registration_readiness.ready ? '#f0fdf4' : '#fef2f2',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
+              <strong style={{ color: data.registration_readiness.ready ? '#166534' : '#991b1b' }}>
+                {data.registration_readiness.ready ? 'Registration ready' : 'Not registration ready'}
+              </strong>
+              <span style={{ color: '#475569', fontSize: '0.88rem' }}>{data.registration_readiness.summary}</span>
+            </div>
+            <p style={{ margin: '0.5rem 0 0.35rem', color: '#64748b', fontSize: '0.85rem' }}>
+              Independent support workers need Yellow Card, Blue Card, First Aid, and a driver&apos;s licence (front) on file and in date.
+            </p>
+            <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.88rem' }}>
+              {(data.registration_readiness.required || []).map((item) => (
+                <li key={item.document_type} style={{ marginBottom: '0.2rem' }}>
+                  <strong>{item.short_label}</strong>
+                  {': '}
+                  {!item.present
+                    ? 'Missing'
+                    : item.status === 'missing_expiry'
+                      ? 'Uploaded — add expiry date'
+                      : item.status === 'expired'
+                        ? `Expired ${item.expiry_date ? formatDate(item.expiry_date) : ''}`
+                        : item.status === 'expiring_soon'
+                          ? `Expiring soon (${item.expiry_date ? formatDate(item.expiry_date) : '—'})`
+                          : `Valid until ${item.expiry_date ? formatDate(item.expiry_date) : '—'}`}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
           <button type="button" className="btn btn-secondary" onClick={handleSendRenewalReminder} disabled={renewalSending || !data?.email}>
             {renewalSending ? 'Sending…' : 'Send renewal reminder'}
@@ -1187,7 +1236,7 @@ export default function StaffProfile() {
           </button>
         </div>
         {complianceDocs.length === 0 ? (
-          <p>No compliance documents yet. Staff can upload these when they complete the onboarding form.</p>
+          <p>No compliance documents yet. Upload certificates below, or staff can add them when they complete onboarding.</p>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -1243,7 +1292,7 @@ export default function StaffProfile() {
           </div>
         )}
         <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
-          <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Upload renewed document</h4>
+          <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Upload certificate</h4>
           <form onSubmit={handleUploadCompliance} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'flex-end' }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Document type</label>
@@ -1253,6 +1302,17 @@ export default function StaffProfile() {
                 ))}
               </select>
             </div>
+            {newDocType === 'other' && (
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Certificate name</label>
+                <input
+                  value={newDocDisplayName}
+                  onChange={(e) => setNewDocDisplayName(e.target.value)}
+                  placeholder="e.g. CPR, Manual Handling"
+                  style={{ minWidth: 180 }}
+                />
+              </div>
+            )}
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label>File</label>
               <input type="file" accept="image/*,.pdf" onChange={(e) => setNewDocFile(e.target.files?.[0] || null)} />

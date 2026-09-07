@@ -66,7 +66,7 @@ export const registers = {
     const q = new URLSearchParams({ row_key: rowKey, col_index: String(colIndex) });
     return fetchApi(`/registers/${encodeURIComponent(viewId)}/cell?${q.toString()}`, { method: 'DELETE' });
   },
-  exportUrl: ({ view, format = 'csv', from, to } = {}) => {
+  exportUrl: ({ view, format = 'xlsx', from, to } = {}) => {
     const q = new URLSearchParams();
     if (view) q.set('view', view);
     if (format) q.set('format', format);
@@ -81,6 +81,31 @@ export const admin = {
   billableSummary: (params) => fetchApi(`/admin/billable-summary?${new URLSearchParams(params || {}).toString()}`),
   financialOverview: (params) => fetchApi(`/admin/financial-overview?${new URLSearchParams(params || {}).toString()}`),
   paySummary: () => fetchApi('/admin/pay-summary'),
+  exportTable: async ({ title, subtitle, columns, rows, format = 'xlsx', filename } = {}) => {
+    const res = await fetch(`${API}/admin/export-table`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, subtitle, columns, rows, format, filename })
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+      throw new Error(err?.error || text || 'Export failed');
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = /filename="([^"]+)"/i.exec(disposition);
+    const name = match?.[1] || `${filename || 'export'}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
   refreshRegisters: () => fetchApi('/integrations/microsoft-drive/refresh-registers', { method: 'POST' }),
   /** Multipart: file, optional default_participant_id, optional dry_run=1 (preview only). */
   importCaseNotesCsv: async (formData) => {

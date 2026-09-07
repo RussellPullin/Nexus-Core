@@ -401,7 +401,7 @@ router.post('/:token/step', (req, res) => {
     }
     if (stepNum === 2 && stepData && typeof stepData === 'object') {
       const required = ['role', 'hourly_rate', 'bank_bsb', 'bank_account'];
-      if (stepData.employment_type === 'subcontractor') required.push('abn');
+      if (stepData.employment_type === 'subcontractor' || stepData.employment_type === 'independent_support_worker') required.push('abn');
       validateRequiredFields(stepData, required);
     }
     if (stepNum === 4 && stepData && typeof stepData === 'object') {
@@ -620,7 +620,7 @@ router.post('/:token/submit', async (req, res) => {
       'bank_bsb',
       'bank_account'
     ]);
-    if (mergedIntake.employment_type === 'subcontractor') validateRequiredFields(mergedIntake, ['abn']);
+    if (mergedIntake.employment_type === 'subcontractor' || mergedIntake.employment_type === 'independent_support_worker') validateRequiredFields(mergedIntake, ['abn']);
     if (mergedIntake.policy_acknowledged !== 'true' && mergedIntake.policy_acknowledged !== true) {
       return res.status(400).json({ error: 'Confirm policy acknowledgement before submitting.', missingFields: ['policy_acknowledged'] });
     }

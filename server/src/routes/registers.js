@@ -1,9 +1,13 @@
 import { Router } from 'express';
-import ExcelJS from 'exceljs';
 import { requireCoordinatorOrAdmin } from '../middleware/roles.js';
 import { db } from '../db/index.js';
 import { buildRegisterSnapshotForOrg, getOrgRegisterSettings, isRegisterEditableForOrg, saveOrgRegisterSettings, REGISTER_CATALOG, sheetKeyToViewId, createManualRegisterRow, deleteManualRegisterRow, migrateManualRegisterRowKey, isManualRegisterRowKey, REGISTER_CATALOG_BY_VIEW_ID } from '../services/registerSnapshots.service.js';
 import { ensureOnedriveLinkedRegistersImported, refreshOnedriveLinkedRegisters } from '../services/registerOnedriveImport.service.js';
+import {
+  buildCsvString,
+  buildReadableExcelBuffer,
+  buildReadablePdfBuffer
+} from '../services/readableTableExport.service.js';
 
 const router = Router();
 
@@ -45,12 +49,6 @@ function filterRowsByDate(view, from, to) {
     if (toTime != null && time > toTime) return false;
     return true;
   });
-}
-
-function csvEscape(value) {
-  const s = String(value ?? '');
-  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
 }
 
 function incidentPayload(body = {}) {
@@ -334,34 +332,52 @@ router.get('/export', requireCoordinatorOrAdmin, async (req, res) => {
     const orgId = requireOrg(req, res);
     if (!orgId) return;
     const viewId = VIEW_ALIASES[String(req.query.view || '').trim()] || 'staff_compliance_register';
-    const format = String(req.query.format || 'csv').toLowerCase() === 'xlsx' ? 'xlsx' : 'csv';
+    const formatRaw = String(req.query.format || 'xlsx').toLowerCase();
+    const format = ['xlsx', 'pdf', 'csv'].includes(formatRaw) ? formatRaw : 'xlsx';
     const snapshot = buildRegisterSnapshotForOrg(orgId);
     const view = snapshot.views.find((v) => v.id === viewId);
     if (!view) return res.status(404).json({ error: 'Register view not found' });
     const rows = filterRowsByDate(view, req.query.from, req.query.to);
     const baseName = `${view.id}-${new Date().toISOString().slice(0, 10)}`;
+    const org = db.prepare('SELECT name FROM organisations WHERE id = ?').get(orgId);
+    const title = view.title || view.id;
+    const subtitle = org?.name ? `${org.name} · Compliance register` : 'Compliance register';
+    const metaLines = [
+      `Generated ${new Date().toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}`,
+      `${rows.length} row${rows.length === 1 ? '' : 's'}${req.query.from || req.query.to ? ' (filtered by date)' : ''}`
+    ];
+    const primaryColor = '#1d4ed8';
 
     if (format === 'xlsx') {
-      const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet(view.title || view.id);
-      ws.columns = view.columns.map((header) => ({ header, key: header, width: Math.min(Math.max(String(header).length + 4, 14), 42) }));
-      for (const row of rows) {
-        const obj = {};
-        view.columns.forEach((col, idx) => {
-          obj[col] = row[idx] ?? '';
-        });
-        ws.addRow(obj);
-      }
-      ws.getRow(1).font = { bold: true };
-      ws.views = [{ state: 'frozen', ySplit: 1 }];
-      ws.autoFilter = `A1:${String.fromCharCode(64 + Math.max(1, Math.min(view.columns.length, 26)))}1`;
-      const out = await wb.xlsx.writeBuffer();
+      const out = await buildReadableExcelBuffer({
+        title,
+        subtitle,
+        metaLines,
+        columns: view.columns,
+        rows,
+        sheetName: view.title || view.id,
+        primaryColor
+      });
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
-      return res.send(Buffer.isBuffer(out) ? out : Buffer.from(out));
+      return res.send(out);
     }
 
-    const csv = [view.columns, ...rows].map((row) => row.map(csvEscape).join(',')).join('\r\n');
+    if (format === 'pdf') {
+      const out = await buildReadablePdfBuffer({
+        title,
+        subtitle,
+        metaLines,
+        columns: view.columns,
+        rows,
+        landscape: view.columns.length > 4
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.pdf"`);
+      return res.send(out);
+    }
+
+    const csv = buildCsvString(view.columns, rows);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${baseName}.csv"`);
     res.send(csv);

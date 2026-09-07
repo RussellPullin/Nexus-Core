@@ -38,6 +38,14 @@ import { tryPushStaffDocument, resolveOrgIdForStaff } from '../services/orgOnedr
 import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 import { decrypt } from '../lib/crypto.js';
 import { upsertStaffComplianceDocument } from '../services/staffComplianceDocuments.service.js';
+import {
+  buildRegistrationReadinessMap,
+  buildStaffRegistrationReadiness
+} from '../services/staffRegistrationReadiness.service.js';
+import {
+  STAFF_COMPLIANCE_DOCUMENT_LABELS,
+  documentTypeLabel
+} from '../../../shared/staffComplianceDocs.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../../..');
@@ -45,14 +53,7 @@ const dataDir = process.env.DATA_DIR || join(projectRoot, 'data');
 const staffUploadsDir = join(dataDir, 'uploads', 'staff');
 
 const DOCUMENT_TYPES = ['drivers_licence_front', 'drivers_licence_back', 'blue_card', 'yellow_card', 'first_aid', 'car_insurance'];
-const DOCUMENT_TYPE_LABELS = {
-  drivers_licence_front: "Driver's licence (front)",
-  drivers_licence_back: "Driver's licence (back)",
-  blue_card: 'Blue Card (Working With Children Check)',
-  yellow_card: 'Yellow Card (Disability Worker Screening)',
-  first_aid: 'First Aid Certificate',
-  car_insurance: 'Car insurance certificate',
-};
+const DOCUMENT_TYPE_LABELS = { ...STAFF_COMPLIANCE_DOCUMENT_LABELS };
 
 function cleanDocumentDisplayName(value, fallback) {
   const cleaned = value == null ? '' : String(value).trim().replace(/\s+/g, ' ').slice(0, 120);
@@ -309,6 +310,11 @@ router.get('/', async (req, res) => {
     } else {
       enriched = staff.map((s) => ({ ...s, ...shifterDefaults }));
     }
+    const readinessMap = buildRegistrationReadinessMap(enriched);
+    enriched = enriched.map((s) => ({
+      ...s,
+      registration_readiness: readinessMap[s.id] || null
+    }));
     res.json(enriched);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -623,15 +629,16 @@ router.get('/:id', async (req, res) => {
     shifter_status: 'not_enabled',
     supabase_profile_id: null,
   };
+  const registration_readiness = buildStaffRegistrationReadiness(s);
   if (!isSupabaseShifterConfigured()) {
-    return res.json({ ...s, ...shifterDefaults });
+    return res.json({ ...s, ...shifterDefaults, registration_readiness });
   }
   try {
     const shifterMap = await getShifterFieldsByStaffId([s]);
-    return res.json({ ...s, ...(shifterMap.get(s.id) || shifterDefaults) });
+    return res.json({ ...s, ...(shifterMap.get(s.id) || shifterDefaults), registration_readiness });
   } catch (e) {
     console.error('[staff get] shifter enrich failed:', e);
-    return res.json({ ...s, ...shifterDefaults, shifter_enrich_error: true });
+    return res.json({ ...s, ...shifterDefaults, shifter_enrich_error: true, registration_readiness });
   }
 });
 
@@ -1593,9 +1600,20 @@ router.post('/:id/send-renewal-reminder', requireAdminOrDelegate, async (req, re
     if (!isEmailConfiguredForUser(userId)) {
       return res.status(400).json({ error: 'Connect your email in Settings.', code: 'EMAIL_NOT_CONNECTED' });
     }
-    const docs = db.prepare('SELECT document_type, expiry_date, status FROM staff_compliance_documents WHERE staff_id = ? AND (status = ? OR status = ?)').all(req.params.id, 'expiring_soon', 'expired');
+    const docs = db
+      .prepare(
+        'SELECT document_type, display_name, expiry_date, status FROM staff_compliance_documents WHERE staff_id = ? AND (status = ? OR status = ?)'
+      )
+      .all(req.params.id, 'expiring_soon', 'expired');
     const subject = 'Compliance document renewal reminder – Nexus Core';
-    const text = `Hi ${s.name},\n\nPlease renew the following compliance document(s) and upload via the link we will send you, or contact your manager.\n\n${docs.map((d) => `- ${d.document_type}: expires ${d.expiry_date || 'N/A'} (${d.status})`).join('\n')}\n\nThank you.`;
+    const lines =
+      docs.length > 0
+        ? docs.map(
+            (d) =>
+              `- ${documentTypeLabel(d.document_type, d.display_name)}: expires ${d.expiry_date || 'N/A'} (${String(d.status || '').replace(/_/g, ' ')})`
+          )
+        : ['- (No expiring/expired documents currently flagged — please check your certificates are still in date.)'];
+    const text = `Hi ${s.name},\n\nPlease renew the following compliance document(s) and upload via the renewal link your manager can send you, or contact your manager.\n\n${lines.join('\n')}\n\nKeeping your Yellow Card, Blue Card, and other certificates up to date keeps you registration-ready.\n\nThank you.`;
     await sendEmailViaRelay(userId, s.email, subject, text, null, null);
     const manager = s.manager_id ? db.prepare('SELECT email FROM staff WHERE id = ?').get(s.manager_id) : null;
     if (manager?.email) {
