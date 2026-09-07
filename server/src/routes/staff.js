@@ -38,10 +38,7 @@ import { tryPushStaffDocument, resolveOrgIdForStaff } from '../services/orgOnedr
 import { getEmailConfigForUser, getRelayConfigFromEnv } from '../lib/emailSendConfig.js';
 import { decrypt } from '../lib/crypto.js';
 import { upsertStaffComplianceDocument } from '../services/staffComplianceDocuments.service.js';
-import {
-  buildRegistrationReadinessMap,
-  buildStaffRegistrationReadiness
-} from '../services/staffRegistrationReadiness.service.js';
+import { buildStaffRegistrationReadiness } from '../services/staffRegistrationReadiness.service.js';
 import {
   STAFF_COMPLIANCE_DOCUMENT_LABELS,
   documentTypeLabel
@@ -310,11 +307,6 @@ router.get('/', async (req, res) => {
     } else {
       enriched = staff.map((s) => ({ ...s, ...shifterDefaults }));
     }
-    const readinessMap = buildRegistrationReadinessMap(enriched);
-    enriched = enriched.map((s) => ({
-      ...s,
-      registration_readiness: readinessMap[s.id] || null
-    }));
     res.json(enriched);
   } catch (err) {
     res.status(500).json({ error: err.message });

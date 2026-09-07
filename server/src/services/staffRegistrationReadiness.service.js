@@ -1,6 +1,6 @@
 /**
- * Registration readiness for independent support workers (Shifter Pro / sole traders).
- * Tracks Yellow Card, Blue Card, and other required certificates with in-date status.
+ * Registration readiness for the logged-in independent support worker (Shifter Pro).
+ * One person per instance — checklist is personal, not a multi-worker list.
  */
 import { db } from '../db/index.js';
 import {
@@ -146,19 +146,4 @@ export function buildStaffRegistrationReadiness(staff) {
       additional: optionalStored.length
     }
   };
-}
-
-/**
- * Batch readiness for a list of staff ids (list views).
- * @param {Array<{ id: string, employment_type?: string|null }>} staffRows
- */
-export function buildRegistrationReadinessMap(staffRows) {
-  /** @type {Record<string, object>} */
-  const map = {};
-  for (const s of staffRows || []) {
-    if (!s?.id) continue;
-    if (!isIndependentSupportWorker(s.employment_type)) continue;
-    map[s.id] = buildStaffRegistrationReadiness(s);
-  }
-  return map;
 }

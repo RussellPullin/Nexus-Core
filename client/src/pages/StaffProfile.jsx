@@ -1206,7 +1206,7 @@ export default function StaffProfile() {
               <span style={{ color: '#475569', fontSize: '0.88rem' }}>{data.registration_readiness.summary}</span>
             </div>
             <p style={{ margin: '0.5rem 0 0.35rem', color: '#64748b', fontSize: '0.85rem' }}>
-              Independent support workers need Yellow Card, Blue Card, First Aid, and a driver&apos;s licence (front) on file and in date.
+              Keep your Yellow Card, Blue Card, First Aid, and driver&apos;s licence (front) on file and in date so you stay registration-ready.
             </p>
             <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.88rem' }}>
               {(data.registration_readiness.required || []).map((item) => (
