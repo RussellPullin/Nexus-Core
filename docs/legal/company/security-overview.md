@@ -49,7 +49,16 @@ Suspected personal information breaches are handled under our [Data Breach Respo
 
 Nexus Core Solutions personnel access production data only when necessary for support, security, or operations, under confidentiality obligations.
 
-## 7. Questions / questionnaires
+## 7. Enterprise diligence
+
+For large-organisation reviews, use:
+
+- [Trust Center one-pager](../enterprise/trust-center.md)
+- [Security Questionnaire Response Pack](../enterprise/security-questionnaire-pack.md)
+- [Enterprise readiness roadmap](../enterprise/README.md)
+- [Controls mapping (SOC 2 / ISO bridging)](../enterprise/controls-mapping.md)
+
+## 8. Questions / questionnaires
 
 Security questionnaires: nexuscoresolutions@outlook.com  
 Subject: `Security review`

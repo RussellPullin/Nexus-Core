@@ -42,3 +42,19 @@ Use this after legal review of `docs/legal/`.
 - [ ] Attach DPA + Customer Terms to trial/paid signup flow
 - [ ] Store executed agreements
 - [ ] Schedule annual review reminder
+
+## Enterprise readiness (large-company diligence)
+
+- [ ] Read and follow `enterprise/README.md` 90-day roadmap
+- [ ] Approve policies in `policies/POLICY-REGISTER.md` (owners + dates)
+- [ ] Create private evidence vault; fill `evidence/EVIDENCE-INVENTORY.md`
+- [ ] Enforce MFA for all production admin accounts
+- [ ] Run joiner/leaver process once end-to-end; keep access review log
+- [ ] Complete backup restore test; file notes in vault
+- [ ] Tabletop the data breach plan; keep minutes
+- [ ] Place cyber + PI/public liability insurance; store certificates
+- [ ] Commission vulnerability scan / pen test; track remediations
+- [ ] Customise `enterprise/security-questionnaire-pack.md` with real numbers
+- [ ] Publish `/security` (and optional `/trust`) from Trust Center + Security Overview
+- [ ] Decide SOC 2 vs ISO path; do **not** claim certification early
+- [ ] Use `enterprise/deal-checklist.md` before each large signature

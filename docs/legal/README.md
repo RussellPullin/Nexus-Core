@@ -89,7 +89,25 @@ This folder holds the **vendor / SaaS** forms and policies Nexus Core Solutions 
 | Account deletion instructions | Apple requirement | P0 | [`shifter-pro/account-deletion.md`](shifter-pro/account-deletion.md) |
 | App Privacy Labels worksheet | Extra categories vs Shifter | P1 | [`shifter-pro/app-privacy-labels.md`](shifter-pro/app-privacy-labels.md) |
 
-### E. Not in this pack (customer NDIS provider obligations)
+### E. Enterprise sales readiness (large-company diligence)
+
+Large buyers ask for policies, questionnaire answers, and evidence — not only public privacy pages. See **[`enterprise/README.md`](enterprise/README.md)** for the roadmap.
+
+| Document | Why required | Priority | Draft location |
+|----------|--------------|----------|----------------|
+| Enterprise readiness roadmap | What to do in 90 days to sell to large orgs | P0 | [`enterprise/README.md`](enterprise/README.md) |
+| Trust Center one-pager | First attachment for security reviews | P0 | [`enterprise/trust-center.md`](enterprise/trust-center.md) |
+| Security questionnaire pack | Pre-answered SIG/CAIQ-style questions | P0 | [`enterprise/security-questionnaire-pack.md`](enterprise/security-questionnaire-pack.md) |
+| Controls mapping (SOC 2 / ISO) | Bridging artefact until certified | P1 | [`enterprise/controls-mapping.md`](enterprise/controls-mapping.md) |
+| Enterprise deal checklist | Pre-signature gate | P1 | [`enterprise/deal-checklist.md`](enterprise/deal-checklist.md) |
+| ISMS policy set | Access, SDLC, vulns, BCP/DR, retention, vendors, HR, crypto, logging, change | P0 | [`policies/`](policies/) |
+| Policy register | Adoption tracking | P0 | [`policies/POLICY-REGISTER.md`](policies/POLICY-REGISTER.md) |
+| Evidence inventory | Private vault index for audits | P0 | [`evidence/EVIDENCE-INVENTORY.md`](evidence/EVIDENCE-INVENTORY.md) |
+| PIA / DPIA template | Before new sensitive-data features | P1 | [`policies/pia-dpia-template.md`](policies/pia-dpia-template.md) |
+
+**Do not claim SOC 2 or ISO 27001 until an auditor certifies you.** The pack supports honest “aligned practices + roadmap” answers.
+
+### F. Not in this pack (customer NDIS provider obligations)
 
 Customer organisations still need their own NDIS policies/registers (services agreements, incident management, worker screening, etc.). Those live in the **document library** shipped inside Nexus Core — see `docs/doc-library-remediation/`. Do not conflate vendor SaaS legal pages with provider registration evidence.
 
@@ -110,11 +128,12 @@ Publish (or copy) drafts to the marketing site as:
 | `/terms/shifter` | Shifter ToU |
 | `/terms/shifter-pro` | Shifter Pro ToU (+ IAP) |
 | `/dpa` | Data Processing Addendum |
-| `/security` | Security overview |
+| `/security` | Security overview (+ link to Trust Center summary) |
 | `/cookies` | Cookie notice |
 | `/subprocessors` | Subprocessor list |
 | `/legal/account-deletion` | Combined account deletion for both apps |
 | `/aup` | Acceptable Use Policy |
+| `/trust` (optional) | Public Trust Center one-pager |
 
 App Store Connect:
 
@@ -129,7 +148,8 @@ App Store Connect:
 2. Have an Australian privacy/commercial lawyer review (especially DPA, SaaS terms, health/disability data handling).
 3. Align App Store seller name and privacy URLs.
 4. Publish to the marketing site; keep this folder as source of truth until the site repo owns the HTML.
-5. Review annually or when subprocessors / products change.
+5. For enterprise deals: follow [`enterprise/README.md`](enterprise/README.md), adopt policies in `policies/`, and fill the private [`evidence/EVIDENCE-INVENTORY.md`](evidence/EVIDENCE-INVENTORY.md).
+6. Review annually or when subprocessors / products change.
 
 ---
 
@@ -138,29 +158,12 @@ App Store Connect:
 ```
 docs/legal/
   README.md                          ← this matrix
-  company/
-    privacy-policy.md
-    website-terms.md
-    cookie-notice.md
-    acceptable-use-policy.md
-    subprocessors.md
-    security-overview.md
-    collection-notice.md
-  nexus-core/
-    privacy-policy.md
-    customer-terms.md
-    data-processing-addendum.md
-    service-level-agreement.md
-  shifter/
-    privacy-policy.md
-    terms-of-use.md
-    account-deletion.md
-    app-privacy-labels.md
-  shifter-pro/
-    privacy-policy.md
-    terms-of-use.md
-    account-deletion.md
-    app-privacy-labels.md
-  internal/
-    data-breach-response-plan.md
+  PUBLISHING-CHECKLIST.md
+  company/                           ← public legal pages
+  nexus-core/                        ← SaaS terms, DPA, privacy, SLA
+  shifter/ · shifter-pro/            ← app privacy, ToU, deletion, labels
+  internal/                          ← breach response playbook
+  enterprise/                        ← trust center, questionnaire, deal checklist
+  policies/                          ← ISMS-style internal policies
+  evidence/                          ← audit artefact index (not secrets)
 ```
