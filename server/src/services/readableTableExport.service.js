@@ -239,23 +239,25 @@ export function buildReadablePdfBuffer(opts) {
       const fontSize = colCount > 8 ? 7 : colCount > 5 ? 8 : 9;
 
       const drawHeader = () => {
+        const headerTop = doc.y;
         doc.save();
-        doc.rect(doc.page.margins.left, doc.y, pageWidth, headerHeight).fill('#1d4ed8');
+        doc.rect(doc.page.margins.left, headerTop, pageWidth, headerHeight).fill('#1d4ed8');
         let x = doc.page.margins.left;
         columns.forEach((col) => {
           doc
             .fillColor('#ffffff')
             .font('Helvetica-Bold')
             .fontSize(fontSize)
-            .text(sanitizePdfText(col), x + 3, doc.y + 6, {
+            .text(sanitizePdfText(col), x + 3, headerTop + 6, {
               width: colWidth - 6,
               height: headerHeight - 8,
+              lineBreak: false,
               ellipsis: true
             });
           x += colWidth;
         });
         doc.restore();
-        doc.y += headerHeight;
+        doc.y = headerTop + headerHeight;
       };
 
       drawHeader();
@@ -288,12 +290,13 @@ export function buildReadablePdfBuffer(opts) {
           const raw = String(values[i] ?? '');
           const rgb = STATUS_PDF_RGB[raw];
           doc
-            .fillColor(rgb ? `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})` : '#0f172a')
+            .fillColor(rgb || '#0f172a')
             .font(rgb ? 'Helvetica-Bold' : 'Helvetica')
             .fontSize(fontSize)
             .text(sanitizePdfText(raw), x + 3, rowTop + rowPad, {
               width: colWidth - 6,
               height: rowHeight - rowPad,
+              lineBreak: false,
               ellipsis: true
             });
           x += colWidth;
