@@ -15,7 +15,7 @@ import {
 const PARTICIPANT_LABELS = participantFieldLabels();
 
 function agreementPackSlugsForServiceType(serviceType) {
-  const slugs = ['privacy-consent-form', 'service-schedule', 'core:service_agreement', 'service_agreement'];
+  const slugs = ['privacy-consent-form', 'service-schedule'];
   if (serviceType === 'sil') slugs.push('services-agreement-sil');
   else if (serviceType === 'support_coordination') slugs.push('support-coordination-services-agreement', 'conflict-of-interest-declaration');
   else slugs.push('services-agreement');

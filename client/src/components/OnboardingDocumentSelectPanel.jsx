@@ -156,10 +156,10 @@ export default function OnboardingDocumentSelectPanel({
         setDocuments(docs);
         const preferred = Array.isArray(preferredSlugs) ? preferredSlugs.filter(Boolean) : [];
         if (preferred.length) {
-          const hasCoreSa = docs.some((d) => d.id === 'core:service_agreement' && (preferred.includes('core:service_agreement') || preferred.includes('service_agreement')));
           const librarySa = new Set(['services-agreement', 'services-agreement-sil', 'support-coordination-services-agreement']);
+          const prefersLibrarySa = preferred.some((s) => librarySa.has(s));
           setSelectedIds(new Set(docs.filter((d) => {
-            if (hasCoreSa && librarySa.has(d.slug)) return false;
+            if (d.id === 'core:service_agreement' && prefersLibrarySa) return false;
             return preferred.includes(d.slug) || preferred.includes(d.id);
           }).map((d) => d.id)));
         } else {
@@ -246,9 +246,10 @@ export default function OnboardingDocumentSelectPanel({
     const docsNeedingInput = documents.filter((d) => {
       if (!selectedIds.has(d.id)) return false;
       if (d.admin_fields?.length) return true;
-      // Staff multi-signer forms have organisation sections to complete and sign in Nexus Core
-      // before the worker is emailed — even when the manifest has no admin_fields array.
-      if (!isParticipant && (d.needs_admin_prepare || Number(d.signature_count) >= 2)) return true;
+      // Multi-signer library forms (new Services Agreement, Service Schedule, Privacy Consent)
+      // have organisation sections to complete and sign in Nexus Core before the participant
+      // is emailed — same prepare step as staff onboarding.
+      if (d.needs_admin_prepare || Number(d.signature_count) >= 2) return true;
       return false;
     });
     if (docsNeedingInput.length) {
@@ -366,7 +367,7 @@ export default function OnboardingDocumentSelectPanel({
         </select>
         <p className="forms-muted" style={{ fontSize: '0.85rem', margin: '0.35rem 0 0' }}>
           {Array.isArray(preferredSlugs) && preferredSlugs.length
-            ? 'Service agreement, service schedule, and privacy consent are pre-selected. Conflict of interest is included for support coordination. You can change any selection before sending.'
+            ? 'The library Services Agreement, Service Schedule, and Privacy Consent are pre-selected. Conflict of interest is included for support coordination. You can change any selection before sending.'
             : <>Documents tagged for <strong>{contextLabel}</strong> are pre-selected. You can change any selection before sending.</>}
         </p>
       </div>

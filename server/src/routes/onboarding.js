@@ -458,7 +458,7 @@ router.post('/participants/:id/send-onboarding-pack', async (req, res) => {
       if (err.code === 'ESIGNATURE_NOT_ENABLED' || err.code === 'DOCUSEAL_NOT_ENABLED') {
         return res.status(400).json({ error: err.message, code: err.code });
       }
-      if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING') {
+      if (err.code === 'ORG_SIGNATORY_MISSING' || err.code === 'SIGNER_EMAIL_MISSING' || err.code === 'ORG_FIELDS_REQUIRED') {
         return res.status(400).json({ error: err.message, code: err.code });
       }
       throw err;
@@ -561,7 +561,13 @@ router.get('/participants/:id/onboarding-org-fields/:masterId', requireAdminOrDe
     }
     const master = listOnboardingLibraryMasters(orgId, 'participant_onboarding').find((m) => m.id === req.params.masterId);
     if (!master) return res.status(404).json({ error: 'Document not found' });
-    const fields = await getLibraryMasterOrgFields({ masterId: master.id, orgId, workflow: 'participant_onboarding' });
+    const participant = db.prepare('SELECT * FROM participants WHERE id = ?').get(req.params.id);
+    const fields = await getLibraryMasterOrgFields({
+      masterId: master.id,
+      orgId,
+      workflow: 'participant_onboarding',
+      participant
+    });
     res.json({ fields });
   } catch (err) {
     res.status(500).json({ error: err.message });
