@@ -982,6 +982,30 @@ try {
 
   try {
     db.exec(`
+      CREATE TABLE IF NOT EXISTS participant_signature_envelopes (
+        id TEXT PRIMARY KEY,
+        envelope_id TEXT NOT NULL UNIQUE,
+        participant_id TEXT NOT NULL,
+        org_id TEXT,
+        display_name TEXT,
+        status TEXT DEFAULT 'sent',
+        sent_at TEXT DEFAULT (datetime('now')),
+        completed_at TEXT,
+        signed_document_path TEXT,
+        certificate_document_path TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_participant_signature_envelopes_participant ON participant_signature_envelopes(participant_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_participant_signature_envelopes_envelope ON participant_signature_envelopes(envelope_id)');
+  } catch (e) {
+    if (!e.message?.includes('already exists')) console.warn('participant_signature_envelopes migration:', e.message);
+  }
+
+  try {
+    db.exec(`
       CREATE TABLE IF NOT EXISTS audit_events (
         id TEXT PRIMARY KEY,
         participant_id TEXT,

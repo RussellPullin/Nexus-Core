@@ -356,6 +356,12 @@ async function sendSignaturePacket(orgId, workflow, packetMasters, { staff, part
        VALUES (?, ?, ?, ?, ?, 'sent', datetime('now'))`
     ).run(uuidv4(), envelopeId, staff.id, orgId, docNames);
   }
+  if (workflow === 'participant_onboarding' && participant?.id) {
+    db.prepare(
+      `INSERT INTO participant_signature_envelopes (id, envelope_id, participant_id, org_id, display_name, status, sent_at)
+       VALUES (?, ?, ?, ?, ?, 'sent', datetime('now'))`
+    ).run(uuidv4(), envelopeId, participant.id, orgId, docNames);
+  }
 
   return {
     signatureRequests: prepared.map((p) => ({

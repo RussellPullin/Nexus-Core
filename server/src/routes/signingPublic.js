@@ -468,6 +468,14 @@ router.post('/:token/submit', async (req, res) => {
            WHERE envelope_id = ?`
         ).run(signedDocPath, certificateDocPath, signer.envelope_id);
       }
+      const participantLink = db.prepare('SELECT id FROM participant_signature_envelopes WHERE envelope_id = ?').get(signer.envelope_id);
+      if (participantLink) {
+        db.prepare(
+          `UPDATE participant_signature_envelopes
+           SET status = 'signed', completed_at = datetime('now'), signed_document_path = ?, certificate_document_path = ?, updated_at = datetime('now')
+           WHERE envelope_id = ?`
+        ).run(signedDocPath, certificateDocPath, signer.envelope_id);
+      }
       markActivityRiskRecordSignedFromEnvelope(signer.envelope_id, {
         signedDocumentPath: signedDocPath
       });

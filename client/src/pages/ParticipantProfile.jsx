@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { backToPreviousListPath, participantProfileBackLabel } from '../lib/listViewUrl.js';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
-import { participants, organisations, ndis, smartDefaults, onboarding, formTemplates } from '../lib/api';
-import { NEXUS_CORE_SIGN_COMING_SOON_TITLE, useSignEnabled } from '../lib/featureFlags.js';
+import { participants, organisations, ndis, smartDefaults, onboarding } from '../lib/api';
 import CopyableField from '../components/CopyableField';
 import ActivityRiskAssessmentAssign from '../components/ActivityRiskAssessmentAssign';
 import AddressAutocomplete from '../components/AddressAutocomplete';
@@ -195,197 +194,12 @@ export default function ParticipantProfile() {
   const [orchestratorBusy, setOrchestratorBusy] = useState(false);
   const [orchestratorResult, setOrchestratorResult] = useState(null);
   const [orchestratorError, setOrchestratorError] = useState('');
-  // Phase 4 — intake-link UI state.
-  const [intakeIssuing, setIntakeIssuing] = useState(false);
-  const [intakeLinkResult, setIntakeLinkResult] = useState(null);
-  const [intakeLinkError, setIntakeLinkError] = useState('');
-  const [showIntakeSendPanel, setShowIntakeSendPanel] = useState(false);
-  const [intakeSendToMode, setIntakeSendToMode] = useState('participant'); // 'participant' | 'other'
-  const [intakeSendToEmail, setIntakeSendToEmail] = useState('');
-  const [intakeSendToNote, setIntakeSendToNote] = useState('');
   const [expandedBudgetCards, setExpandedBudgetCards] = useState({});
   const [allNdisItems, setAllNdisItems] = useState([]);
   const [copiedGoalKey, setCopiedGoalKey] = useState(null);
   const [invoiceEmailInput, setInvoiceEmailInput] = useState('');
-  const [saTemplates, setSaTemplates] = useState([]);
-  const [saSelectedTemplate, setSaSelectedTemplate] = useState('');
-  const [saAgreements, setSaAgreements] = useState([]);
-  const [saLoading, setSaLoading] = useState(false);
-  const [saSaving, setSaSaving] = useState(false);
-  const [saMessage, setSaMessage] = useState('');
-  const [saOverrides, setSaOverrides] = useState({
-    agreement_date: '',
-    scheduled_review_date: '',
-    monitoring_worker_frequency: '',
-    other_provider_consultation_frequency: '',
-    communication_preferences: '',
-    services: [
-      { description: '', rate: '', hours: '' },
-      { description: '', rate: '', hours: '' },
-      { description: '', rate: '', hours: '' },
-      { description: '', rate: '', hours: '' },
-      { description: '', rate: '', hours: '' }
-    ]
-  });
-  const [saGaps, setSaGaps] = useState(null);
-  const [saPreflightLoading, setSaPreflightLoading] = useState(false);
-  const [saSignBusy, setSaSignBusy] = useState(false);
-  const signEnabled = useSignEnabled();
-  const [saScrollTarget, setSaScrollTarget] = useState(null);
-
-  const saInstanceOverridesPayload = useMemo(() => {
-    const o = saOverrides;
-    const instance_overrides = {};
-    if (o.agreement_date) instance_overrides.agreement_date = o.agreement_date;
-    if (o.scheduled_review_date) instance_overrides.scheduled_review_date = o.scheduled_review_date;
-    if (o.monitoring_worker_frequency?.trim()) instance_overrides.monitoring_worker_frequency = o.monitoring_worker_frequency.trim();
-    if (o.other_provider_consultation_frequency?.trim()) {
-      instance_overrides.other_provider_consultation_frequency = o.other_provider_consultation_frequency.trim();
-    }
-    if (o.communication_preferences?.trim()) instance_overrides.communication_preferences = o.communication_preferences.trim();
-    const services = (Array.isArray(o.services) ? o.services : [])
-      .map((s) => ({
-        description: String(s?.description || '').trim(),
-        rate: Number(s?.rate) || 0,
-        hours: Number(s?.hours) || 0
-      }))
-      .filter((s) => s.description || s.rate || s.hours);
-    if (services.length > 0) instance_overrides.services = services;
-    return instance_overrides;
-  }, [saOverrides]);
-
-  const saServicesTotals = useMemo(() => {
-    const list = Array.isArray(saOverrides.services) ? saOverrides.services : [];
-    const lines = list.map((s) => {
-      const rate = Number(s?.rate) || 0;
-      const hours = Number(s?.hours) || 0;
-      return Math.round(rate * hours * 100) / 100;
-    });
-    const total = Math.round(lines.reduce((a, b) => a + b, 0) * 100) / 100;
-    const completeRows = list.filter((s) => {
-      const rate = Number(s?.rate) || 0;
-      const hours = Number(s?.hours) || 0;
-      return String(s?.description || '').trim() && rate > 0 && hours > 0;
-    }).length;
-    return { lines, total, completeRows };
-  }, [saOverrides.services]);
-
-  const saPreSendChecklist = useMemo(() => {
-    const fmtDob = data?.date_of_birth ? formatDate(String(data.date_of_birth).slice(0, 10)) : '';
-    return [
-      { key: 'name', label: 'Full name', value: data?.name },
-      { key: 'address', label: 'Address', value: data?.address },
-      { key: 'phone', label: 'Phone', value: data?.phone || data?.mobile },
-      { key: 'email', label: 'Participant email (signing step 2)', value: data?.email },
-      { key: 'ndis_number', label: 'NDIS number', value: data?.ndis_number },
-      { key: 'dob', label: 'Date of birth', value: fmtDob },
-      { key: 'agreement_date', label: 'Agreement date', value: saOverrides.agreement_date },
-      { key: 'review_date', label: 'Scheduled review date', value: saOverrides.scheduled_review_date },
-      {
-        key: 'services',
-        label: 'Services & quote (at least one line)',
-        value: saServicesTotals.completeRows > 0
-          ? `${saServicesTotals.completeRows} line${saServicesTotals.completeRows === 1 ? '' : 's'} · Total $${saServicesTotals.total.toFixed(2)}`
-          : ''
-      }
-    ];
-  }, [
-    data?.name,
-    data?.address,
-    data?.phone,
-    data?.mobile,
-    data?.email,
-    data?.ndis_number,
-    data?.date_of_birth,
-    saOverrides.agreement_date,
-    saOverrides.scheduled_review_date,
-    saServicesTotals.completeRows,
-    saServicesTotals.total
-  ]);
-
-  const saChecklistMissing = saPreSendChecklist.filter((r) => !String(r.value || '').trim());
-  const saReadyToSend = saChecklistMissing.length === 0;
-
-  const navigateToGapFix = useCallback(
-    (gap) => {
-      const fix = gap?.fix;
-      if (!fix || !data) return;
-      if (fix.kind === 'participant_profile') {
-        setTab(fix.tab || 'overview');
-        if (fix.open_edit) {
-          setEditForm({ ...data, invoice_emails: parseInvoiceEmailsField(data.invoice_emails) });
-          setInvoiceEmailInput('');
-        }
-        if (fix.anchor_id) setSaScrollTarget(fix.anchor_id);
-        return;
-      }
-      if (fix.kind === 'forms') {
-        navigate(`${pathPrefix}/forms`);
-        return;
-      }
-      if (fix.kind === 'settings') {
-        const q = new URLSearchParams({ expand: fix.section || 'company' });
-        navigate(`${pathPrefix}/settings?${q.toString()}`);
-        return;
-      }
-      if (fix.kind === 'agreements_tab') {
-        setTab('agreements');
-        if (fix.anchor_id) setSaScrollTarget(fix.anchor_id);
-      }
-    },
-    [data, navigate, pathPrefix]
-  );
-
-  useEffect(() => {
-    if (tab !== 'agreements') {
-      setSaGaps(null);
-      setSaPreflightLoading(false);
-      return;
-    }
-    if (!id || !saSelectedTemplate || !data) {
-      setSaGaps(null);
-      return;
-    }
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      setSaPreflightLoading(true);
-      participants
-        .preflightServiceAgreement(id, {
-          org_template_id: saSelectedTemplate,
-          instance_overrides: saInstanceOverridesPayload
-        })
-        .then((res) => {
-          if (!cancelled) setSaGaps(res);
-        })
-        .catch(() => {
-          if (!cancelled) setSaGaps(null);
-        })
-        .finally(() => {
-          if (!cancelled) setSaPreflightLoading(false);
-        });
-    }, 450);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [tab, id, saSelectedTemplate, saInstanceOverridesPayload, data]);
-
-  useEffect(() => {
-    if (!saScrollTarget) return undefined;
-    const timer = window.setTimeout(() => {
-      const el = document.getElementById(saScrollTarget);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.style.transition = 'box-shadow 0.25s ease';
-        el.style.boxShadow = '0 0 0 3px rgba(234, 179, 8, 0.95)';
-        window.setTimeout(() => {
-          el.style.boxShadow = '';
-        }, 2400);
-      }
-      setSaScrollTarget(null);
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [saScrollTarget, tab, editForm]);
+  const [onboardingAgreements, setOnboardingAgreements] = useState([]);
+  const [agreementsLoading, setAgreementsLoading] = useState(false);
 
   const copyGoalLine = async (key, text) => {
     if (!String(text || '').trim()) return;
@@ -470,19 +284,17 @@ export default function ParticipantProfile() {
   useEffect(() => {
     if (tab !== 'agreements' || !id) return;
     let cancelled = false;
-    setSaLoading(true);
-    Promise.all([formTemplates.instances(), participants.listServiceAgreements(id)])
-      .then(([ti, list]) => {
-        if (cancelled) return;
-        const inst = ti.instances || [];
-        setSaTemplates(inst);
-        setSaAgreements(list.items || []);
-        const svc = inst.find((x) => x.template_key === 'service_agreement_standard_v3');
-        setSaSelectedTemplate((prev) => prev || svc?.id || '');
+    setAgreementsLoading(true);
+    onboarding
+      .listAgreements(id)
+      .then((res) => {
+        if (!cancelled) setOnboardingAgreements(Array.isArray(res?.items) ? res.items : []);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled) setOnboardingAgreements([]);
+      })
       .finally(() => {
-        if (!cancelled) setSaLoading(false);
+        if (!cancelled) setAgreementsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -1118,29 +930,6 @@ export default function ParticipantProfile() {
     }
   };
 
-  // Phase 4: issue a public self-service intake link and (when configured) email it.
-  const handleSendIntakeLink = async () => {
-    setIntakeIssuing(true);
-    setIntakeLinkError('');
-    setIntakeLinkResult(null);
-    try {
-      const body = {};
-      if (intakeSendToMode === 'other') {
-        const emailVal = intakeSendToEmail.trim();
-        if (!emailVal) { setIntakeLinkError('Enter an email address to send to.'); setIntakeIssuing(false); return; }
-        body.send_to_email = emailVal;
-        if (intakeSendToNote.trim()) body.send_to_note = intakeSendToNote.trim();
-      }
-      const res = await onboarding.issueIntakeToken(id, body);
-      setIntakeLinkResult(res);
-      setShowIntakeSendPanel(false);
-    } catch (err) {
-      setIntakeLinkError(err.message || 'Failed to issue intake link');
-    } finally {
-      setIntakeIssuing(false);
-    }
-  };
-
   // Phase 2: one-click orchestrator handler. Calls the new /onboarding/run endpoint and
   // refreshes the inline state so the user sees per-step results without a page reload.
   const handleRunOnboarding = async () => {
@@ -1640,101 +1429,10 @@ export default function ParticipantProfile() {
                   >
                     {orchestratorBusy ? 'Preparing…' : 'Onboard Participant'}
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => { setShowIntakeSendPanel((v) => !v); setIntakeLinkResult(null); setIntakeLinkError(''); }}
-                    title="Send the participant a private link so they can fill in their own intake details"
-                  >
-                    Send self-intake link
-                  </button>
                   <Link to={`${pathPrefix}/onboarding/${id}`} className="btn btn-secondary">Open onboarding</Link>
                 </div>
               </div>
 
-              {/* ── Send-to panel ── */}
-              {showIntakeSendPanel && (
-                <div style={{ marginBottom: '0.75rem', padding: '0.9rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
-                  <p style={{ margin: '0 0 0.6rem', fontWeight: 600, fontSize: '0.9rem', color: '#1e293b' }}>Send intake form to:</p>
-                  <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.9rem', cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="intakeSendTo"
-                      checked={intakeSendToMode === 'participant'}
-                      onChange={() => setIntakeSendToMode('participant')}
-                    />
-                    Participant's email on file
-                    {participant?.email ? (
-                      <span style={{ color: '#475569', fontSize: '0.85rem' }}>({participant.email})</span>
-                    ) : (
-                      <span style={{ color: '#b91c1c', fontSize: '0.85rem' }}>(no email on file)</span>
-                    )}
-                  </label>
-                  <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.6rem', fontSize: '0.9rem', cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="intakeSendTo"
-                      checked={intakeSendToMode === 'other'}
-                      onChange={() => setIntakeSendToMode('other')}
-                    />
-                    Another email address (guardian, family, coordinator)
-                  </label>
-                  {intakeSendToMode === 'other' && (
-                    <div style={{ display: 'grid', gap: '0.5rem', marginBottom: '0.6rem', paddingLeft: '1.5rem' }}>
-                      <input
-                        type="email"
-                        className="form-input"
-                        placeholder="Email address"
-                        value={intakeSendToEmail}
-                        onChange={(e) => setIntakeSendToEmail(e.target.value)}
-                        style={{ maxWidth: 320 }}
-                      />
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="Who is this? e.g. Parent: Jane Smith (optional)"
-                        value={intakeSendToNote}
-                        onChange={(e) => setIntakeSendToNote(e.target.value)}
-                        style={{ maxWidth: 320 }}
-                      />
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={handleSendIntakeLink}
-                      disabled={intakeIssuing}
-                    >
-                      {intakeIssuing ? 'Sending…' : 'Send intake link'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setShowIntakeSendPanel(false)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {intakeLinkResult && (
-                <div style={{ padding: '0.5rem 0.75rem', border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#166534', borderRadius: 6, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                  {intakeLinkResult.email_sent
-                    ? <>Intake link emailed to {intakeLinkResult.send_to_email || 'participant'}. Expires {new Date(intakeLinkResult.expires_at).toLocaleDateString('en-AU')}. </>
-                    : <>Intake link generated (email not sent). Expires {new Date(intakeLinkResult.expires_at).toLocaleDateString('en-AU')}. </>}
-                  <a href={intakeLinkResult.url} target="_blank" rel="noreferrer">Copy / open link</a>
-                  {intakeLinkResult.email_error && (
-                    <div style={{ marginTop: '.25rem', color: '#991b1b' }}>Email failed: {intakeLinkResult.email_error}</div>
-                  )}
-                </div>
-              )}
-              {intakeLinkError && (
-                <div style={{ padding: '0.5rem 0.75rem', border: '1px solid #fecaca', background: '#fee2e2', color: '#991b1b', borderRadius: 6, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
-                  {intakeLinkError}
-                </div>
-              )}
               {onboardingReadiness?.ready === false && (
                 <div
                   style={{
@@ -2946,514 +2644,70 @@ export default function ParticipantProfile() {
 
       {tab === 'agreements' && (
         <div className="card">
-          <h3>Service Agreement</h3>
+          <h3>Onboarding agreements</h3>
           <p style={{ color: '#64748b', fontSize: '0.92rem', marginBottom: '1rem' }}>
-            Generate a PDF from your organisation’s cloned template. Data is snapshotted at generation time. Ensure your org admin has set up the template under{' '}
-            <Link to={`${pathPrefix}/forms`}>Forms → Services Agreement template</Link>.
+            Service agreements, schedules, and consents sent during onboarding. Send new ones from the{' '}
+            <Link to={`${pathPrefix}/onboarding/${id}`}>onboarding page</Link>.
           </p>
-          {saMessage && (
-            <div
-              style={{
-                marginBottom: '0.75rem',
-                padding: '0.5rem 0.75rem',
-                borderRadius: 6,
-                background: saMessage.includes('failed') || saMessage.includes('Choose') ? '#fef2f2' : '#f0fdf4',
-                color: saMessage.includes('failed') || saMessage.includes('Choose') ? '#991b1b' : '#166534'
-              }}
-            >
-              {saMessage}
-            </div>
-          )}
-          {saLoading ? (
-            <p>Loading templates…</p>
+          {agreementsLoading ? (
+            <p>Loading agreements…</p>
+          ) : onboardingAgreements.length === 0 ? (
+            <p style={{ color: '#64748b' }}>No agreements have been sent or completed yet.</p>
           ) : (
-            <>
-              <div className="form-group">
-                <label>Organisation template</label>
-                <select
-                  className="form-input"
-                  style={{ maxWidth: 420 }}
-                  value={saSelectedTemplate}
-                  onChange={(e) => setSaSelectedTemplate(e.target.value)}
-                >
-                  <option value="">— Select —</option>
-                  {saTemplates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label || t.master_title || t.template_key}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {saSelectedTemplate && (saPreflightLoading || (saGaps?.gaps?.length ?? 0) > 0) ? (
-                <div
-                  style={{
-                    marginBottom: '1rem',
-                    padding: '0.85rem 1rem',
-                    borderRadius: 8,
-                    border: '1px solid #e2e8f0',
-                    background: '#fffbeb'
-                  }}
-                >
-                  {saPreflightLoading ? (
-                    <p style={{ margin: 0, color: '#92400e', fontSize: '0.92rem' }}>Checking agreement fields…</p>
-                  ) : (
-                    <>
-                      {(saGaps?.blocking_count ?? 0) > 0 ? (
-                        <div style={{ marginBottom: (saGaps?.warning_count ?? 0) > 0 ? '0.85rem' : 0 }}>
-                          <p style={{ margin: '0 0 0.5rem 0', fontWeight: 700, color: '#991b1b' }}>
-                            Required before PDF: {saGaps.blocking_count} missing field{saGaps.blocking_count === 1 ? '' : 's'}
-                          </p>
-                          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#450a0a', fontSize: '0.9rem', lineHeight: 1.45 }}>
-                            {(saGaps.gaps || [])
-                              .filter((g) => g.severity === 'blocking')
-                              .map((g) => (
-                                <li key={g.id} style={{ marginBottom: '0.35rem' }}>
-                                  <strong>{g.title}</strong>
-                                  {g.section ? (
-                                    <span style={{ color: '#64748b' }}>
-                                      {' '}
-                                      ({g.section})
-                                    </span>
-                                  ) : null}
-                                  {g.fix ? (
-                                    <div style={{ marginTop: '0.25rem' }}>
-                                      <button type="button" className="btn btn-secondary" style={{ fontSize: '0.82rem', padding: '0.2rem 0.55rem' }} onClick={() => navigateToGapFix(g)}>
-                                        Go to fix
-                                      </button>
-                                    </div>
-                                  ) : null}
-                                </li>
-                              ))}
-                          </ul>
-                        </div>
-                      ) : null}
-                      {(saGaps?.warning_count ?? 0) > 0 ? (
-                        <div>
-                          <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600, color: '#92400e' }}>
-                            May appear empty in the PDF: {saGaps.warning_count} optional field{saGaps.warning_count === 1 ? '' : 's'}
-                          </p>
-                          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#78350f', fontSize: '0.88rem', lineHeight: 1.45 }}>
-                            {(saGaps.gaps || [])
-                              .filter((g) => g.severity === 'warning')
-                              .map((g) => (
-                                <li key={g.id} style={{ marginBottom: '0.35rem' }}>
-                                  <strong>{g.title}</strong>
-                                  {g.section ? (
-                                    <span style={{ color: '#64748b' }}>
-                                      {' '}
-                                      ({g.section})
-                                    </span>
-                                  ) : null}
-                                  {g.fix ? (
-                                    <div style={{ marginTop: '0.25rem' }}>
-                                      <button type="button" className="btn btn-secondary" style={{ fontSize: '0.82rem', padding: '0.2rem 0.55rem' }} onClick={() => navigateToGapFix(g)}>
-                                        Go to fix
-                                      </button>
-                                    </div>
-                                  ) : null}
-                                </li>
-                              ))}
-                          </ul>
-                        </div>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              ) : null}
-              <div
-                style={{
-                  marginBottom: '1rem',
-                  padding: '0.85rem 1rem',
-                  borderRadius: 8,
-                  border: `1px solid ${saReadyToSend ? '#bbf7d0' : '#fde68a'}`,
-                  background: saReadyToSend ? '#f0fdf4' : '#fffbeb'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <strong style={{ color: '#0f172a' }}>Pre-send checklist (complete in Nexus before signing)</strong>
-                  <span style={{ fontSize: '0.82rem', color: saReadyToSend ? '#15803d' : '#b45309' }}>
-                    {saReadyToSend
-                      ? 'Ready to send for signatures'
-                      : `${saChecklistMissing.length} item${saChecklistMissing.length === 1 ? '' : 's'} remaining`}
-                  </span>
-                </div>
-                <p style={{ margin: '0 0 0.65rem 0', fontSize: '0.84rem', color: '#475569' }}>
-                  All agreement details are finalised here in Nexus Core. Once everything below is ticked, click <strong>Sign with Nexus Core</strong> — the signed PDF is sent first to the organisation admin (Default signatory under <Link to="/settings">Settings → Business</Link>), then auto-forwarded to the participant. Both only need to add a signature, printed name, and date — no other fields to fill.
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '0.4rem' }}>
-                  {saPreSendChecklist.map((row) => {
-                    const ok = !!String(row.value || '').trim();
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Document</th>
+                    <th>Status</th>
+                    <th>Completed</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {onboardingAgreements.map((item) => {
+                    const waitingOn = (item.signers || []).find((s) => s.status !== 'signed');
                     return (
-                      <div
-                        key={row.key}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: '0.5rem',
-                          fontSize: '0.86rem',
-                          color: ok ? '#0f172a' : '#991b1b'
-                        }}
-                      >
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            display: 'inline-block',
-                            width: 16,
-                            textAlign: 'center',
-                            fontWeight: 700,
-                            color: ok ? '#15803d' : '#b91c1c'
-                          }}
-                        >
-                          {ok ? '✓' : '✗'}
-                        </span>
-                        <span style={{ flex: 1 }}>
-                          <span style={{ display: 'block', fontWeight: 600 }}>{row.label}</span>
-                          <span style={{ color: ok ? '#334155' : '#b91c1c' }}>
-                            {ok
-                              ? row.value
-                              : row.key === 'services'
-                                ? 'Add at least one line below (description + hours + rate)'
-                                : ['agreement_date', 'review_date'].includes(row.key)
-                                  ? 'Set the date below'
-                                  : 'Missing — open Edit'}
-                          </span>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-                {!saReadyToSend && saChecklistMissing.some((r) => !['agreement_date', 'review_date', 'services'].includes(r.key)) ? (
-                  <div style={{ marginTop: '0.65rem' }}>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ fontSize: '0.82rem', padding: '0.25rem 0.6rem' }}
-                      onClick={() => {
-                        if (data) {
-                          setEditForm({ ...data, invoice_emails: parseInvoiceEmailsField(data.invoice_emails) });
-                        }
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                      }}
-                    >
-                      Edit participant details
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              <div id="sa-gap-agreements-fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-                <div className="form-group">
-                  <label>Agreement date</label>
-                  <input
-                    type="date"
-                    className="form-input"
-                    value={saOverrides.agreement_date}
-                    onChange={(e) => setSaOverrides((o) => ({ ...o, agreement_date: e.target.value }))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Scheduled review date</label>
-                  <input
-                    type="date"
-                    className="form-input"
-                    value={saOverrides.scheduled_review_date}
-                    onChange={(e) => setSaOverrides((o) => ({ ...o, scheduled_review_date: e.target.value }))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Monitoring frequency (this participant)</label>
-                  <input
-                    className="form-input"
-                    value={saOverrides.monitoring_worker_frequency}
-                    onChange={(e) => setSaOverrides((o) => ({ ...o, monitoring_worker_frequency: e.target.value }))}
-                    placeholder="Defaults from template if blank"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Other provider consultation</label>
-                  <input
-                    className="form-input"
-                    value={saOverrides.other_provider_consultation_frequency}
-                    onChange={(e) => setSaOverrides((o) => ({ ...o, other_provider_consultation_frequency: e.target.value }))}
-                  />
-                </div>
-                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                  <label>Communication preferences</label>
-                  <input
-                    className="form-input"
-                    value={saOverrides.communication_preferences}
-                    onChange={(e) => setSaOverrides((o) => ({ ...o, communication_preferences: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <div
-                style={{
-                  marginBottom: '1rem',
-                  padding: '0.85rem 1rem',
-                  borderRadius: 8,
-                  border: '1px solid #e2e8f0',
-                  background: '#ffffff'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <strong style={{ color: '#0f172a' }}>Services & quote (up to 5 NDIS line items)</strong>
-                  <span style={{ fontSize: '0.85rem', color: '#0f172a' }}>
-                    Total quote: <strong>${saServicesTotals.total.toFixed(2)}</strong>
-                  </span>
-                </div>
-                <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.84rem', color: '#475569' }}>
-                  Enter the NDIS supports you're quoting for this plan. Line total = hours × rate. Grand total prints on the agreement. Leave a row blank to skip it. If you leave all rows blank, the schedule is loaded from the participant's plan implementations.
-                </p>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
-                    <thead>
-                      <tr style={{ background: '#f1f5f9' }}>
-                        <th style={{ padding: '0.4rem', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>#</th>
-                        <th style={{ padding: '0.4rem', textAlign: 'left', borderBottom: '1px solid #e2e8f0', minWidth: 260 }}>
-                          NDIS line item / description
-                        </th>
-                        <th style={{ padding: '0.4rem', textAlign: 'right', borderBottom: '1px solid #e2e8f0', width: 110 }}>Hours</th>
-                        <th style={{ padding: '0.4rem', textAlign: 'right', borderBottom: '1px solid #e2e8f0', width: 130 }}>Rate ($/hr)</th>
-                        <th style={{ padding: '0.4rem', textAlign: 'right', borderBottom: '1px solid #e2e8f0', width: 130 }}>Line total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(saOverrides.services || []).map((row, i) => (
-                        <tr key={i}>
-                          <td style={{ padding: '0.35rem', color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>{i + 1}</td>
-                          <td style={{ padding: '0.35rem', borderBottom: '1px solid #f1f5f9' }}>
-                            <input
-                              className="form-input"
-                              value={row.description}
-                              placeholder="e.g. 01_011_0107_1_1 — Assistance with daily personal activities"
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setSaOverrides((o) => {
-                                  const next = [...(o.services || [])];
-                                  next[i] = { ...(next[i] || {}), description: v };
-                                  return { ...o, services: next };
-                                });
-                              }}
-                            />
-                          </td>
-                          <td style={{ padding: '0.35rem', borderBottom: '1px solid #f1f5f9' }}>
-                            <input
-                              className="form-input"
-                              type="number"
-                              min="0"
-                              step="0.25"
-                              style={{ textAlign: 'right' }}
-                              value={row.hours}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setSaOverrides((o) => {
-                                  const next = [...(o.services || [])];
-                                  next[i] = { ...(next[i] || {}), hours: v };
-                                  return { ...o, services: next };
-                                });
-                              }}
-                            />
-                          </td>
-                          <td style={{ padding: '0.35rem', borderBottom: '1px solid #f1f5f9' }}>
-                            <input
-                              className="form-input"
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              style={{ textAlign: 'right' }}
-                              value={row.rate}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setSaOverrides((o) => {
-                                  const next = [...(o.services || [])];
-                                  next[i] = { ...(next[i] || {}), rate: v };
-                                  return { ...o, services: next };
-                                });
-                              }}
-                            />
-                          </td>
-                          <td
-                            style={{
-                              padding: '0.35rem',
-                              textAlign: 'right',
-                              borderBottom: '1px solid #f1f5f9',
-                              fontVariantNumeric: 'tabular-nums',
-                              color: saServicesTotals.lines[i] > 0 ? '#0f172a' : '#94a3b8'
-                            }}
-                          >
-                            ${(saServicesTotals.lines[i] || 0).toFixed(2)}
-                          </td>
-                        </tr>
-                      ))}
-                      <tr>
-                        <td colSpan={4} style={{ padding: '0.5rem 0.35rem', textAlign: 'right', fontWeight: 700 }}>
-                          Total quote
+                      <tr key={item.id}>
+                        <td>{item.display_name}</td>
+                        <td style={{ textTransform: 'capitalize' }}>
+                          {item.status === 'signed' ? 'Completed' : item.status || '—'}
+                          {item.status !== 'signed' && waitingOn ? (
+                            <span style={{ display: 'block', color: '#64748b', fontSize: '0.8rem' }}>
+                              Waiting on {waitingOn.name || waitingOn.email}
+                            </span>
+                          ) : null}
                         </td>
-                        <td
-                          style={{
-                            padding: '0.5rem 0.35rem',
-                            textAlign: 'right',
-                            fontWeight: 700,
-                            fontVariantNumeric: 'tabular-nums'
-                          }}
-                        >
-                          ${saServicesTotals.total.toFixed(2)}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                title={
-                  (saGaps?.blocking_count ?? 0) > 0
-                    ? 'Complete required fields listed above (or use Go to fix).'
-                    : undefined
-                }
-                disabled={
-                  saSaving ||
-                  !saSelectedTemplate ||
-                  saPreflightLoading ||
-                  (saGaps?.blocking_count ?? 0) > 0
-                }
-                onClick={async () => {
-                  if (!saSelectedTemplate) {
-                    setSaMessage('Choose a template. Clone one under Settings → Form templates if none appear.');
-                    return;
-                  }
-                  setSaSaving(true);
-                  setSaMessage('');
-                  try {
-                    const r = await participants.generateServiceAgreement(id, {
-                      org_template_id: saSelectedTemplate,
-                      instance_overrides: saInstanceOverridesPayload
-                    });
-                    setSaMessage('Generated. Download opened in a new tab; the file is saved under Documents and to OneDrive when connected.');
-                    window.open(formTemplates.generatedPdfUrl(r.id), '_blank', 'noopener,noreferrer');
-                    const list = await participants.listServiceAgreements(id);
-                    const items = list.items || [];
-                    if (r.form_instance_id && items.length) {
-                      const idx = items.findIndex((x) => x.id === r.id);
-                      if (idx >= 0) items[idx] = { ...items[idx], form_instance_id: r.form_instance_id };
-                    }
-                    setSaAgreements(items);
-                  } catch (e) {
-                    const payload = e.apiPayload;
-                    if (payload?.gaps) {
-                      setSaGaps({
-                        gaps: payload.gaps,
-                        blocking_count: payload.blocking_count ?? 0,
-                        warning_count: payload.warning_count ?? 0,
-                        can_generate: (payload.blocking_count ?? 0) === 0
-                      });
-                    }
-                    setSaMessage(e.message || 'Generation failed');
-                  } finally {
-                    setSaSaving(false);
-                  }
-                }}
-              >
-                {saSaving ? 'Generating…' : 'Generate PDF'}
-              </button>
-
-              <h4 style={{ marginTop: '1.5rem' }}>Generated agreements</h4>
-              <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem' }}>
-                Download to review the full pre-filled agreement, or click <strong>Sign with Nexus Core</strong> to send it for signatures.
-                The Sign button is enabled only once the pre-send checklist above is complete. The PDF goes first to the organisation default signatory, then to the participant — both only sign.
-                Set the default signatory under <Link to="/settings">Settings → Business</Link> and enable signing under Settings → Onboarding.
-              </p>
-              {saAgreements.length === 0 ? (
-                <p className="empty-state">None yet.</p>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>When</th>
-                      <th>Template</th>
-                      <th>Status</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {saAgreements.map((g) => (
-                      <tr key={g.id}>
-                        <td>{g.generated_at ? formatDate(g.generated_at.slice(0, 10)) : '—'}</td>
-                        <td>{g.template_label || '—'}</td>
-                        <td>{g.status || '—'}</td>
+                        <td>{item.completed_at ? formatDate(String(item.completed_at).slice(0, 10)) : '—'}</td>
                         <td>
-                          <a className="btn btn-secondary" style={{ fontSize: '0.8rem' }} href={formTemplates.generatedPdfUrl(g.id)} target="_blank" rel="noopener noreferrer">
-                            Download to sign
-                          </a>
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            style={{ fontSize: '0.8rem', marginLeft: 6 }}
-                            disabled={
-                              saSignBusy ||
-                              !signEnabled ||
-                              !g.form_instance_id ||
-                              !['generated', 'draft'].includes(g.status) ||
-                              !saReadyToSend
-                            }
-                            title={
-                              !signEnabled
-                                ? NEXUS_CORE_SIGN_COMING_SOON_TITLE
-                                : !g.form_instance_id
-                                  ? 'Generate the agreement first'
-                                  : !data?.email?.trim()
-                                    ? 'Add participant email in Edit (use your email for a self-test)'
-                                    : !saReadyToSend
-                                      ? `Complete the pre-send checklist first: ${saChecklistMissing.map((m) => m.label).join(', ')}`
-                                      : 'Send this agreement for signature via Nexus Core'
-                            }
-                            onClick={async () => {
-                              if (!g.form_instance_id) return;
-                              if (!data?.email?.trim()) {
-                                setSaMessage('Add a participant email in Edit before sending for signature.');
-                                return;
-                              }
-                              if (
-                                !confirm(
-                                  `Send the service agreement to ${data.email.trim()} for signature via Nexus Core?`
-                                )
-                              ) {
-                                return;
-                              }
-                              setSaSignBusy(true);
-                              setSaMessage('');
-                              try {
-                                await onboarding.sendFormForSignature(id, g.form_instance_id);
-                                setSaMessage(`Sent for signature to ${data.email.trim()}. Check that inbox.`);
-                                const list = await participants.listServiceAgreements(id);
-                                setSaAgreements(list.items || []);
-                              } catch (e) {
-                                setSaMessage(e.message || 'Could not send for signature');
-                              } finally {
-                                setSaSignBusy(false);
-                              }
-                            }}
-                          >
-                            {saSignBusy ? 'Sending…' : 'Sign with Nexus Core'}
-                          </button>
-                          {g.onedrive_web_url ? (
-                            <a
-                              href={g.onedrive_web_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="btn btn-secondary"
-                              style={{ fontSize: '0.8rem', marginLeft: 6 }}
+                          {item.can_view_signed ? (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => window.open(onboarding.agreementFileUrl(id, item.source, item.source_id, 'signed'), '_blank', 'noopener,noreferrer')}
                             >
-                              OneDrive
-                            </a>
+                              View
+                            </button>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Not signed yet</span>
+                          )}
+                          {item.can_view_certificate ? (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ marginLeft: 6 }}
+                              onClick={() => window.open(onboarding.agreementFileUrl(id, item.source, item.source_id, 'certificate'), '_blank', 'noopener,noreferrer')}
+                            >
+                              Certificate
+                            </button>
                           ) : null}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

@@ -55,6 +55,7 @@ import {
   issueIntakeToken,
   getLatestIntakeTokenForParticipant
 } from '../services/participantIntakeToken.service.js';
+import { listParticipantAgreements, resolveParticipantAgreementFile } from '../services/participantAgreements.service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
@@ -1011,6 +1012,36 @@ router.get('/participants/:id/signed-artifacts', (req, res) => {
       certificate_document_path: f.certificate_document_path
     }));
     res.json({ signed_forms: signedForms, count: signedForms.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/participants/:id/agreements', (req, res) => {
+  try {
+    const items = listParticipantAgreements(req.params.id);
+    if (!items) return res.status(404).json({ error: 'Participant not found' });
+    res.json({ items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/participants/:id/agreements/:source/:sourceId/:kind(signed|certificate)', (req, res) => {
+  try {
+    const file = resolveParticipantAgreementFile(
+      req.params.id,
+      `${req.params.source}:${req.params.sourceId}`,
+      req.params.kind
+    );
+    if (!file) return res.status(404).json({ error: 'Agreement not found' });
+    if (file.missing || !file.path || !existsSync(file.path)) {
+      return res.status(404).json({ error: 'Document not ready yet.' });
+    }
+    const absPath = resolve(file.path);
+    const safeName = `${req.params.kind}-${(file.display_name || 'agreement').replace(/[^a-zA-Z0-9-_]+/g, '_')}.pdf`;
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.sendFile(absPath);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

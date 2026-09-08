@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { onboarding, participants, organisations, ndis, smartDefaults, forms } from '../lib/api';
 import AddressAutocomplete from '../components/AddressAutocomplete';
@@ -90,7 +90,6 @@ function formatParticipantDob(value) {
 export default function OnboardingPage() {
   const pathPrefix = useProductPathPrefix();
   const { id } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
   const idRef = useRef(id);
   idRef.current = id;
   const [participant, setParticipant] = useState(null);
@@ -124,19 +123,6 @@ export default function OnboardingPage() {
       .then((cats) => setSupportCategories(Array.isArray(cats) && cats.length > 0 ? cats : FALLBACK_SUPPORT_CATEGORIES))
       .catch(() => setSupportCategories(FALLBACK_SUPPORT_CATEGORIES));
   }, []);
-
-  // Optional deep-link: ?autoOpenPack=1 opens the agreement picker after intake is already done.
-  // Strip the param once handled so a reload does not re-open it.
-  useEffect(() => {
-    if (!participant || searchParams.get('autoOpenPack') !== '1') return;
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete('autoOpenPack');
-      return next;
-    }, { replace: true });
-    handleSendParticipantPolicyPack();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [participant, searchParams]);
 
   useEffect(() => {
     if (!participant || !intakeToken || intakeToken.status !== 'completed') return;
@@ -451,18 +437,6 @@ export default function OnboardingPage() {
     });
   }, [participant?.plan_manager_id, orgs]);
 
-  const handleInitialize = async () => {
-    setWorking(true);
-    try {
-      await onboarding.initialize(id, providerOrgId || null);
-      await refresh();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setWorking(false);
-    }
-  };
-
   const handleSaveIntake = async (options = {}) => {
     const sendAgreements = options?.sendAgreements === true;
     if (!composeParticipantLegalName(intake) || !(intake.email || participant?.email || '').trim()) {
@@ -505,6 +479,7 @@ export default function OnboardingPage() {
         ndia_managed_services: intake.ndia_managed_services,
         plan_managed_services: intake.plan_managed_services
       };
+      if (!state) await onboarding.initialize(id, providerOrgId || null);
       await onboarding.saveIntake(id, {
         participant: participantData,
         intake: intakeData,
@@ -638,17 +613,7 @@ export default function OnboardingPage() {
       <div className="card">
         <h3>{participant?.name || 'Participant'}</h3>
 
-        {!state ? (
-          <div>
-            <p style={{ color: '#64748b' }}>Initialize onboarding to start the intake form.</p>
-            <div className="form-group">
-              <label>Provider Organisation (optional)</label>
-              <input value={providerOrgId} onChange={(e) => setProviderOrgId(e.target.value)} placeholder="Defaults to participant plan manager" />
-            </div>
-            <button className="btn btn-primary" onClick={handleInitialize} disabled={working}>Initialize onboarding</button>
-          </div>
-        ) : (
-          <>
+        <>
             <h4>Start with name and email</h4>
             <p style={{ color: '#64748b', marginBottom: '1rem' }}>
               Add the participant name and email first. Complete the intake here, or email the form to the participant or a coordinator.
@@ -1378,7 +1343,6 @@ export default function OnboardingPage() {
               </button>
             </div>
           </>
-        )}
       </div>
 
       <OnboardingDocumentSelectModal

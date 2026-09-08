@@ -1115,6 +1115,9 @@ export const onboarding = {
     body: JSON.stringify(body || {})
   }),
   getIntakeToken: (participantId) => fetchApi(`/onboarding/participants/${participantId}/intake-token`),
+  listAgreements: (participantId) => fetchApi(`/onboarding/participants/${participantId}/agreements`),
+  agreementFileUrl: (participantId, source, sourceId, kind) =>
+    `${API}/onboarding/participants/${participantId}/agreements/${source}/${sourceId}/${kind}`,
   sendOnboardingPack: (participantId, body) =>
     fetchApi(`/onboarding/participants/${participantId}/send-onboarding-pack`, { method: 'POST', body: JSON.stringify(body || {}) }),
   getOnboardingOrgFields: (participantId, masterId) =>
@@ -1144,65 +1147,11 @@ export const onboarding = {
     method: 'PUT',
     body: JSON.stringify(data)
   }),
-  generateFormPack: (participantId) => fetchApi(`/onboarding/participants/${participantId}/generate-form-pack`, {
-    method: 'POST'
-  }),
-  sendSignatures: (participantId) => fetchApi(`/onboarding/participants/${participantId}/send-signatures`, {
-    method: 'POST'
-  }),
-  sendFormForSignature: (participantId, formInstanceId) => fetchApi(`/onboarding/participants/${participantId}/send-form/${formInstanceId}`, {
-    method: 'POST'
-  }),
-  setPrivacyConsentSigner: (participantId, formInstanceId, signerType) =>
-    fetchApi(`/onboarding/participants/${participantId}/forms/${formInstanceId}/privacy-consent-signer`, {
-      method: 'POST',
-      body: JSON.stringify({ signer_type: signerType })
-    }),
-  regenerate: (participantId) => fetchApi(`/onboarding/participants/${participantId}/regenerate`, {
-    method: 'POST'
-  }),
-  signedArtifacts: (participantId) => fetchApi(`/onboarding/participants/${participantId}/signed-artifacts`),
-  prefillSnapshot: (participantId, formId) => fetchApi(`/onboarding/participants/${participantId}/forms/${formId}/prefill-snapshot`),
-  getFormDocumentUrl: (participantId, formId) => `${window.location.origin}${API}/onboarding/participants/${participantId}/forms/${formId}/document`,
-  getFormDocumentBlob: async (participantId, formId) => {
-    const res = await fetch(`${API}/onboarding/participants/${participantId}/forms/${formId}/document`, { credentials: 'include' });
-    if (!res.ok) {
-      const err = await res.text();
-      let msg = 'Failed to load document';
-      try {
-        const j = JSON.parse(err);
-        if (j.error) msg = j.error;
-      } catch {
-        if (err) msg = err;
-      }
-      throw new Error(msg);
-    }
-    return res.blob();
-  },
-  uploadFormDocument: async (participantId, formId, file) => {
-    const form = new FormData();
-    form.append('document', file);
-    const res = await fetch(`${API}/onboarding/participants/${participantId}/forms/${formId}/document`, {
-      method: 'PUT',
-      body: form,
-      credentials: 'include'
-    });
-    const text = await res.text();
-    if (!res.ok) throw new Error(text ? (() => { try { return JSON.parse(text); } catch { return null; } })()?.error || text : 'Upload failed');
-    return text ? JSON.parse(text) : null;
-  },
-  deleteForm: (participantId, formInstanceId) => fetchApi(`/onboarding/participants/${participantId}/forms/${formInstanceId}`, { method: 'DELETE' }),
-  evidenceBundle: (participantId) => fetchApi(`/onboarding/participants/${participantId}/evidence-bundle`),
-  runRenewals: (participantId) => fetchApi(`/onboarding/participants/${participantId}/renewals/run`, {
-    method: 'POST'
-  }),
-  providerCompliance: (organisationId) => fetchApi(`/onboarding/providers/${organisationId}/compliance`),
   getProviderSettings: (organisationId) => fetchApi(`/onboarding/providers/${organisationId}/settings`),
   providerSettings: (organisationId, data) => fetchApi(`/onboarding/providers/${organisationId}/settings`, {
     method: 'PUT',
     body: JSON.stringify(data || {})
-  }),
-  providerTemplates: (organisationId) => fetchApi(`/onboarding/providers/${organisationId}/templates`)
+  })
 };
 
 export const forms = {
