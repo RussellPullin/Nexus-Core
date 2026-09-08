@@ -110,7 +110,12 @@ function rectToTopLeft(rect, pageHeight) {
   };
 }
 
-function inferFieldType(fieldName, mergeKey) {
+function inferFieldType(fieldName, mergeKey, acroField = null) {
+  // Trust the real AcroForm widget type first — a checkbox is a checkbox even when
+  // its name ("tp_gp") gives no hint. Signature blocks are text fields by name.
+  const ctor = acroField?.constructor?.name;
+  if (ctor === 'PDFCheckBox') return 'checkbox';
+  if (ctor === 'PDFRadioGroup') return 'checkbox';
   const n = `${fieldName} ${mergeKey}`.toLowerCase();
   if (isSignatureAcroFieldName(fieldName) || isSignatureAcroFieldName(mergeKey) || /signature/.test(n)) {
     return 'signature';
@@ -136,6 +141,11 @@ const EMPLOYER_DETAIL_FIELDS = new Set([
 
 function inferSigner(mergeKey, workflow, fieldName = '') {
   const name = String(fieldName || '').toLowerCase().trim();
+  // tp_* = "third party / support-team" consent checkboxes on a participant form —
+  // always the person signing, never the org (e.g. tp_employer is *their* employer).
+  if (name.startsWith('tp_')) {
+    return workflow === 'staff_onboarding' ? 'staff' : 'participant';
+  }
   if (
     EMPLOYER_DETAIL_FIELDS.has(name)
     || (workflow === 'staff_onboarding' && /^(location|start_date|hours|salary)$/.test(name))
@@ -225,7 +235,7 @@ export async function suggestSigningLayoutFromPdf(pdfBytes, contractFieldMap, wo
       ? (map[name] || name)
       : (map[name] || suggestContractFieldMap([name], wfKind)[name] || '');
     mergeKey = String(mergeKey || '').trim();
-    const type = inferFieldType(name, mergeKey);
+    const type = inferFieldType(name, mergeKey, field);
     const widgets = field.acroField.getWidgets();
     if (!widgets.length) continue;
 

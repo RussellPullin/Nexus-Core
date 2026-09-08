@@ -154,12 +154,15 @@ function readLogoBytes(tokens) {
   const dataUploads = process.env.DATA_DIR
     ? join(process.env.DATA_DIR, 'uploads')
     : join(process.cwd(), 'data', 'uploads');
+  const base = raw.replace(/^.*[/\\]/, '');
   const candidates = isAbsolute(raw)
-    ? [raw]
+    ? [raw, join(dataUploads, base), join(dataUploads, 'org-logos', base)]
     : [
-        join(process.cwd(), raw),
-        join(dataUploads, raw.replace(/^.*[/\\]/, '')),
-        join(dataUploads, raw)
+        join(dataUploads, raw),
+        join(dataUploads, base),
+        join(dataUploads, 'org-logos', base),
+        join(dataUploads, 'org-logos', raw),
+        join(process.cwd(), raw)
       ];
   for (const p of candidates) {
     if (existsSync(p)) {

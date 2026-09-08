@@ -107,16 +107,22 @@ function resolveOrgLogoPath(orgId) {
   if (!orgId) return null;
   const raw = String(getOrgRenderContext(orgId)?.branding?.logoPath || '').trim();
   if (!raw) return null;
+  const base = raw.replace(/^.*[/\\]/, '');
+  const orgLogosDir = join(dataUploadsDir, 'org-logos');
   const candidates = isAbsolute(raw)
-    ? [raw]
+    ? [raw, join(dataUploadsDir, base), join(orgLogosDir, base)]
     : [
+        join(dataUploadsDir, raw),
+        join(dataUploadsDir, base),
+        join(orgLogosDir, base),
+        join(orgLogosDir, raw),
         join(projectRoot, raw),
-        join(dataUploadsDir, raw.replace(/^.*[/\\]/, '')),
-        join(dataUploadsDir, raw)
+        join(projectRoot, '..', raw)
       ];
   for (const p of candidates) {
     if (existsSync(p)) return p;
   }
+  console.warn(`[document-library] org ${orgId} has logo_path "${raw}" but no file found (tried ${candidates.length} paths)`);
   return null;
 }
 

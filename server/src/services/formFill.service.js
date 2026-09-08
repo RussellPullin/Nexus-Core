@@ -237,38 +237,41 @@ export async function fillAcroFormWithTokens(pdfBytes, tokens, options = {}) {
     if (isSignatureAcroFieldName(name)) continue;
 
     const isLogo = /^(org_logo|logo)$/i.test(name);
-    if (isLogo && embeddedLogo) {
-      try {
-        const widgets = field.acroField.getWidgets();
-        for (const widget of widgets) {
-          let rect;
-          try {
-            rect = widget.getRectangle();
-          } catch {
-            continue;
+    if (isLogo) {
+      // A logo field is never text: if we have an image, draw it; either way blank the
+      // field so the raw logo_path string ("business-logo.png") can't leak in as text.
+      if (embeddedLogo) {
+        try {
+          for (const widget of field.acroField.getWidgets()) {
+            let rect;
+            try {
+              rect = widget.getRectangle();
+            } catch {
+              continue;
+            }
+            const pageRef = typeof widget.P === 'function' ? widget.P() : widget.P;
+            let page = pages[0];
+            if (pageRef) {
+              const match = pages.find((p) => p.ref === pageRef || p.ref?.toString() === pageRef?.toString());
+              if (match) page = match;
+            }
+            const maxW = Math.max(24, rect.width);
+            const maxH = Math.max(16, rect.height);
+            const scale = Math.min(maxW / embeddedLogo.width, maxH / embeddedLogo.height, 1);
+            const w = embeddedLogo.width * scale;
+            const h = embeddedLogo.height * scale;
+            page.drawImage(embeddedLogo, {
+              x: rect.x,
+              y: rect.y + Math.max(0, (rect.height - h) / 2),
+              width: w,
+              height: h
+            });
           }
-          const pageRef = typeof widget.P === 'function' ? widget.P() : widget.P;
-          let page = pages[0];
-          if (pageRef) {
-            const match = pages.find((p) => p.ref === pageRef || p.ref?.toString() === pageRef?.toString());
-            if (match) page = match;
-          }
-          const maxW = Math.max(24, rect.width);
-          const maxH = Math.max(16, rect.height);
-          const scale = Math.min(maxW / embeddedLogo.width, maxH / embeddedLogo.height, 1);
-          const w = embeddedLogo.width * scale;
-          const h = embeddedLogo.height * scale;
-          page.drawImage(embeddedLogo, {
-            x: rect.x,
-            y: rect.y + Math.max(0, (rect.height - h) / 2),
-            width: w,
-            height: h
-          });
+        } catch {
+          /* logo overlay is best-effort */
         }
-        try { form.getTextField(name).setText(''); } catch { /* ignore */ }
-      } catch {
-        /* logo overlay is best-effort */
       }
+      try { form.getTextField(name).setText(''); } catch { /* not a text field */ }
       continue;
     }
 
