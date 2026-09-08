@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import { extname, join, resolve, dirname } from 'path';
+import { join, resolve, dirname } from 'path';
 import { writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
@@ -10,6 +10,7 @@ import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { tenantParticipantClause } from '../lib/orgScopeSql.js';
 import { getOrgRenderContext } from '../services/orgContext.service.js';
 import { seedOrgFromMasters } from '../services/orgBootstrap.service.js';
+import { assertEmbeddableLogo } from '../lib/logoImage.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '../..');
@@ -396,8 +397,13 @@ router.post('/me/logo', requireAdminOrDelegate, memoryUpload.single('logo'), (re
     const orgId = requesterOrgId(req);
     if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
     if (!req.file) return res.status(400).json({ error: 'logo file required (multipart field: logo)' });
-    const ext = (extname(req.file.originalname || '').toLowerCase() || '.png').replace(/[^.a-z0-9]/g, '');
-    const safeExt = ['.png', '.jpg', '.jpeg', '.svg', '.webp'].includes(ext) ? ext : '.png';
+    let realFmt;
+    try {
+      realFmt = assertEmbeddableLogo(req.file.buffer);
+    } catch (fmtErr) {
+      return res.status(400).json({ error: fmtErr.message });
+    }
+    const safeExt = realFmt === 'png' ? '.png' : '.jpg';
     if (!existsSync(orgLogoDir)) mkdirSync(orgLogoDir, { recursive: true });
     const existing = db.prepare('SELECT logo_path FROM organisations WHERE id = ?').get(orgId);
     if (existing?.logo_path && existsSync(existing.logo_path)) {

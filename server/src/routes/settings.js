@@ -4,6 +4,7 @@
 import { Router } from 'express';
 import { randomBytes } from 'crypto';
 import { requireAdminOrDelegate } from '../middleware/roles.js';
+import { assertEmbeddableLogo } from '../lib/logoImage.js';
 import multer from 'multer';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, createReadStream } from 'fs';
 import { join, resolve, dirname } from 'path';
@@ -328,9 +329,15 @@ router.post('/logo', requireAdminOrDelegate, upload.single('file'), (req, res) =
     if (req.file.size > MAX_SIZE) {
       return res.status(400).json({ error: 'File too large. Max 500KB.' });
     }
+    let realFmt;
+    try {
+      realFmt = assertEmbeddableLogo(req.file.buffer);
+    } catch (fmtErr) {
+      return res.status(400).json({ error: fmtErr.message });
+    }
 
     mkdirSync(uploadsDir, { recursive: true });
-    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+    const ext = realFmt === 'png' ? 'png' : 'jpg';
     const filename = `business-logo.${ext}`;
     const filePath = join(uploadsDir, filename);
     writeFileSync(filePath, req.file.buffer);
