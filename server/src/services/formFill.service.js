@@ -10,6 +10,8 @@ import { PDFDocument } from 'pdf-lib';
 import Docxtemplater from 'docxtemplater';
 import PizZip from 'pizzip';
 import { getServiceAgreementTemplatePath, getSupportPlanTemplatePath } from './formTemplatePath.service.js';
+
+export { getServiceAgreementTemplatePath, getSupportPlanTemplatePath };
 import { db } from '../db/index.js';
 import { composeParticipantLegalName } from '../../../shared/onboardingFieldRegistry.js';
 import {
