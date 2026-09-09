@@ -24,6 +24,12 @@ function toPdfSafeText(str) {
     .replace(/[^\t\n\r\x20-\x7E]/g, '?');
 }
 
+function isCheckedMergeValue(value) {
+  if (value === true || value === 1) return true;
+  const s = String(value ?? '').trim().toLowerCase();
+  return s === 'true' || s === 'yes' || s === 'on' || s === '1' || s === 'checked';
+}
+
 function dataUrlToImageBuffer(dataUrl) {
   if (!dataUrl || typeof dataUrl !== 'string') return null;
   const match = dataUrl.match(/^data:image\/(png|jpe?g);base64,(.+)$/);
@@ -46,15 +52,51 @@ export async function fillCustomFormFromLayout(pdfBytes, signingLayout, mergeDat
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const pages = doc.getPages();
   const fields = signingLayout?.fields || [];
+  let form = null;
+  try {
+    form = doc.getForm();
+  } catch {
+    form = null;
+  }
 
   for (const f of fields) {
-    if (!f || f.type === 'checkbox') continue;
+    if (!f) continue;
     const page = pages[(f.page || 1) - 1];
     if (!page) continue;
 
     const value =
       resolvePdfFieldMergeValue(mergeData, f.merge_key, options) ||
       resolvePdfFieldMergeValue(mergeData, f.api_id, options);
+
+    if (f.type === 'checkbox') {
+      if (!isCheckedMergeValue(value)) continue;
+      let checkedViaForm = false;
+      if (form) {
+        for (const name of [f.api_id, f.merge_key]) {
+          if (!name || checkedViaForm) continue;
+          try {
+            form.getCheckBox(name).check();
+            checkedViaForm = true;
+          } catch {
+            /* try the other name */
+          }
+        }
+      }
+      if (!checkedViaForm) {
+        const pageH = page.getHeight();
+        const rectY = pageH - f.y - f.height;
+        const size = Math.min(f.width, f.height);
+        page.drawText('X', {
+          x: f.x + Math.max(1, (f.width - size) / 2),
+          y: rectY + Math.max(1, (f.height - size) / 2),
+          size: Math.max(8, size - 2),
+          font,
+          color: rgb(0.1, 0.1, 0.1)
+        });
+      }
+      continue;
+    }
+
     if (!value) continue;
 
     const pageH = page.getHeight();
@@ -94,6 +136,14 @@ export async function fillCustomFormFromLayout(pdfBytes, signingLayout, mergeDat
       font,
       maxWidth: Math.max(20, f.width - 4)
     });
+  }
+
+  if (form) {
+    try {
+      form.updateFieldAppearances();
+    } catch {
+      /* some viewers still show values without appearance streams */
+    }
   }
 
   return Buffer.from(await doc.save());

@@ -4,6 +4,12 @@ import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { signingPublic } from '../lib/api';
 import SignatureCanvas from '../components/SignatureCanvas';
+import {
+  emptyHighlightStyle,
+  fieldValueIsFilled,
+  isSupportTeamConsentCheckbox,
+  shouldHighlightEmptyField
+} from '../lib/signingFieldUi.js';
 
 /**
  * Native e-signature: public signer page. Token-authenticated, no login required.
@@ -30,14 +36,15 @@ function scaledFieldStyle(field, scale) {
 
 function FieldOverlay({ field, scale, value, signatureDataUrl, onChange }) {
   const style = scaledFieldStyle(field, scale);
+  const empty = shouldHighlightEmptyField(field, value, signatureDataUrl);
+  const highlight = emptyHighlightStyle(empty);
 
   if (field.type === 'signature') {
     return (
       <div
         style={{
           ...style,
-          border: `1px dashed ${signatureDataUrl ? '#16a34a' : '#94a3b8'}`,
-          background: 'rgba(255,255,255,0.7)',
+          ...highlight,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -47,19 +54,21 @@ function FieldOverlay({ field, scale, value, signatureDataUrl, onChange }) {
         {signatureDataUrl ? (
           <img src={signatureDataUrl} alt="Your signature" style={{ maxWidth: '100%', maxHeight: '100%' }} />
         ) : (
-          <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Sign below</span>
+          <span style={{ fontSize: '0.7rem', color: '#92400e', fontWeight: 600 }}>Sign below</span>
         )}
       </div>
     );
   }
 
   if (field.type === 'checkbox') {
+    const size = Math.max(14, Math.min(field.width * scale, field.height * scale, 22));
     return (
       <input
         type="checkbox"
-        checked={Boolean(value)}
+        checked={fieldValueIsFilled(field, value)}
         onChange={(e) => onChange(e.target.checked)}
-        style={{ ...style, margin: 0, cursor: 'pointer', width: Math.min(field.width * scale, 20), height: Math.min(field.height * scale, 20) }}
+        title={field.label || ''}
+        style={{ ...style, margin: 0, cursor: 'pointer', width: size, height: size, accentColor: '#1d4ed8' }}
       />
     );
   }
@@ -71,24 +80,26 @@ function FieldOverlay({ field, scale, value, signatureDataUrl, onChange }) {
         value={value || ''}
         placeholder={field.label || ''}
         onChange={(e) => onChange(e.target.value)}
-        style={{ ...style, margin: 0, border: '1px solid #1d4ed8', borderRadius: 2, fontSize: '0.75rem', padding: '0 2px' }}
+        title={field.label || ''}
+        style={{ ...style, ...highlight, margin: 0, borderRadius: 2, fontSize: '0.75rem', padding: '0 2px' }}
       />
     );
   }
 
-  // date
   return (
     <input
       type="date"
       value={value || ''}
       onChange={(e) => onChange(e.target.value)}
-      style={{ ...style, margin: 0, border: '1px solid #1d4ed8', borderRadius: 2, fontSize: '0.75rem', padding: '0 2px' }}
+      title={field.label || ''}
+      style={{ ...style, ...highlight, margin: 0, borderRadius: 2, fontSize: '0.75rem', padding: '0 2px' }}
     />
   );
 }
 
-function DocumentPages({ doc, scale, values, onFieldChange, signatureDataUrl, tokenUrl }) {
+function DocumentPages({ doc, values, onFieldChange, signatureDataUrl, tokenUrl }) {
   const [pageCount, setPageCount] = useState(0);
+  const [pageViews, setPageViews] = useState([]);
   const pdfDocRef = useRef(null);
   const canvasRefs = useRef([]);
 
@@ -114,30 +125,37 @@ function DocumentPages({ doc, scale, values, onFieldChange, signatureDataUrl, to
     let cancelled = false;
     (async () => {
       await new Promise((r) => requestAnimationFrame(r));
+      const views = [];
       for (let i = 0; i < pageCount; i += 1) {
         if (cancelled) return;
         const canvas = canvasRefs.current[i];
         if (!canvas) continue;
         const page = await pdf.getPage(i + 1);
-        const viewport = page.getViewport({ scale });
+        const unscaled = page.getViewport({ scale: 1 });
+        const pageScale = DISPLAY_WIDTH / unscaled.width;
+        const viewport = page.getViewport({ scale: pageScale });
         const ctx = canvas.getContext('2d');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvasContext: ctx, viewport }).promise;
+        views[i] = { width: viewport.width, height: viewport.height, scale: pageScale };
       }
+      if (!cancelled) setPageViews(views);
     })().catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [pageCount, scale]);
-
-  const pageWidth = (doc.page_width || 595) * scale;
-  const pageHeight = (doc.page_height || 842) * scale;
+  }, [pageCount, tokenUrl]);
 
   return (
     <div style={{ marginBottom: '2rem' }}>
       <h3 style={{ fontSize: '1rem', color: '#1e293b', marginBottom: '0.75rem' }}>{doc.display_name}</h3>
-      {Array.from({ length: pageCount }, (_, pageIndex) => (
+      {Array.from({ length: pageCount }, (_, pageIndex) => {
+        const view = pageViews[pageIndex];
+        const scale = view?.scale || DISPLAY_WIDTH / (doc.page_width || 595);
+        const pageWidth = view?.width || (doc.page_width || 595) * scale;
+        const pageHeight = view?.height || (doc.page_height || 842) * scale;
+        return (
         <div
           key={pageIndex}
           style={{ position: 'relative', width: pageWidth, height: pageHeight, margin: '0 auto 1rem', boxShadow: '0 2px 10px rgba(15,23,42,0.12)', background: '#fff' }}
@@ -158,7 +176,8 @@ function DocumentPages({ doc, scale, values, onFieldChange, signatureDataUrl, to
               ))}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -234,7 +253,7 @@ export default function SignDocumentPage() {
       for (const f of doc.fields || []) {
         if (!f.required) continue;
         if (f.type === 'signature' && !signatureDataUrl) return 'Please draw your signature before submitting.';
-        if (f.type !== 'signature' && !values[f.merge_key]) return `Please complete: ${f.label || f.merge_key}`;
+        if (f.type !== 'signature' && !fieldValueIsFilled(f, values[f.merge_key])) return `Please complete: ${f.label || f.merge_key}`;
       }
     }
     return '';
@@ -341,7 +360,18 @@ export default function SignDocumentPage() {
 
   const branding = data?.organisation || null;
   const primary = branding?.primary_color || '#1d4ed8';
-  const scale = DISPLAY_WIDTH / (data?.documents?.[0]?.page_width || 595);
+  const consentBoxes = (data?.documents || []).flatMap((d) => (d.fields || []).filter(isSupportTeamConsentCheckbox));
+  const allConsentsTicked = consentBoxes.length > 0 && consentBoxes.every((f) => fieldValueIsFilled(f, values[f.merge_key]));
+  const toggleAllConsents = () => {
+    const next = !allConsentsTicked;
+    setValues((v) => {
+      const updated = { ...v };
+      for (const f of consentBoxes) updated[f.merge_key] = next;
+      clearTimeout(debouncers.current.values);
+      debouncers.current.values = setTimeout(() => persist({ values: updated }), 600);
+      return updated;
+    });
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8fafc' }}>
@@ -353,11 +383,25 @@ export default function SignDocumentPage() {
       </header>
 
       <main style={{ maxWidth: DISPLAY_WIDTH, margin: '0 auto', padding: '1.5rem 1rem 3rem' }}>
+        <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 10, padding: '0.85rem 1rem', marginBottom: '1.25rem', color: '#92400e', fontSize: '.9rem', lineHeight: 1.5 }}>
+          Highlighted boxes still need to be completed by you (or your guardian). Green boxes have already been filled.
+        </div>
+
+        {consentBoxes.length > 0 ? (
+          <div style={{ marginBottom: '1.25rem', display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" onClick={toggleAllConsents} style={secondaryBtn}>
+              {allConsentsTicked ? 'Untick all support-team consents' : 'Tick all support-team consents'}
+            </button>
+            <span style={{ fontSize: '.85rem', color: '#475569' }}>
+              Use this if you agree to share information with everyone listed on the Privacy Consent form.
+            </span>
+          </div>
+        ) : null}
+
         {(data?.documents || []).map((doc) => (
           <DocumentPages
             key={doc.id}
             doc={doc}
-            scale={scale}
             values={values}
             onFieldChange={handleFieldChange}
             signatureDataUrl={signatureDataUrl}

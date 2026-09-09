@@ -201,7 +201,11 @@ async function embedCoordinatorSignature(doc, coordinatorSignatureDataUrl) {
   }
 }
 
-export { getServiceAgreementTemplatePath, getSupportPlanTemplatePath };
+function isAcroCheckValue(value) {
+  if (value === true || value === 1) return true;
+  const s = String(value ?? '').trim().toLowerCase();
+  return s === 'true' || s === 'yes' || s === 'on' || s === '1' || s === 'checked';
+}
 
 /**
  * Fill a PDF AcroForm using dotted org/participant tokens and the tokenised-master aliases
@@ -278,9 +282,15 @@ export async function fillAcroFormWithTokens(pdfBytes, tokens, options = {}) {
     const value = lookupAcroFormValue(name, fillMap);
     if (value == null || value === '') continue;
     try {
-      form.getTextField(name).setText(value);
+      form.getTextField(name).setText(String(value));
     } catch {
-      // Not a TextField (checkbox, radio, etc.) — skip
+      try {
+        const cb = form.getCheckBox(name);
+        if (isAcroCheckValue(value)) cb.check();
+        else cb.uncheck();
+      } catch {
+        /* radio or unknown — skip */
+      }
     }
   }
 

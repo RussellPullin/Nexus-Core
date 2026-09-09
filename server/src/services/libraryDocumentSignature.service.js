@@ -93,23 +93,112 @@ function parseManifestSigningLayout(manifest) {
   return raw;
 }
 
+function fieldKey(f) {
+  return String(f?.api_id || f?.merge_key || '').toLowerCase();
+}
+
+function markNamedProviderBlockAsOrg(fields) {
+  const named = fields.find((f) => f.type === 'signature' && /^(p_sig|s_sig|org_signature)$/.test(fieldKey(f)));
+  if (!named) return false;
+  named.signer = 'org';
+  named.required = true;
+  const prefix = fieldKey(named).replace(/_sig$/, '');
+  for (const f of fields) {
+    const id = fieldKey(f);
+    if (id === `${prefix}_name` || id === `${prefix}_date`) f.signer = 'org';
+  }
+  return true;
+}
+
+function extraValueForField(extra, f) {
+  if (!extra || !f) return extra?.[f?.merge_key];
+  if (Object.prototype.hasOwnProperty.call(extra, f.merge_key)) return extra[f.merge_key];
+  if (f.api_id && Object.prototype.hasOwnProperty.call(extra, f.api_id)) return extra[f.api_id];
+  return undefined;
+}
+
+export function layoutFieldIsFilled(extra, f) {
+  const value = extraValueForField(extra, f);
+  if (f.type === 'checkbox') {
+    if (value === true || value === 1) return true;
+    const s = String(value ?? '').trim().toLowerCase();
+    return s === 'true' || s === 'yes' || s === 'on' || s === '1' || s === 'checked';
+  }
+  return String(value ?? '').trim().length > 0;
+}
+
+function extraForAcroFill(extra, layout) {
+  const out = { ...(extra || {}) };
+  for (const f of layout?.fields || []) {
+    const value = extraValueForField(extra, f);
+    if (value == null || value === '') continue;
+    if (f.merge_key && out[f.merge_key] == null) out[f.merge_key] = value;
+    if (f.api_id && out[f.api_id] == null) out[f.api_id] = value;
+  }
+  return out;
+}
+
+function dropEmptyOptionalServiceRows(fields, extra, allFields) {
+  const prefixes = ['s2', 's3', 's4', 's5'];
+  const drop = new Set();
+  for (const prefix of prefixes) {
+    const row = (allFields || fields).filter((f) => new RegExp(`^${prefix}_`).test(fieldKey(f)));
+    if (row.length && row.every((f) => !layoutFieldIsFilled(extra, f))) drop.add(prefix);
+  }
+  if (!drop.size) return fields;
+  return fields.filter((f) => {
+    const m = /^(s[2-5])_/.exec(fieldKey(f));
+    return !(m && drop.has(m[1]));
+  });
+}
+
+function masterAllowsAdminPrefill(master, workflow) {
+  if (workflow === 'staff_onboarding') return false;
+  return /services-agreement|service-schedule|privacy-consent/.test(String(master?.slug || ''));
+}
+
+function adminPrepareFieldsFromLayout(layout, { includeParticipantFields = false } = {}) {
+  return (layout?.fields || []).filter((f) => {
+    if (f.signer === 'org') return true;
+    if (!includeParticipantFields) return false;
+    // Recipient must still draw their own signature.
+    if (f.type === 'signature') return false;
+    return true;
+  });
+}
+
+function remainingSignerFields(layout, extra) {
+  const leftover = (layout?.fields || []).filter((f) => {
+    if (f.signer === 'org') return false;
+    if (f.type === 'signature') return true;
+    return !layoutFieldIsFilled(extra, f);
+  });
+  return dropEmptyOptionalServiceRows(leftover, extra, layout?.fields || []).map((f) => (
+    f.type === 'text' ? { ...f, fillable: true } : f
+  ));
+}
+
 function ensureMultiSignerLayout(layout, master, workflow) {
   const sigCount = Number(master.manifest?.signature_count) || 0;
   if (sigCount < 2) return layout;
-  const hasOrg = layout.fields.some((f) => f.signer === 'org');
-  const signatureFields = layout.fields.filter((f) => f.type === 'signature');
-  if (hasOrg && signatureFields.length >= 2) return layout;
+  const next = { ...layout, fields: layout.fields.map((f) => ({ ...f })) };
+  if (!next.fields.some((f) => f.signer === 'org')) {
+    markNamedProviderBlockAsOrg(next.fields);
+  }
+  const hasOrg = next.fields.some((f) => f.signer === 'org');
+  const signatureFields = next.fields.filter((f) => f.type === 'signature');
+  if (hasOrg && signatureFields.length >= 2) return next;
 
   const page = layout.page_count || 1;
-  const next = { ...layout, fields: [...layout.fields] };
   if (!hasOrg) {
+    const lastSig = signatureFields[signatureFields.length - 1];
     next.fields.unshift({
       id: uuidv4(),
-      page,
-      x: 72,
-      y: 620,
-      width: 180,
-      height: 36,
+      page: lastSig?.page || page,
+      x: lastSig ? lastSig.x : 72,
+      y: lastSig ? Math.max(20, lastSig.y - 48) : 620,
+      width: lastSig?.width || 180,
+      height: lastSig?.height || 36,
       type: 'signature',
       merge_key: 'org_signature',
       label: 'Organisation signature',
@@ -203,11 +292,12 @@ function resolvePrimaryRecipient({ workflow, staff, participant, signerTypeOverr
 export async function getLibraryMasterOrgFields({ masterId, orgId, workflow, staff = null, participant = null }) {
   const master = listOnboardingLibraryMasters(orgId, workflow).find((m) => m.id === masterId);
   if (!master) return [];
+  const includeParticipantFields = masterAllowsAdminPrefill(master, workflow);
   try {
     const att = await renderLibraryMasterAttachment(master, orgId, { staff, participant, extra: {} });
     if (att?.content && att.contentType === 'application/pdf') {
       const layout = await resolveSigningLayout(master, att.content, workflow);
-      return layout.fields.filter((f) => f.signer === 'org');
+      return adminPrepareFieldsFromLayout(layout, { includeParticipantFields });
     }
   } catch (err) {
     console.warn('[getLibraryMasterOrgFields] layout from PDF failed:', err?.message);
@@ -218,7 +308,9 @@ export async function getLibraryMasterOrgFields({ masterId, orgId, workflow, sta
     page_count: 1,
     fields: []
   };
-  return ensureMultiSignerLayout(fromManifest, master, workflow).fields.filter((f) => f.signer === 'org');
+  return adminPrepareFieldsFromLayout(ensureMultiSignerLayout(fromManifest, master, workflow), {
+    includeParticipantFields
+  });
 }
 
 async function prepareMasterDocument(master, orgId, workflow, { staff, participant, adminFieldValuesByMasterId = {}, recipientRole = null }) {
@@ -238,18 +330,19 @@ async function prepareMasterDocument(master, orgId, workflow, { staff, participa
   let buffer = att.content;
 
   const orgFields = layout.fields.filter((f) => f.signer === 'org');
-  if (orgFields.length) {
-    const missingRequired = orgFields.filter((f) => f.required && !String(extra[f.merge_key] || '').trim());
-    if (missingRequired.length) {
-      const err = new Error(
-        `Fill in the organisation's required field(s) first: ${missingRequired.map((f) => f.label || f.merge_key).join(', ')}.`
-      );
-      err.code = 'ORG_FIELDS_REQUIRED';
-      throw err;
-    }
-    buffer = await fillCustomFormFromLayout(buffer, layout, extra, { workflow });
-    layout = { ...layout, fields: layout.fields.filter((f) => f.signer !== 'org') };
+  const missingRequired = orgFields.filter((f) => f.required && !layoutFieldIsFilled(extra, f));
+  if (missingRequired.length) {
+    const err = new Error(
+      `Fill in the organisation's required field(s) first: ${missingRequired.map((f) => f.label || f.merge_key).join(', ')}.`
+    );
+    err.code = 'ORG_FIELDS_REQUIRED';
+    throw err;
   }
+  const fillExtra = extraForAcroFill(extra, layout);
+  if (orgFields.length || Object.keys(fillExtra).length) {
+    buffer = await fillCustomFormFromLayout(buffer, layout, fillExtra, { workflow });
+  }
+  layout = { ...layout, fields: remainingSignerFields(layout, extra) };
 
   const orgSignatory = resolveOrgSignatoryForDocuSeal(orgId);
   const docuSealFields = buildCustomFormDocuSealFields(layout, {

@@ -4,20 +4,30 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { staff as staffApi, onboarding as onboardingApi } from '../lib/api';
 import SignatureCanvas from './SignatureCanvas';
 import AdminFieldInput from './AdminFieldInput.jsx';
+import {
+  emptyHighlightStyle,
+  fieldValueIsFilled,
+  isSupportTeamConsentCheckbox,
+  shouldHighlightEmptyField
+} from '../lib/signingFieldUi.js';
 
 /**
- * Visual "prepare and sign" step for admin_fields before a library-master document is sent —
- * shows the actual rendered document with the org's fields overlaid at their real position
- * (signature/date/text boxes from the manifest's signing_layout, same coordinates the staff
- * signer's own SignDocumentPage.jsx renders), so the admin fills and signs in place rather than
- * through a plain form. Admin_fields with no matching signing_layout position (pure docxtemplater
- * merge tags embedded in flowing text, e.g. remuneration rate) stay a plain sidebar form, since
- * there's no meaningful page position to overlay them on.
+ * Visual "prepare and sign" step before a library-master document is sent —
+ * shows the actual rendered document with fillable fields overlaid at their real
+ * position. Organisation signatures are completed here; leftover blanks stay
+ * highlighted for the participant or guardian.
  */
 
 GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const DISPLAY_WIDTH = 700;
+
+function todayIso() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
 
 function scaledStyle(field, scale) {
   return {
@@ -32,6 +42,8 @@ function scaledStyle(field, scale) {
 
 function PositionedFieldOverlay({ field, scale, value, onChange, onSignClick }) {
   const style = scaledStyle(field, scale);
+  const empty = shouldHighlightEmptyField(field, value, field.type === 'signature' ? value : null);
+  const highlight = emptyHighlightStyle(empty);
 
   if (field.type === 'signature') {
     return (
@@ -40,8 +52,7 @@ function PositionedFieldOverlay({ field, scale, value, onChange, onSignClick }) 
         onClick={onSignClick}
         style={{
           ...style,
-          border: `1px dashed ${value ? '#16a34a' : '#94a3b8'}`,
-          background: 'rgba(255,255,255,0.85)',
+          ...highlight,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -59,28 +70,56 @@ function PositionedFieldOverlay({ field, scale, value, onChange, onSignClick }) 
     );
   }
 
+  if (field.type === 'checkbox') {
+    const size = Math.max(14, Math.min(field.width * scale, field.height * scale, 22));
+    return (
+      <input
+        type="checkbox"
+        checked={fieldValueIsFilled(field, value)}
+        onChange={(e) => onChange(e.target.checked)}
+        title={field.label || ''}
+        style={{
+          ...style,
+          width: size,
+          height: size,
+          margin: 0,
+          cursor: 'pointer',
+          accentColor: '#1d4ed8'
+        }}
+      />
+    );
+  }
+
   return (
     <input
       type={field.type === 'date' ? 'date' : 'text'}
       value={value || ''}
+      placeholder={empty ? field.label || '' : ''}
       onChange={(e) => onChange(e.target.value)}
-      style={{ ...style, margin: 0, border: '1px solid #1d4ed8', borderRadius: 2, fontSize: '0.75rem', padding: '0 4px' }}
+      title={field.label || ''}
+      style={{
+        ...style,
+        ...highlight,
+        margin: 0,
+        borderRadius: 2,
+        fontSize: '0.75rem',
+        padding: '0 4px'
+      }}
     />
   );
 }
 
 function DocumentPreviewPages({ pdfBytes, positionedFields, values, onFieldChange, onSignClick }) {
   const [pageCount, setPageCount] = useState(0);
+  const [pageViews, setPageViews] = useState([]);
   const pdfDocRef = useRef(null);
   const canvasRefs = useRef([]);
 
   useEffect(() => {
     let cancelled = false;
-    // Drop the previous document and force the render effect to re-run even when
-    // the next document has the same page count (otherwise its canvases keep the
-    // old page — or go blank — when the admin clicks Next).
     pdfDocRef.current = null;
     setPageCount(0);
+    setPageViews([]);
     if (!pdfBytes) return undefined;
     const loadingTask = getDocument({ data: pdfBytes.slice(0) });
     loadingTask.promise
@@ -96,30 +135,33 @@ function DocumentPreviewPages({ pdfBytes, positionedFields, values, onFieldChang
     };
   }, [pdfBytes]);
 
-  const scale = DISPLAY_WIDTH / 595;
-
   useEffect(() => {
     const pdf = pdfDocRef.current;
     if (!pdf || !pageCount) return undefined;
     let cancelled = false;
     (async () => {
       await new Promise((r) => requestAnimationFrame(r));
+      const views = [];
       for (let i = 0; i < pageCount; i += 1) {
         if (cancelled) return;
         const canvas = canvasRefs.current[i];
         if (!canvas) continue;
         const page = await pdf.getPage(i + 1);
+        const unscaled = page.getViewport({ scale: 1 });
+        const scale = DISPLAY_WIDTH / unscaled.width;
         const viewport = page.getViewport({ scale });
         const ctx = canvas.getContext('2d');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvasContext: ctx, viewport }).promise;
+        views[i] = { width: viewport.width, height: viewport.height, scale };
       }
+      if (!cancelled) setPageViews(views);
     })().catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [pageCount, scale]);
+  }, [pageCount]);
 
   if (!pdfBytes) return null;
 
@@ -127,8 +169,10 @@ function DocumentPreviewPages({ pdfBytes, positionedFields, values, onFieldChang
     <div>
       {Array.from({ length: pageCount }, (_, pageIndex) => {
         const pageNum = pageIndex + 1;
-        const pageWidth = 595 * scale;
-        const pageHeight = 842 * scale;
+        const view = pageViews[pageIndex];
+        const scale = view?.scale || DISPLAY_WIDTH / 595;
+        const pageWidth = view?.width || DISPLAY_WIDTH;
+        const pageHeight = view?.height || 842 * scale;
         return (
           <div
             key={pageIndex}
@@ -164,7 +208,7 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
     ? { preview: onboardingApi.previewOnboardingDocument, orgFields: onboardingApi.getOnboardingOrgFields }
     : { preview: staffApi.previewOnboardingDocument, orgFields: staffApi.getOnboardingOrgFields };
   const recipientId = participantId || staffId;
-  const recipientLabel = participantId ? 'participant' : 'staff member';
+  const recipientLabel = participantId ? 'participant or guardian' : 'staff member';
 
   const rootRef = useRef(null);
   const [orgFields, setOrgFields] = useState([]);
@@ -196,8 +240,6 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
   useEffect(() => {
     if (!doc) return;
     let cancelled = false;
-    // Moving to the next document — scroll back to the top so the preparer can
-    // see which document they are about to complete and sign.
     rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
     setPdfBytes(null);
@@ -228,11 +270,14 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
         }
       }
     }
+    const current = values[doc.id] || {};
     const sig = lastSignatureRef.current;
-    if (!sig) return;
     for (const f of orgFields) {
-      if (f.type === 'signature' && !String((values[doc.id] || {})[f.merge_key] || '').trim()) {
+      if (current[f.merge_key] != null && String(current[f.merge_key]).length) continue;
+      if (f.type === 'signature' && f.signer === 'org' && sig) {
         onChange(doc.id, f.merge_key, sig);
+      } else if (f.type === 'date' && f.signer === 'org') {
+        onChange(doc.id, f.merge_key, todayIso());
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -246,7 +291,7 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
   const needsFallbackOrgSig =
     Boolean(staffId) &&
     Number(doc.signature_count) >= 2 &&
-    !orgFields.some((f) => f.type === 'signature') &&
+    !orgFields.some((f) => f.type === 'signature' && f.signer === 'org') &&
     !unpositionedSignatures.some((f) => f.key === 'org_signature');
   if (needsFallbackOrgSig) {
     unpositionedSignatures.push({
@@ -254,17 +299,20 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
       merge_key: 'org_signature',
       label: 'Organisation signature',
       type: 'signature',
+      signer: 'org',
       required: true
     });
   }
   const positionedAdminFields = orgFields;
+  const consentBoxes = positionedAdminFields.filter(isSupportTeamConsentCheckbox);
+  const allConsentsTicked = consentBoxes.length > 0 && consentBoxes.every((f) => fieldValueIsFilled(f, docValues[f.merge_key]));
 
-  const allRequiredKeys = [
-    ...plainFields.filter((f) => f.required).map((f) => f.key),
-    ...positionedAdminFields.filter((f) => f.required).map((f) => f.merge_key),
-    ...unpositionedSignatures.filter((f) => f.required).map((f) => f.key)
+  const requiredKeys = [
+    ...plainFields.filter((f) => f.required).map((f) => ({ key: f.key, field: f })),
+    ...positionedAdminFields.filter((f) => f.required && f.signer === 'org').map((f) => ({ key: f.merge_key, field: f })),
+    ...unpositionedSignatures.filter((f) => f.required).map((f) => ({ key: f.key, field: f }))
   ];
-  const missingRequired = allRequiredKeys.some((key) => !String(docValues[key] || '').trim());
+  const missingRequired = requiredKeys.some(({ key, field }) => !fieldValueIsFilled(field || { type: 'text' }, docValues[key]));
 
   const handlePlainChange = (key, value) => {
     onChange(doc.id, key, value);
@@ -272,6 +320,13 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
 
   const handlePositionedChange = (key, value) => {
     onChange(doc.id, key, value);
+  };
+
+  const toggleAllConsents = () => {
+    const next = !allConsentsTicked;
+    for (const f of consentBoxes) {
+      onChange(doc.id, f.merge_key, next);
+    }
   };
 
   const openSignModal = (field) => {
@@ -289,11 +344,23 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
   return (
     <div ref={rootRef}>
       <p className="forms-muted" style={{ marginTop: 0 }}>
-        Prepare document {index + 1} of {docs.length} in Nexus Core — complete the organisation sections and sign below.
+        Prepare document {index + 1} of {docs.length}. Fill in any boxes you can — highlighted fields can stay blank
+        for the {recipientLabel} to complete. Sign the organisation block before sending.
         {index === docs.length - 1
-          ? ` Then one email is sent to the ${recipientLabel} to complete and sign${docs.length > 1 ? ' (one signature covers every form)' : ''}.`
-          : ` Your signature is reused on the remaining documents.`}
+          ? ` Then one email is sent to the ${recipientLabel}.`
+          : ' Your signature is reused on the remaining documents.'}
       </p>
+
+      {consentBoxes.length > 0 ? (
+        <div style={{ marginBottom: '0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={toggleAllConsents}>
+            {allConsentsTicked ? 'Untick all support-team consents' : 'Tick all support-team consents'}
+          </button>
+          <span className="forms-muted" style={{ fontSize: '0.85rem' }}>
+            Use this if they agree to share information with everyone listed.
+          </span>
+        </div>
+      ) : null}
 
       <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         {plainFields.length > 0 || unpositionedSignatures.length > 0 ? (
@@ -328,7 +395,18 @@ export default function AdminDocumentSignPreview({ staffId, participantId, docs,
               {loading ? 'Updating…' : 'Update preview'}
             </button>
           </div>
-        ) : null}
+        ) : (
+          <div style={{ flex: '0 0 220px' }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => loadPreview(docValues)}
+              disabled={loading}
+            >
+              {loading ? 'Updating…' : 'Update preview'}
+            </button>
+          </div>
+        )}
 
         <div style={{ flex: '1 1 auto', minWidth: 320 }}>
           {error ? (

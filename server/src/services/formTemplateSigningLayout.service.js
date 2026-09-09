@@ -139,7 +139,7 @@ const EMPLOYER_DETAIL_FIELDS = new Set([
   'greeting_name', 'induction_status'
 ]);
 
-function inferSigner(mergeKey, workflow, fieldName = '') {
+export function inferSigner(mergeKey, workflow, fieldName = '') {
   const name = String(fieldName || '').toLowerCase().trim();
   // tp_* = "third party / support-team" consent checkboxes on a participant form —
   // always the person signing, never the org (e.g. tp_employer is *their* employer).
@@ -160,14 +160,30 @@ function inferSigner(mergeKey, workflow, fieldName = '') {
   const k = `${mergeKey}_${fieldName}`.toLowerCase().replace(/^_+|_+$/g, '');
   if (
     /(^|_)(org|prov|provider|employer|supervisor)(_|$)/.test(k)
-    // provider-side sign-off block: s_ / sup_ / d_s_ prefix + sig|date|name|print|role
-    || /(^|_)(s|sup|d_s|sig_s|sig_prov)_(sig|date|name|print|role)($|_)/.test(k)
+    // provider-side sign-off: p_ (tokenised NDIS "Signed for and on behalf of the Provider"),
+    // s_ / sup_ / d_s_ prefix + sig|date|name|print|role
+    || /(^|_)(p|s|sup|d_s|sig_s|sig_prov)_(sig|date|name|print|role)($|_)/.test(k)
     || /^organisation/.test(k)
   ) {
     return 'org';
   }
   if (workflow === 'staff_onboarding') return 'staff';
   return 'participant';
+}
+
+/**
+ * Client vs representative signature blocks on the tokenised NDIS masters. Identity
+ * fields like c_first stay untagged so both signer paths still see them.
+ */
+export function inferAppliesWhen(fieldName = '') {
+  const n = String(fieldName || '').toLowerCase().trim();
+  if (/^(b_client|b_name|b_sig|b_date|rs_name|rs_sig|rs_date|rep_name|rep_sig|rep_date)$/.test(n)) {
+    return 'guardian';
+  }
+  if (/^(a_name|a_sig|a_date|cs_name|cs_sig|cs_date|c_name|c_sig|c_date)$/.test(n)) {
+    return 'participant';
+  }
+  return null;
 }
 
 function defaultSignerForWorkflow(workflow) {
@@ -249,6 +265,7 @@ export async function suggestSigningLayoutFromPdf(pdfBytes, contractFieldMap, wo
       const pageIndex = findWidgetPageIndex(doc, widget);
       const pageH = pages[pageIndex]?.getHeight() || meta.page_height;
       const box = rectToTopLeft(rect, pageH);
+      const appliesWhen = inferAppliesWhen(name);
       layout.fields.push({
         id: uuidv4(),
         page: pageIndex + 1,
@@ -259,7 +276,8 @@ export async function suggestSigningLayoutFromPdf(pdfBytes, contractFieldMap, wo
         signer,
         required: type === 'signature',
         api_id: sanitizeApiId(name),
-        cover_underlying: defaultCoverUnderlying(type, name, mergeKey)
+        cover_underlying: defaultCoverUnderlying(type, name, mergeKey),
+        ...(appliesWhen ? { applies_when: appliesWhen } : {})
       });
     }
   }
