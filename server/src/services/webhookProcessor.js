@@ -15,6 +15,7 @@ import {
   parseTimeToMinutes
 } from './progressNoteMatcher.js';
 import { canImportMergeIntoShift, repairInvalidShiftInvoiceLinks } from './shiftInvoiceLink.service.js';
+import { normalizeExternalShiftId } from '../lib/externalShiftId.js';
 import { recordEvent } from './learningEvent.service.js';
 import { updateAggregatesForShift } from './featureStore.service.js';
 import { scheduleMirrorShiftToNexusSupabase } from './nexusPublicShiftsSync.service.js';
@@ -208,6 +209,7 @@ export function processShifts(shiftsArray, options = {}) {
 
   for (const s of deduped) {
     const shiftId = String(s.shiftId ?? s.shift_id ?? '').trim();
+    const persistableShiftId = normalizeExternalShiftId(shiftId);
     const dateStr = String(s.date ?? '').trim();
     if (!shiftId || !dateStr) {
       skipped++;
@@ -379,7 +381,8 @@ export function processShifts(shiftsArray, options = {}) {
         }
 
         let resolvedShiftId;
-        const shifterShiftId = shiftId || null;
+        const existingStableId = matchingShift ? normalizeExternalShiftId(matchingShift.shifter_shift_id) : '';
+        const shifterShiftId = persistableShiftId || existingStableId || null;
         // A future-dated shift can't have been delivered yet: keep it scheduled (and uncharged)
         // regardless of any completed-like signal from Shifter.
         const startIsFuture = isFutureShiftStart(startDateTime);
@@ -391,7 +394,7 @@ export function processShifts(shiftsArray, options = {}) {
             // Admin-edited shifts must remain authoritative. Imports should not overwrite participant/staff/times/notes/status.
             // We still capture the progress note, and we can backfill missing import linkage fields.
             const shouldBackfillShifterId =
-              shifterShiftId &&
+              persistableShiftId &&
               (!matchingShift.shifter_shift_id || String(matchingShift.shifter_shift_id).trim() === '');
             const existingExpenses = Number.isFinite(Number(matchingShift.expenses)) ? Number(matchingShift.expenses) : 0;
             const shouldBackfillExpenses = existingExpenses <= 0 && expensesVal > 0;
@@ -409,7 +412,7 @@ export function processShifts(shiftsArray, options = {}) {
                   updated_at = datetime('now')
                 WHERE id = ?
               `).run(
-                shouldBackfillShifterId ? shifterShiftId : (matchingShift.shifter_shift_id || null),
+                shouldBackfillShifterId ? persistableShiftId : (matchingShift.shifter_shift_id || null),
                 shouldBackfillExpenses ? expensesVal : existingExpenses,
                 resolvedShiftId
               );

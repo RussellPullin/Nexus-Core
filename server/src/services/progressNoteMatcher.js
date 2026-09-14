@@ -6,6 +6,7 @@ import { db } from '../db/index.js';
 import { tenantParticipantClause } from '../lib/orgScopeSql.js';
 import { getShiftDayType, getShiftTimeBand, getShiftLocalDateString, getShiftWallClockMinutes } from '../lib/ndisDay.js';
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
+import { normalizeExternalShiftId } from '../lib/externalShiftId.js';
 
 /**
  * Check if an NDIS line item is an establishment fee (one-off, not hourly).
@@ -220,8 +221,8 @@ function getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime, dayType) {
  * @returns {object | null} Shift row or null
  */
 export function findShiftByShifterShiftId(shifterShiftId) {
-  if (!shifterShiftId || typeof shifterShiftId !== 'string' || !shifterShiftId.trim()) return null;
-  const id = String(shifterShiftId).trim();
+  const id = normalizeExternalShiftId(shifterShiftId);
+  if (!id) return null;
   return db.prepare('SELECT * FROM shifts WHERE shifter_shift_id = ?').get(id) || null;
 }
 
@@ -233,8 +234,8 @@ export function findShiftByShifterShiftId(shifterShiftId) {
  * @returns {object | null}
  */
 export function findShiftByShifterShiftIdForParticipant(shifterShiftId, participantId, staffId) {
-  if (!shifterShiftId || !participantId || !staffId) return null;
-  const id = String(shifterShiftId).trim();
+  const id = normalizeExternalShiftId(shifterShiftId);
+  if (!id || !participantId || !staffId) return null;
   return (
     db
       .prepare(
@@ -282,11 +283,12 @@ export function findShiftByParticipantStaffAndStartTime(participantId, staffId, 
  * @returns {object | null} Shift row or null
  */
 export function findMatchingShift({ participantId, staffId, supportDate, startTime, endTime, shiftId }) {
-  if (shiftId) {
+  const stableShiftId = normalizeExternalShiftId(shiftId);
+  if (stableShiftId) {
     const byShifterId = db.prepare(`
       SELECT * FROM shifts
       WHERE shifter_shift_id = ? AND participant_id = ? AND staff_id = ?
-    `).get(shiftId, participantId, staffId);
+    `).get(stableShiftId, participantId, staffId);
     if (byShifterId) return byShifterId;
     const byNexusId = db.prepare(`
       SELECT * FROM shifts
