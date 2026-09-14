@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { upsertRenewalTasksForParticipant, createAuditEvent } from './onboarding.service.js';
 import { sendEmailViaRelay } from './notification.service.js';
+import { documentTypeLabel } from '../../../shared/staffComplianceDocs.js';
 
 /**
  * Picks an org user to send background reminder emails as. There is no server-level
@@ -98,7 +99,7 @@ export async function runDailyAutomationTick({ orgId = null, actorType = 'system
       .slice(0, 10);
     const expiring = db
       .prepare(
-        `SELECT scd.id, scd.staff_id, scd.document_type, scd.expiry_date, scd.updated_at, s.org_id, s.name as staff_name
+        `SELECT scd.id, scd.staff_id, scd.document_type, scd.display_name, scd.expiry_date, scd.updated_at, s.org_id, s.name as staff_name
          FROM staff_compliance_documents scd
          JOIN staff s ON s.id = scd.staff_id
          WHERE scd.expiry_date IS NOT NULL
@@ -119,6 +120,7 @@ export async function runDailyAutomationTick({ orgId = null, actorType = 'system
           newValue: {
             staff_id: row.staff_id,
             document_type: row.document_type,
+            display_name: row.display_name,
             expiry_date: row.expiry_date,
             horizon_days: horizonDays
           }
@@ -146,14 +148,15 @@ export async function runDailyAutomationTick({ orgId = null, actorType = 'system
             ? db.prepare('SELECT name, email, manager_id FROM staff WHERE id = ?').get(row.staff_id)
             : null;
           if (staffFull?.email?.trim()) {
-            const subject = 'Compliance document renewal reminder – Nexus Core';
-            const text = `Hi ${staffFull.name},\n\nYour ${row.document_type} is expiring on ${row.expiry_date}. Please renew it and upload the updated document, or contact your manager.\n\nThank you.`;
+            const label = documentTypeLabel(row.document_type, row.display_name);
+            const subject = `Compliance document renewal reminder – ${label} – Nexus Core`;
+            const text = `Hi ${staffFull.name},\n\nYour ${label} is expiring on ${row.expiry_date}. Please renew it and upload the updated document, or contact your manager for a renewal upload link.\n\nStaying in date keeps you registration-ready for support work.\n\nThank you.`;
             await sendEmailViaRelay(senderUserId, staffFull.email, subject, text, null, null);
             const manager = staffFull.manager_id
               ? db.prepare('SELECT email FROM staff WHERE id = ?').get(staffFull.manager_id)
               : null;
             if (manager?.email?.trim()) {
-              await sendEmailViaRelay(senderUserId, manager.email, `Compliance reminder: ${staffFull.name}`, text, null, null);
+              await sendEmailViaRelay(senderUserId, manager.email, `Compliance reminder: ${staffFull.name} – ${label}`, text, null, null);
             }
             db.prepare(
               `INSERT INTO staff_certification_reminders (id, staff_id, document_type, reminder_type) VALUES (?, ?, ?, ?)`

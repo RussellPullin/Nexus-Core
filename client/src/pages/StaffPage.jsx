@@ -572,6 +572,7 @@ export default function StaffPage() {
                 <select value={form.employment_type} onChange={(e) => setForm({ ...form, employment_type: e.target.value })}>
                   <option value="employee">Employee</option>
                   <option value="subcontractor">Subcontractor</option>
+                  <option value="independent_support_worker">Independent support worker</option>
                 </select>
               </div>
               <div className="form-group">

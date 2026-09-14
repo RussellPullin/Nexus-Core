@@ -710,6 +710,7 @@ CREATE TABLE IF NOT EXISTS staff_compliance_documents (
   id TEXT PRIMARY KEY,
   staff_id TEXT NOT NULL,
   document_type TEXT NOT NULL,
+  display_name TEXT,
   file_path TEXT NOT NULL,
   onedrive_item_id TEXT,
   onedrive_web_url TEXT,

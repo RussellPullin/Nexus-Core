@@ -19,6 +19,7 @@ config({ path: resolve(__dirname, '../../.env') });
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../src/db/index.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser } from '../src/services/notification.service.js';
+import { documentTypeLabel } from '../../shared/staffComplianceDocs.js';
 
 const REMINDER_DAYS = [60, 30, 7];
 
@@ -53,16 +54,18 @@ function relayAdminForStaffOrg(staffOrgId) {
 }
 
 async function sendReminder(adminId, staff, doc, reminderType) {
-  const subject = `Compliance document expiring – ${doc.document_type} – Nexus Core`;
+  const label = documentTypeLabel(doc.document_type, doc.display_name);
+  const subject = `Compliance document expiring – ${label} – Nexus Core`;
   const days = reminderType === '60_days' ? 60 : reminderType === '30_days' ? 30 : 7;
-  const text = `Hi ${staff.name},\n\nYour compliance document "${doc.document_type}" expires on ${doc.expiry_date}. Please renew and upload it (or contact your manager for a renewal link).\n\nThis is a ${days}-day reminder.\n\nThank you.`;
+  const text = `Hi ${staff.name},\n\nYour compliance document "${label}" expires on ${doc.expiry_date}. Please renew and upload it (or contact your manager for a renewal link).\n\nThis is a ${days}-day reminder so you stay registration-ready.\n\nThank you.`;
   await sendEmailViaRelay(adminId, staff.email, subject, text, null, null);
 }
 
 async function sendManagerNotify(adminId, managerEmail, staffName, doc, reminderType) {
+  const label = documentTypeLabel(doc.document_type, doc.display_name);
   const days = reminderType === '60_days' ? 60 : reminderType === '30_days' ? 30 : 7;
-  const subject = `Staff compliance reminder: ${staffName} – ${doc.document_type}`;
-  const text = `${staffName}'s compliance document "${doc.document_type}" expires on ${doc.expiry_date}. A ${days}-day reminder has been sent to the staff member.`;
+  const subject = `Staff compliance reminder: ${staffName} – ${label}`;
+  const text = `${staffName}'s compliance document "${label}" expires on ${doc.expiry_date}. A ${days}-day reminder has been sent to the staff member.`;
   await sendEmailViaRelay(adminId, managerEmail, subject, text, null, null);
 }
 
@@ -75,7 +78,7 @@ async function run() {
     const targetDate = addDays(today, days);
     const reminderType = `${days}_days`;
     const docs = db.prepare(`
-      SELECT scd.id, scd.staff_id, scd.document_type, scd.expiry_date
+      SELECT scd.id, scd.staff_id, scd.document_type, scd.display_name, scd.expiry_date
       FROM staff_compliance_documents scd
       WHERE scd.expiry_date = ? AND scd.expiry_date IS NOT NULL
     `).all(targetDate);

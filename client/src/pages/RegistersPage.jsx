@@ -380,11 +380,11 @@ export default function RegistersPage() {
     await reloadRegisters();
   };
 
-  const handleExport = () => {
+  const handleExport = (format = 'xlsx') => {
     if (!active) return;
     const url = registers.exportUrl({
       view: active.id,
-      format: 'csv',
+      format,
       from: activeFilter.from,
       to: activeFilter.to
     });
@@ -718,7 +718,9 @@ export default function RegistersPage() {
                   Clear {activeFilter.status}
                 </button>
               )}
-              <button type="button" className="btn btn-secondary" onClick={handleExport}>Export CSV</button>
+              <button type="button" className="btn btn-secondary" onClick={() => handleExport('xlsx')}>Download Excel</button>
+              <button type="button" className="btn btn-secondary" onClick={() => handleExport('pdf')}>Download PDF</button>
+              <button type="button" className="btn btn-secondary" onClick={() => handleExport('csv')}>Download CSV</button>
             </div>
 
             <div style={{ overflowX: 'auto', maxHeight: 'min(64vh, 620px)', overflowY: 'auto', marginTop: '1rem' }}>
