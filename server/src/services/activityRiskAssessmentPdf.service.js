@@ -816,6 +816,10 @@ export async function fillActivityRiskPdfFields(pdfBytes, fieldValues) {
     if (ctor === 'PDFTextField') {
       field.setText(String(raw));
       try {
+        // Fixed small size matching the form's print design — without this,
+        // pdf-lib's default appearance renders at an oversized font that clips
+        // badly in these compact AcroForm boxes.
+        field.setFontSize(6.5);
         field.updateAppearances(font);
       } catch {
         /* appearance optional */
