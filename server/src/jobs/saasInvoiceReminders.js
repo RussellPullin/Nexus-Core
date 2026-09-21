@@ -11,6 +11,7 @@
 import cron from 'node-cron';
 import { createClient } from '@supabase/supabase-js';
 import { sendMail } from '../lib/mailer.js';
+import { reminderCoverageLine, SAAS_BANK, isOwnerOrganisation } from '../lib/saasSubscription.js';
 
 const VENDOR_NAME = 'Nexus Core Solutions';
 const VENDOR_EMAIL = 'nexuscoresolutions@outlook.com';
@@ -39,7 +40,7 @@ function daysSince(dateStr) {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function buildReminderHtml({ invoiceNumber, orgName, total, dueDate, issuedAt, subject, messageHtml }) {
+function buildReminderHtml({ invoiceNumber, orgName, total, dueDate, issuedAt, messageHtml, coverageLine }) {
   const logo = logoUrl();
   return `<!DOCTYPE html>
 <html lang="en">
@@ -63,6 +64,7 @@ function buildReminderHtml({ invoiceNumber, orgName, total, dueDate, issuedAt, s
   </div>
   <p>Hi ${orgName},</p>
   ${messageHtml}
+  <p style="font-size:13px">${coverageLine}</p>
   <table>
     <thead><tr><th>Invoice</th><th>Issued</th><th>Due</th><th style="text-align:right">Amount</th></tr></thead>
     <tbody>
@@ -71,7 +73,7 @@ function buildReminderHtml({ invoiceNumber, orgName, total, dueDate, issuedAt, s
     <tfoot><tr class="total-row"><td colspan="3">Total Due</td><td style="text-align:right">${currency(total)}</td></tr></tfoot>
   </table>
   <p style="font-size:13px">Please transfer to:<br>
-  <strong>BSB:</strong> 923-100 &nbsp; <strong>Account:</strong> 811730015 &nbsp; <strong>Reference:</strong> ${invoiceNumber}</p>
+  <strong>BSB:</strong> ${SAAS_BANK.bsb} &nbsp; <strong>Account:</strong> ${SAAS_BANK.account} &nbsp; <strong>Reference:</strong> ${invoiceNumber}</p>
   <p style="font-size:13px">If you've already paid, please ignore this message.</p>
   <div class="footer">
     ${VENDOR_NAME} &nbsp;|&nbsp; ABN: 75 249 898 796 &nbsp;|&nbsp; Not registered for GST<br>
@@ -102,6 +104,7 @@ export async function run() {
     try {
       const days = daysSince(inv.issued_at);
       const org = inv.organizations;
+      if (isOwnerOrganisation(org?.name)) continue;
       const to = org?.billing_email || VENDOR_EMAIL;
       const orgName = org?.name || 'there';
 
@@ -143,8 +146,8 @@ export async function run() {
           total: inv.total,
           dueDate: inv.due_at,
           issuedAt: inv.issued_at,
-          subject,
           messageHtml,
+          coverageLine: reminderCoverageLine(inv.line_items),
         });
         await sendReminderEmail(to, subject, html, inv.invoice_number, inv.total, inv.due_at);
         log(`Reminder sent (day ${days})`, { org: orgName, invoice: inv.invoice_number });

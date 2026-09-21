@@ -7,6 +7,7 @@
 import cron from 'node-cron';
 import { createClient } from '@supabase/supabase-js';
 import { createCombinedInvoice } from '../services/combinedInvoiceService.js';
+import { isOwnerOrganisation } from '../lib/saasSubscription.js';
 
 function getNcSupabase() {
   const url = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
@@ -45,6 +46,7 @@ export async function run() {
     .not('billing_anchor_date', 'is', null);
 
   for (const sOrg of shifterOrgs || []) {
+    if (isOwnerOrganisation(sOrg.name)) continue;
     try {
       const periodEnd = new Date(sOrg.subscription_expires_at);
       const periodStart = new Date(periodEnd);
@@ -97,6 +99,7 @@ export async function run() {
     .is('billing_anchor_date', null);
 
   for (const sOrg of newShifterOrgs || []) {
+    if (isOwnerOrganisation(sOrg.name)) continue;
     try {
       const { count } = await shifterSupabase
         .from('profiles')

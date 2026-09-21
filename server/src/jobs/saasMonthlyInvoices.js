@@ -5,6 +5,7 @@
 import cron from 'node-cron';
 import { createClient } from '@supabase/supabase-js';
 import { createSaasInvoice } from '../services/saasInvoiceService.js';
+import { isOwnerOrganisation } from '../lib/saasSubscription.js';
 
 function getSupabase() {
   const url = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
@@ -34,6 +35,7 @@ export async function run() {
   if (error) { log('Failed to fetch orgs', error); return; }
 
   for (const org of orgs || []) {
+    if (isOwnerOrganisation(org.name)) continue;
     try {
       const periodEnd = new Date(org.subscription_expires_at);
       const periodStart = new Date(periodEnd);

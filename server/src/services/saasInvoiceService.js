@@ -4,7 +4,8 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { MONTHLY_FLAT_RATE, calculateInvoiceAmount } from '../lib/saasBillingTiers.js';
+import { calculateInvoiceAmount } from '../lib/saasBillingTiers.js';
+import { SAAS_BANK } from '../lib/saasSubscription.js';
 import { sendMail } from '../lib/mailer.js';
 
 const VENDOR_EMAIL = 'nexuscoresolutions@outlook.com';
@@ -66,7 +67,8 @@ function buildInvoiceHtml({ invoiceNumber, orgName, periodLabel, subtotal, gst, 
     </tfoot>
   </table>
   <p style="font-size:13px">Please transfer to:<br>
-  <strong>BSB:</strong> 923-100 &nbsp; <strong>Account:</strong> 811730015 &nbsp; <strong>Reference:</strong> ${invoiceNumber}</p>
+  <strong>BSB:</strong> ${SAAS_BANK.bsb} &nbsp; <strong>Account:</strong> ${SAAS_BANK.account} &nbsp; <strong>Reference:</strong> ${invoiceNumber}</p>
+  <p style="font-size:13px">Shifter is part of Nexus Core. This is the only subscription invoice.</p>
   <div class="footer">
     ${VENDOR_NAME} &nbsp;|&nbsp; ABN: 75 249 898 796 &nbsp;|&nbsp; Not registered for GST<br>
     Questions? ${VENDOR_EMAIL}

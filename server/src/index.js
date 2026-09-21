@@ -186,6 +186,8 @@ import { requireAgencyShell } from './middleware/agencyShell.js';
 import { requireAdminOrDelegate, requireCoordinatorOrAdmin } from './middleware/roles.js';
 import { startLearningJobs } from './jobs/learningJobs.js';
 import saasBillingDashboardRouter from './routes/saasBillingDashboard.js';
+import saasSubscriptionRouter from './routes/saasSubscription.js';
+import { enforcePaidSubscription } from './middleware/subscriptionLock.js';
 import { start as startSaasFirstInvoice } from './jobs/saasFirstInvoice.js';
 import { start as startSaasMonthlyInvoices } from './jobs/saasMonthlyInvoices.js';
 import { start as startSaasOverdueCheck } from './jobs/saasOverdueCheck.js';
@@ -232,6 +234,9 @@ app.use(session({
   // stays set for Xero, which would mark cookies Secure and break login over HTTP.
   cookie: { secure: process.env.NODE_ENV === 'production', httpOnly: true, sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 }
 }));
+
+app.use(enforcePaidSubscription);
+app.use('/api/saas/subscription', requireAuth, saasSubscriptionRouter);
 
 // Auth routes (public)
 app.use('/api/auth', authRouter);

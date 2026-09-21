@@ -6,14 +6,13 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { MONTHLY_FLAT_RATE } from '../lib/saasBillingTiers.js';
+import { SAAS_BANK } from '../lib/saasSubscription.js';
 import { sendMail } from '../lib/mailer.js';
 
 const PRICE_PER_USER = 8.5;
 const VENDOR_NAME = 'Nexus Core Solutions';
 const VENDOR_EMAIL = 'nexuscoresolutions@outlook.com';
-const VENDOR_ABN = '75 249 898 796';
-const VENDOR_BSB = '923-100';
-const VENDOR_ACCOUNT = '811730015';
+const VENDOR_ABN = SAAS_BANK.abn;
 
 function getNcSupabase() {
   const url = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
@@ -115,7 +114,8 @@ function buildCombinedInvoiceHtml({ invoiceNumber, orgName, to, issuedAt, dueDat
   </table>
 
   <p style="font-size:13px">Please transfer to:<br>
-  <strong>BSB:</strong> ${VENDOR_BSB} &nbsp;&nbsp; <strong>Account:</strong> ${VENDOR_ACCOUNT} &nbsp;&nbsp; <strong>Reference:</strong> ${invoiceNumber}</p>
+  <strong>BSB:</strong> ${SAAS_BANK.bsb} &nbsp;&nbsp; <strong>Account:</strong> ${SAAS_BANK.account} &nbsp;&nbsp; <strong>Reference:</strong> ${invoiceNumber}</p>
+  <p style="font-size:13px">This is the only subscription invoice. Shifter is included here, so there is no separate Shifter bill or reminder.</p>
 
   <div class="footer">
     ${VENDOR_NAME} &nbsp;|&nbsp; ABN: ${VENDOR_ABN} &nbsp;|&nbsp; Not registered for GST<br>

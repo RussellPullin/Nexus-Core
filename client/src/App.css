@@ -2472,3 +2472,74 @@ details.card.settings-collapsible > summary:hover {
   font-weight: 500;
   text-align: right;
 }
+
+.sub-pay {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: #f5f6f8;
+}
+
+.sub-pay-card {
+  width: min(520px, 100%);
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.75rem;
+}
+
+.sub-pay-kicker {
+  margin: 0 0 0.35rem;
+  color: #64748b;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sub-pay-card h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.5rem;
+}
+
+.sub-pay-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.sub-pay-lead {
+  color: #334155;
+  line-height: 1.45;
+}
+
+.sub-pay-invoice,
+.sub-pay-bank {
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.sub-pay-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0;
+}
+
+.sub-pay-row span {
+  color: #64748b;
+}
+
+.sub-pay-note {
+  margin: 0.5rem 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.sub-pay-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}

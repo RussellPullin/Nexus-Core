@@ -10,6 +10,8 @@ import { createClient } from '@supabase/supabase-js';
 import { createSaasInvoice } from '../services/saasInvoiceService.js';
 import { createCombinedInvoice } from '../services/combinedInvoiceService.js';
 import { MONTHLY_FLAT_RATE } from '../lib/saasBillingTiers.js';
+import { invalidateSubscriptionCache, settleOrgAfterInvoiceChange } from '../services/saasSubscriptionAccount.js';
+import { isOwnerOrganisation } from '../lib/saasSubscription.js';
 
 const router = Router();
 
@@ -93,7 +95,7 @@ router.get('/dashboard', async (req, res) => {
         const markPaidBtn = `<form method="POST" action="/api/saas/billing/mark-paid" style="display:inline;margin-left:4px">
           <input type="hidden" name="secret" value="${secret}">
           <input type="hidden" name="invoiceId" value="${inv.id}">
-          <button type="submit" style="font-size:10px;padding:2px 8px;background:#22c55e;color:#fff;border:none;border-radius:4px;cursor:pointer">✓ Paid</button>
+          <button type="submit" style="font-size:10px;padding:2px 8px;background:#22c55e;color:#fff;border:none;border-radius:4px;cursor:pointer">Mark paid</button>
         </form>`;
         const voidBtn = `<form method="POST" action="/api/saas/billing/void-invoice" style="display:inline;margin-left:4px" onsubmit="return confirm('Void invoice ${inv.invoice_number}?')">
           <input type="hidden" name="secret" value="${secret}">
@@ -109,18 +111,19 @@ router.get('/dashboard', async (req, res) => {
         </tr>`;
       }).join('');
 
+      const owner = isOwnerOrganisation(org.name);
       return `<tr>
-        <td style="padding:10px 12px;font-weight:600">${org.name || org.id}</td>
+        <td style="padding:10px 12px;font-weight:600">${org.name || org.id}${owner ? ' <span style="color:#38bdf8;font-size:11px;font-weight:600">Owner — not billed</span>' : ''}</td>
         <td style="padding:10px 12px">${statusBadge(org.subscription_status || 'trialing')}</td>
         <td style="padding:10px 12px">${currency(MONTHLY_FLAT_RATE)}/mo</td>
         <td style="padding:10px 12px">${nextDate}</td>
         <td style="padding:10px 12px">
-          ${unpaid.length ? `<table width="100%"><thead><tr style="font-size:11px;color:#475569"><th style="padding:2px 8px">Invoice</th><th>Amount</th><th>Status</th><th>Due</th><th>Next reminder</th></tr></thead><tbody>${unpaidRows}</tbody></table>` : '<span style="color:#22c55e;font-size:12px">✓ All paid</span>'}
-          <form method="POST" action="/api/saas/billing/invoice-now" style="margin-top:6px;display:inline-block">
+          ${owner ? '<span style="color:#38bdf8;font-size:12px">No payment required</span>' : unpaid.length ? `<table width="100%"><thead><tr style="font-size:11px;color:#475569"><th style="padding:2px 8px">Invoice</th><th>Amount</th><th>Status</th><th>Due</th><th>Next reminder</th></tr></thead><tbody>${unpaidRows}</tbody></table>` : '<span style="color:#22c55e;font-size:12px">✓ All paid</span>'}
+          ${owner ? '' : `<form method="POST" action="/api/saas/billing/invoice-now" style="margin-top:6px;display:inline-block">
             <input type="hidden" name="secret" value="${secret}">
             <input type="hidden" name="orgId" value="${org.id}">
             <button type="submit" style="font-size:11px;padding:3px 10px;background:#6366f1;color:#fff;border:none;border-radius:4px;cursor:pointer">+ Invoice now</button>
-          </form>
+          </form>`}
           ${org.subscription_status === 'cancelled'
             ? `<form method="POST" action="/api/saas/billing/reactivate-org" style="display:inline-block;margin-left:6px">
                 <input type="hidden" name="secret" value="${secret}">
@@ -182,6 +185,7 @@ router.get('/dashboard', async (req, res) => {
 <body>
   <h1>Nexus Core Billing</h1>
   <p style="color:#64748b;margin:0 0 4px">$${MONTHLY_FLAT_RATE}/org/month &nbsp;·&nbsp; 14-day free trial &nbsp;·&nbsp; ABN 75 249 898 796</p>
+  <p style="color:#cbd5e1;max-width:720px">When a bank transfer arrives, press <strong>Mark paid</strong> on that invoice. Nexus Core (including Shifter) stays open during the trial and until the invoice is 21 days old. After that the organisation sees a payment screen until you mark the invoice paid.</p>
 
   <div class="summary">
     <div class="card"><div class="card-label">Active</div><div class="card-value">${activeCount}</div></div>
@@ -230,9 +234,13 @@ router.post('/invoice-now', async (req, res) => {
     // Check if this org is linked to a Shifter org — if so, send combined invoice
     const { data: org } = await supabase
       .from('organizations')
-      .select('linked_shifter_org_id')
+      .select('name, linked_shifter_org_id')
       .eq('id', orgId)
       .single();
+
+    if (isOwnerOrganisation(org?.name)) {
+      return res.redirect(`/api/saas/billing/dashboard?secret=${req.body.secret}`);
+    }
 
     if (org?.linked_shifter_org_id) {
       // Count active Shifter users for this org
@@ -267,12 +275,7 @@ router.post('/mark-paid', async (req, res) => {
       .select('org_id')
       .single();
 
-    if (inv?.org_id) {
-      await supabase
-        .from('organizations')
-        .update({ subscription_status: 'active', locked_at: null })
-        .eq('id', inv.org_id);
-    }
+    if (inv?.org_id) await settleOrgAfterInvoiceChange(inv.org_id);
     res.redirect(`/api/saas/billing/dashboard?secret=${req.body.secret}`);
   } catch (err) {
     res.status(500).send(`Failed: ${err.message}`);
@@ -286,10 +289,16 @@ router.post('/void-invoice', async (req, res) => {
   if (!invoiceId) return res.status(400).send('invoiceId required');
   try {
     const supabase = getSupabase();
+    const { data: existing } = await supabase
+      .from('saas_invoices')
+      .select('org_id')
+      .eq('id', invoiceId)
+      .maybeSingle();
     await supabase
       .from('saas_invoices')
       .update({ status: 'voided' })
       .eq('id', invoiceId);
+    if (existing?.org_id) await settleOrgAfterInvoiceChange(existing.org_id);
     res.redirect(`/api/saas/billing/dashboard?secret=${req.body.secret}`);
   } catch (err) {
     res.status(500).send(`Failed: ${err.message}`);
@@ -307,6 +316,7 @@ router.post('/cancel-org', async (req, res) => {
       .from('organizations')
       .update({ subscription_status: 'cancelled', locked_at: new Date().toISOString() })
       .eq('id', orgId);
+    invalidateSubscriptionCache(orgId);
     res.redirect(`/api/saas/billing/dashboard?secret=${req.body.secret}`);
   } catch (err) {
     res.status(500).send(`Failed: ${err.message}`);
@@ -324,6 +334,7 @@ router.post('/reactivate-org', async (req, res) => {
       .from('organizations')
       .update({ subscription_status: 'active', locked_at: null })
       .eq('id', orgId);
+    invalidateSubscriptionCache(orgId);
     res.redirect(`/api/saas/billing/dashboard?secret=${req.body.secret}`);
   } catch (err) {
     res.status(500).send(`Failed: ${err.message}`);

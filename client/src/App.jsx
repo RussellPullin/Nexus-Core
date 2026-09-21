@@ -1,10 +1,10 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, Link, Outlet, useParams, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FeatureFlagProvider } from './context/FeatureFlagContext';
 import { PRODUCT_AGENCY, PRODUCT_COORDINATION, isValidActiveProduct } from '@nexus-shared/tenantProduct.js';
-import { auth as authApi } from './lib/api';
+import { auth as authApi, saasSubscription } from './lib/api';
 import { writePreferredProductSurface } from './lib/nexusPreferredProduct.js';
 import ParticipantsPage from './pages/ParticipantsPage';
 import ParticipantProfile from './pages/ParticipantProfile';
@@ -27,6 +27,7 @@ import IntakePage from './pages/IntakePage';
 import SignDocumentPage from './pages/SignDocumentPage';
 import CompliancePage from './pages/CompliancePage';
 import LoginPage from './pages/LoginPage';
+import SubscriptionPaymentPage from './pages/SubscriptionPaymentPage';
 import SetupOrgPage from './pages/SetupOrgPage';
 import SettingsPage from './pages/SettingsPage';
 import FormsPage from './pages/FormsPage';
@@ -247,8 +248,52 @@ function Layout({ productSurface, children }) {
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>;
+  const [billing, setBilling] = useState(undefined);
+
+  const refreshBilling = useCallback(async () => {
+    const account = await saasSubscription.account();
+    setBilling(account);
+    return account;
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setBilling(undefined);
+      return undefined;
+    }
+    let cancelled = false;
+    saasSubscription.account()
+      .then((account) => {
+        if (!cancelled) setBilling(account);
+      })
+      .catch(() => {
+        if (!cancelled) setBilling({ locked: false });
+      });
+    const onLocked = () => {
+      if (!cancelled) {
+        saasSubscription.account()
+          .then((account) => {
+            if (!cancelled) setBilling(account?.locked ? account : { locked: true, invoices: [], bank: null });
+          })
+          .catch(() => {
+            if (!cancelled) setBilling({ locked: true, invoices: [], bank: null });
+          });
+      }
+    };
+    window.addEventListener('nexus:subscription-locked', onLocked);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('nexus:subscription-locked', onLocked);
+    };
+  }, [user]);
+
+  if (loading || (user && billing === undefined)) {
+    return <div className="content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>;
+  }
   if (!user) return <Navigate to="/login" replace />;
+  if (billing?.locked) {
+    return <SubscriptionPaymentPage account={billing} onRefresh={refreshBilling} />;
+  }
   return children;
 }
 

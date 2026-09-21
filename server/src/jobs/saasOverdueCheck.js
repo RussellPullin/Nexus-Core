@@ -5,6 +5,7 @@
 
 import cron from 'node-cron';
 import { createClient } from '@supabase/supabase-js';
+import { isOwnerOrganisation } from '../lib/saasSubscription.js';
 
 function getSupabase() {
   const url = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
@@ -23,13 +24,14 @@ export async function run() {
     // Find pending invoices whose due date has passed
     const { data: overdueInvoices } = await supabase
       .from('saas_invoices')
-      .select('id, org_id, invoice_number')
+      .select('id, org_id, invoice_number, organizations(name)')
       .eq('status', 'pending')
       .lt('due_at', now);
 
     if (!overdueInvoices?.length) return;
 
     for (const inv of overdueInvoices) {
+      if (isOwnerOrganisation(inv.organizations?.name)) continue;
       await supabase
         .from('saas_invoices')
         .update({ status: 'overdue' })

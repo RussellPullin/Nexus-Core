@@ -259,6 +259,15 @@ export async function fetchApi(path, options = {}) {
   const text = await res.text();
   if (!res.ok) {
     const err = text ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+    if (res.status === 402 && err?.code === 'SUBSCRIPTION_LOCKED') {
+      try {
+        if (typeof window !== 'undefined' && window.dispatchEvent) {
+          window.dispatchEvent(new CustomEvent('nexus:subscription-locked'));
+        }
+      } catch {
+        // ignore
+      }
+    }
     if (res.status === 401 && !isAuthPath) {
       // Avoid hard reload loops (flash-then-disappear). Let AuthProvider/ProtectedRoute
       // handle redirect by clearing user state.
@@ -1022,6 +1031,10 @@ export const learning = {
 export const reports = {
   staffAvailability: (start, end) =>
     fetchApi(`/reports/staff-availability?${new URLSearchParams({ start, end }).toString()}`)
+};
+
+export const saasSubscription = {
+  account: () => fetchApi('/saas/subscription'),
 };
 
 export const billing = {
