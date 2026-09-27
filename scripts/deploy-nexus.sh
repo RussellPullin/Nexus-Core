@@ -8,6 +8,7 @@
 # Environment:
 #   FLY_APP_NAME              — default: nexus-core-crm
 #   SKIP_FLY_BACKUP=1         — skip SSH SQLite backup before deploy
+#   SKIP_NDIS_UPSERT=1        — skip post-deploy NDIS Support Catalogue upsert
 #   NEXUS_DEPLOY_BRANCH       — branch you must be on (default: main)
 #   NEXUS_DEPLOY_REMOTE       — default: origin
 #   SKIP_DEPLOY_GIT_CHECKS=1  — bypass all git safety checks (not recommended)
@@ -185,3 +186,19 @@ fi
 
 echo "=== fly deploy ==="
 fly deploy "$@"
+
+# Refresh production NDIS line items from the bundled Support Catalogue.
+# Required after price-guide releases: the image ships the CSV, but SQLite on the
+# volume is only updated when this upsert runs (preserves existing UUIDs).
+if [[ "${SKIP_NDIS_UPSERT:-}" != "1" ]]; then
+  echo "=== Upserting NDIS Support Catalogue on Fly ($APP) ==="
+  if fly ssh console -a "$APP" -C "env DATABASE_PATH=/data/schedule.db DATA_DIR=/data NODE_ENV=production node /app/server/scripts/upsert-ndis-catalogue.mjs"; then
+    echo "=== NDIS catalogue upsert finished ==="
+  else
+    echo "Warning: NDIS catalogue upsert failed (auth, app name, or script missing on image). Re-run manually:" >&2
+    echo "  fly ssh console -a $APP -C \"env DATABASE_PATH=/data/schedule.db DATA_DIR=/data NODE_ENV=production node /app/server/scripts/upsert-ndis-catalogue.mjs\"" >&2
+    echo "Set SKIP_NDIS_UPSERT=1 to silence." >&2
+  fi
+else
+  echo "=== SKIP_NDIS_UPSERT=1 — not refreshing production NDIS catalogue ==="
+fi
