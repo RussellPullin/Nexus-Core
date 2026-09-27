@@ -41,6 +41,8 @@ export default function SettingsPage() {
   const { productSurface } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [emailWizardView, setEmailWizardView] = useState('choose');
+  const [emailConnectBusy, setEmailConnectBusy] = useState('');
+  const emailDetailsRef = useRef(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [billingIntervalMinutes, setBillingIntervalMinutes] = useState(user?.billing_interval_minutes ?? 15);
   const [staffId, setStaffId] = useState(user?.staff_id || '');
@@ -83,9 +85,15 @@ export default function SettingsPage() {
     }
   }, [searchParams, setSearchParams, refreshUser]);
 
+  const openEmailPanel = useCallback((scroll) => {
+    const el = emailDetailsRef.current;
+    if (!el) return;
+    el.open = true;
+    if (scroll) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
   useEffect(() => {
     const expand = searchParams.get('expand');
-    if (!expand) return;
     const t = window.setTimeout(() => {
       if (expand === 'company') {
         const el = document.getElementById('settings-section-company');
@@ -94,9 +102,21 @@ export default function SettingsPage() {
           el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
       }
-    }, 150);
-    return () => clearTimeout(t);
-  }, [searchParams]);
+      if (
+        expand === 'email' ||
+        user?.email_reconnect_required ||
+        (user && !user.email_connected_address)
+      ) {
+        openEmailPanel(expand === 'email');
+      }
+    }, 50);
+    const onOpenEmail = () => openEmailPanel(true);
+    window.addEventListener('nexus:open-email-connect', onOpenEmail);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('nexus:open-email-connect', onOpenEmail);
+    };
+  }, [searchParams, user, user?.email_reconnect_required, user?.email_connected_address, openEmailPanel]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -140,6 +160,20 @@ export default function SettingsPage() {
   };
 
   const oauthBase = () => `${window.location.origin}/api/email/oauth`;
+
+  const startEmailOAuth = async (provider, event) => {
+    event?.preventDefault?.();
+    if (emailConnectBusy) return;
+    setEmailConnectBusy(provider);
+    setTestResult('');
+    const href = `${oauthBase()}/${provider}`;
+    // Refresh the sign-in cookie first. A full-page jump cannot repair a missing session on its own.
+    await Promise.race([
+      refreshUser().catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 4000))
+    ]);
+    window.location.assign(href);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -198,7 +232,7 @@ export default function SettingsPage() {
       <h2>Settings</h2>
 
       <div className="settings-cards-grid">
-      <details className="card settings-collapsible">
+      <details id="settings-section-email" ref={emailDetailsRef} className="card settings-collapsible">
         <summary className="settings-collapsible-summary">
           <span className="settings-collapsible-summary-main">
             <span className="settings-collapsible-title">Connect your email</span>
@@ -235,9 +269,13 @@ export default function SettingsPage() {
               <button type="button" className="btn btn-secondary" onClick={handleTestEmail} disabled={testing}>
                 {testing ? 'Sending…' : 'Send test email to me'}
               </button>
-              <button type="button" className="btn btn-secondary" onClick={() => window.location.assign(`${oauthBase()}/${user.email_provider === 'google' ? 'google' : 'microsoft'}`)}>
-                Reconnect / switch account
-              </button>
+              <a
+                className="btn btn-secondary"
+                href={`${oauthBase()}/${user.email_provider === 'google' ? 'google' : 'microsoft'}`}
+                onClick={(e) => startEmailOAuth(user.email_provider === 'google' ? 'google' : 'microsoft', e)}
+              >
+                {emailConnectBusy ? 'Opening sign-in…' : 'Reconnect / switch account'}
+              </a>
               <button type="button" className="btn btn-secondary" onClick={handleDisconnectEmail} disabled={disconnecting}>
                 {disconnecting ? '…' : 'Disconnect'}
               </button>
@@ -248,12 +286,12 @@ export default function SettingsPage() {
             {emailWizardView === 'choose' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 360 }}>
                 <p style={{ margin: 0, color: '#64748b', fontSize: '0.95rem' }}>Step 1 — Where is your email?</p>
-                <button type="button" className="btn btn-primary" onClick={() => window.location.assign(`${oauthBase()}/google`)}>
-                  Continue with Gmail
-                </button>
-                <button type="button" className="btn btn-primary" onClick={() => window.location.assign(`${oauthBase()}/microsoft`)}>
-                  Continue with Microsoft 365 / Outlook
-                </button>
+                <a className="btn btn-primary" href={`${oauthBase()}/google`} style={{ width: '100%' }} onClick={(e) => startEmailOAuth('google', e)}>
+                  {emailConnectBusy === 'google' ? 'Opening Gmail sign-in…' : 'Continue with Gmail'}
+                </a>
+                <a className="btn btn-primary" href={`${oauthBase()}/microsoft`} style={{ width: '100%' }} onClick={(e) => startEmailOAuth('microsoft', e)}>
+                  {emailConnectBusy === 'microsoft' ? 'Opening Microsoft sign-in…' : 'Continue with Microsoft 365 / Outlook'}
+                </a>
                 <button type="button" className="btn btn-secondary" onClick={() => setEmailWizardView('other')}>
                   Other provider
                 </button>

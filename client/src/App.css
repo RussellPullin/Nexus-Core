@@ -2221,6 +2221,17 @@ details.card.settings-collapsible > summary {
 details.card.settings-collapsible > summary::-webkit-details-marker {
   display: none;
 }
+/* Clicks on the title text must reach the summary, or the panel never opens. */
+details.card.settings-collapsible > summary * {
+  pointer-events: none;
+}
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
 details.card.settings-collapsible > summary::after {
   content: '';
   width: 0.45rem;

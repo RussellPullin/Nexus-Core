@@ -219,7 +219,14 @@ function Layout({ productSurface, children }) {
                     ? 'Connect your email so you can send rosters and staff messages from your own address.'
                     : 'Connect your email so you can send participant-related mail from your own address.'}
             </span>
-            <Link to={`${prefix}/settings`} className="btn btn-primary" style={{ textDecoration: 'none' }}>
+            <Link
+              to={`${prefix}/settings?expand=email`}
+              className="btn btn-primary"
+              style={{ textDecoration: 'none' }}
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('nexus:open-email-connect'));
+              }}
+            >
               {user.email_reconnect_required
                 ? 'Reconnect email'
                 : needsEmailRelay

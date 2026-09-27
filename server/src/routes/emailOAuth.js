@@ -11,26 +11,10 @@ import { oauthApiPublicOrigin } from '../lib/oauthPublicOrigin.js';
 
 const router = Router();
 
-/** Like requireAuth but logs 401 for email OAuth start (full-page navigation cookie issues). */
+/** Full-page OAuth start. A missing cookie must land on the login page, not a raw JSON error. */
 function requireAuthEmailOauthStart(req, res, next) {
   if (req.session?.user) return next();
-  // #region agent log
-  const dbg401 = {
-    sessionId: 'a4dffc',
-    location: 'emailOAuth.js:requireAuthEmailOauthStart',
-    message: 'email oauth start 401 no session',
-    data: { path: req.path || '', hasCookieHeader: Boolean(req.headers?.cookie) },
-    timestamp: Date.now(),
-    hypothesisId: 'C'
-  };
-  fetch('http://127.0.0.1:7395/ingest/9396d2bf-ffd7-4cdc-a66d-39fbe0a7e677', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'a4dffc' },
-    body: JSON.stringify(dbg401)
-  }).catch(() => {});
-  console.error('__NEXUS_DEBUG_A4DFFC__', JSON.stringify(dbg401));
-  // #endregion
-  return res.status(401).json({ error: 'Not authenticated' });
+  return res.redirect('/login?email_connect=1');
 }
 
 function signState(obj) {
@@ -68,25 +52,9 @@ router.post('/disconnect', requireAuth, (req, res) => {
 });
 
 router.get('/google', requireAuthEmailOauthStart, (req, res) => {
-  // #region agent log
-  const dbgStart = {
-    sessionId: 'a4dffc',
-    location: 'emailOAuth.js:GET /google',
-    message: 'oauth start ok (session present)',
-    data: { uidPrefix: String(req.session?.user?.id || '').slice(0, 8) },
-    timestamp: Date.now(),
-    hypothesisId: 'C'
-  };
-  fetch('http://127.0.0.1:7395/ingest/9396d2bf-ffd7-4cdc-a66d-39fbe0a7e677', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'a4dffc' },
-    body: JSON.stringify(dbgStart)
-  }).catch(() => {});
-  console.error('__NEXUS_DEBUG_A4DFFC__', JSON.stringify(dbgStart));
-  // #endregion
   const cid = process.env.GOOGLE_OAUTH_CLIENT_ID;
   if (!cid) {
-    return res.status(500).send('Server missing GOOGLE_OAUTH_CLIENT_ID. Add it to .env.');
+    return res.redirect(buildSettingsRedirectLocation(req, `?email_error=${encodeURIComponent('Gmail sign-in is not set up on this server yet. Ask your administrator to finish email setup.')}`));
   }
   const redirectUri = `${oauthApiPublicOrigin(req)}/api/email/oauth/google/callback`;
   const state = signState({
@@ -219,7 +187,7 @@ router.get('/google/callback', async (req, res) => {
 router.get('/microsoft', requireAuthEmailOauthStart, (req, res) => {
   const cid = process.env.MICROSOFT_OAUTH_CLIENT_ID;
   if (!cid) {
-    return res.status(500).send('Server missing MICROSOFT_OAUTH_CLIENT_ID.');
+    return res.redirect(buildSettingsRedirectLocation(req, `?email_error=${encodeURIComponent('Microsoft sign-in is not set up on this server yet. Ask your administrator to finish email setup.')}`));
   }
   const tenant = process.env.MICROSOFT_OAUTH_TENANT || 'common';
   const redirectUri = `${oauthApiPublicOrigin(req)}/api/email/oauth/microsoft/callback`;

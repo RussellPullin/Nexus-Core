@@ -71,6 +71,11 @@ export default function LoginPage() {
       setIsRecoveryMode(true);
       setIsRegister(false);
       setInfo('Recovery link accepted. Set a new password below.');
+      return;
+    }
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('email_connect') === '1') {
+      setInfo('Sign in again, then use Connect email. Your previous email sign-in had expired.');
     }
   }, []);
 
