@@ -7,8 +7,13 @@
  *   npm run upsert-ndis
  *   node server/scripts/upsert-ndis-catalogue.mjs [path/to/catalogue.csv]
  *
- * On Fly (after deploy):
+ * On Fly (after deploy) — also run automatically by scripts/deploy-nexus.sh unless
+ * SKIP_NDIS_UPSERT=1:
  *   fly ssh console -a nexus-core-crm -C "env DATABASE_PATH=/data/schedule.db DATA_DIR=/data NODE_ENV=production node /app/server/scripts/upsert-ndis-catalogue.mjs"
+ *
+ * Source of truth: official NDIA Support Catalogue (XLSX) converted via
+ * scripts/convert-ndis-catalogue.py into server/ndis-catalogue.csv.
+ * Pricing Schedule effective 24 September 2026 matches Support Catalogue 2026-27 v1.1 rates.
  */
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, resolve } from 'path';
