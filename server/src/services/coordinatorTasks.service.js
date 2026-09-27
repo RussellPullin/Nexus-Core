@@ -144,12 +144,12 @@ export function getSupportCoordLineItem(participantId, activityDate) {
 
   const fallback = db.prepare(`
     SELECT id, rate, rate_remote, rate_very_remote, unit, rate_type, support_item_number, description
-    FROM ndis_line_items
-    WHERE (support_category = '07' OR support_item_number LIKE '07_%')
-      AND support_item_number NOT LIKE '07_799%'
-      AND (rate_type = ? OR rate_type IS NULL OR rate_type = 'weekday')
-      AND (unit = 'hour' OR unit = 'hr')
-    ORDER BY ${SC_LEVEL2_ORDER_SQL}, rate_type = ? DESC
+    FROM ndis_line_items nli
+    WHERE (nli.support_category = '07' OR nli.support_item_number LIKE '07_%')
+      AND nli.support_item_number NOT LIKE '07_799%'
+      AND (nli.rate_type = ? OR nli.rate_type IS NULL OR nli.rate_type = 'weekday')
+      AND (nli.unit = 'hour' OR nli.unit = 'hr')
+    ORDER BY ${SC_LEVEL2_ORDER_SQL}, nli.rate_type = ? DESC
     LIMIT 1
   `).get(dayType, dayType);
 
