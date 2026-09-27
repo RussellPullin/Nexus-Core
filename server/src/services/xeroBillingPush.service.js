@@ -4,6 +4,7 @@
 import { db } from '../db/index.js';
 import { getXeroAccessToken, parseXeroApiBodyOrThrow, XERO_API_BASE } from '../routes/settings.js';
 import { participantInvoiceIncludesGst, roundMoney } from '../lib/invoiceGst.js';
+import { buildXeroLineDescription } from '../lib/xeroLineDescription.js';
 
 const DEFAULT_SALES_ACCOUNT = process.env.XERO_SALES_ACCOUNT_CODE?.trim() || '200';
 /** Australian Xero org: GST on sales 10% */
@@ -218,11 +219,8 @@ export async function pushBillingInvoiceToXero(billingInvoiceId, orgId = null) {
   const lineItems = items.map((li) => {
     const qty = Number(li.quantity) || 0;
     const unit = roundMoney(Number(li.unit_price) || 0);
-    const desc = [li.support_item_number && li.support_item_number !== '-' ? `${li.support_item_number}: ` : '', li.description || 'Line']
-      .join('')
-      .slice(0, 4000);
     return {
-      Description: desc || 'Support',
+      Description: buildXeroLineDescription(li),
       Quantity: qty,
       UnitAmount: unit,
       AccountCode: salesAccount,
