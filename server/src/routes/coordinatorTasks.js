@@ -453,7 +453,7 @@ router.get('/task-invoices/:id/pdf', async (req, res) => {
     const { lineItems, subtotal } = buildTaskInvoiceLineItems(tasks, travelItem, billingIntervalPdf);
     const { gst_amount: gstAmount, total_incl_gst: grandTotal } = gstBreakdownFromSubtotal(subtotal, includesGst);
 
-    const doc = new PDFDocument({ margin: 50 });
+    const doc = new PDFDocument({ size: 'A4', margin: 54 });
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => {
