@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { forms, documentLibrary } from '../lib/api';
+import { forms, documentLibrary, participants } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import ActivityRiskAssessmentsPanel from '../components/ActivityRiskAssessmentsPanel';
@@ -14,14 +14,21 @@ const CATEGORY_LABELS = {
   guide:     'Guide',
 };
 
-const CATEGORY_ICONS = {
-  policy:    '📋',
-  procedure: '🔧',
-  register:  '📊',
-  contract:  '📄',
-  form:      '✏️',
-  guide:     '📖',
-};
+function libraryUseKind(doc) {
+  const signatureCount = Number(doc?.signature_count) || 0;
+  if (signatureCount > 0 || doc?.category === 'form') return 'use';
+  return 'send';
+}
+
+function libraryUseHint(doc) {
+  const kind = libraryUseKind(doc);
+  if (kind === 'use' && Number(doc?.signature_count) > 0) {
+    return 'Sends this form to the participant to sign.';
+  }
+  if (kind === 'use') return 'Emails this form, filled in for the participant.';
+  if (doc?.category === 'policy') return 'Emails this policy to the participant.';
+  return 'Emails this document to the participant.';
+}
 
 export default function FormsPage() {
   const { isAdmin } = useAuth();
@@ -33,6 +40,12 @@ export default function FormsPage() {
   const [libraryTemplates, setLibraryTemplates] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryCategoryFilter, setLibraryCategoryFilter] = useState('');
+  const [activeDoc, setActiveDoc] = useState(null);
+  const [participantOptions, setParticipantOptions] = useState([]);
+  const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [participantQuery, setParticipantQuery] = useState('');
+  const [selectedParticipantId, setSelectedParticipantId] = useState('');
+  const [usingDoc, setUsingDoc] = useState(false);
 
   // Extra organisation documents (escape hatch)
   const [policyFiles, setPolicyFiles] = useState([]);
@@ -82,6 +95,63 @@ export default function FormsPage() {
     }
   };
 
+  const openDocument = (doc) => {
+    setActiveDoc(doc);
+    setParticipantQuery('');
+    setSelectedParticipantId('');
+    setMessage('');
+    if (participantOptions.length > 0) return;
+    setParticipantsLoading(true);
+    participants
+      .list()
+      .then((list) => {
+        const rows = Array.isArray(list) ? list : [];
+        setParticipantOptions(rows.map((p) => ({
+          id: p.id,
+          name: p.name || 'Unnamed participant',
+          email: p.email || ''
+        })));
+      })
+      .catch(() => setParticipantOptions([]))
+      .finally(() => setParticipantsLoading(false));
+  };
+
+  const closeDocument = () => {
+    if (usingDoc) return;
+    setActiveDoc(null);
+  };
+
+  const handleUseDocument = async () => {
+    if (!activeDoc) return;
+    const participant = participantOptions.find((p) => p.id === selectedParticipantId);
+    if (!participant) {
+      setMessage('Choose a participant.');
+      return;
+    }
+    if (!participant.email) {
+      setMessage('This participant has no email address.');
+      return;
+    }
+    const docId = activeDoc.id || activeDoc.slug;
+    const kind = libraryUseKind(activeDoc);
+    setUsingDoc(true);
+    setMessage('');
+    try {
+      await documentLibrary.useForParticipant(docId, participant.id);
+      const name = activeDoc.display_name || activeDoc.name;
+      setMessage(
+        kind === 'use'
+          ? `Sent “${name}” to ${participant.name} to complete.`
+          : `Sent “${name}” to ${participant.name}.`
+      );
+      setActiveDoc(null);
+    } catch (err) {
+      setMessage(err.message || 'Could not send this document');
+    } finally {
+      setUsingDoc(false);
+    }
+  };
+
   const handlePolicyDelete = async (policyId, label) => {
     if (!confirm(`Remove document "${label}"?`)) return;
     setPolicyBusy(true);
@@ -104,6 +174,15 @@ export default function FormsPage() {
   const filteredLibrary = libraryCategoryFilter
     ? (libraryTemplates || []).filter((t) => t.category === libraryCategoryFilter)
     : libraryTemplates;
+  const participantMatches = participantQuery.trim()
+    ? participantOptions.filter((p) => {
+        const q = participantQuery.trim().toLowerCase();
+        return p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q);
+      })
+    : participantOptions;
+  const selectedParticipant = participantOptions.find((p) => p.id === selectedParticipantId) || null;
+  const activeKind = activeDoc ? libraryUseKind(activeDoc) : 'send';
+  const activeDocId = activeDoc ? (activeDoc.id || activeDoc.slug) : '';
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -159,7 +238,7 @@ export default function FormsPage() {
             <span className="forms-lede settings-collapsible-hint" style={{ marginBottom: 0 }}>
               {isAdmin
                 ? (libraryTemplates.length
-                    ? `${libraryTemplates.length} compliance documents — branded from business details`
+                    ? `${libraryTemplates.length} documents — open one to use it for a participant, or send it if it is a policy`
                     : 'Policies, procedures, registers, contracts, and guides. Open to browse.')
                 : 'Admin only — ask an organisation admin to open the library.'}
             </span>
@@ -202,68 +281,23 @@ export default function FormsPage() {
         ) : filteredLibrary.length === 0 ? (
           <p className="forms-muted">No documents found. {libraryTemplates.length === 0 ? 'Check the server has synced templates.' : 'Try a different category filter.'}</p>
         ) : (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-            gap: '0.65rem'
-          }}>
+          <div className="library-doc-grid">
             {filteredLibrary.map((doc) => {
               const docId = doc.id || doc.slug;
-              const previewUrl = documentLibrary.previewMasterUrl(docId);
+              const kind = libraryUseKind(doc);
               return (
                 <button
                   key={docId}
                   type="button"
-                  onClick={() => window.open(previewUrl, '_blank', 'noopener,noreferrer')}
-                  title={`Open ${doc.display_name || doc.name}`}
-                  style={{
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 8,
-                    padding: '0.75rem',
-                    background: '#fff',
-                    display: 'flex',
-                    gap: '0.65rem',
-                    alignItems: 'flex-start',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    transition: 'border-color 0.12s, box-shadow 0.12s',
-                    width: '100%'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = '#93c5fd';
-                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(59,130,246,0.10)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = '#e2e8f0';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
+                  className="library-doc-card"
+                  onClick={() => openDocument(doc)}
+                  title={`${doc.display_name || doc.name} — ${kind === 'use' ? 'use for a participant' : 'send'}`}
                 >
-                  <span style={{ fontSize: '1.2rem', flexShrink: 0, marginTop: 1 }}>
-                    {CATEGORY_ICONS[doc.category] || '📄'}
+                  <span className="library-doc-card-kind">
+                    {CATEGORY_LABELS[doc.category] || doc.category || 'Document'}
                   </span>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'baseline', flexWrap: 'wrap', marginBottom: '0.2rem' }}>
-                      <span style={{
-                        fontSize: '0.7rem',
-                        fontWeight: 600,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        color: '#64748b',
-                        background: '#f1f5f9',
-                        borderRadius: 4,
-                        padding: '0.1rem 0.35rem'
-                      }}>
-                        {CATEGORY_LABELS[doc.category] || doc.category}
-                      </span>
-                      {doc.signature_count > 0 && (
-                        <span style={{ fontSize: '0.7rem', color: '#7c3aed' }}>✍️ Signature</span>
-                      )}
-                    </div>
-                    <strong style={{ display: 'block', fontSize: '0.88rem', color: '#1e293b', lineHeight: 1.3 }}>
-                      {doc.display_name || doc.name}
-                    </strong>
-                  </div>
-                  <span style={{ fontSize: '0.75rem', color: '#3b82f6', flexShrink: 0, marginTop: 2 }}>↗</span>
+                  <span className="library-doc-card-name">{doc.display_name || doc.name}</span>
+                  <span className="library-doc-card-action">{kind === 'use' ? 'Use for participant' : 'Send'}</span>
                 </button>
               );
             })}
@@ -340,6 +374,96 @@ export default function FormsPage() {
           <p className="forms-muted" style={{ fontSize: '0.85rem' }}>No extra documents uploaded.</p>
         )}
       </section>
+
+      {activeDoc && (
+        <div className="modal-overlay" onClick={closeDocument}>
+          <div
+            className="modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 980, width: '94vw' }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="library-doc-title"
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              <div>
+                <span className="library-doc-card-kind">
+                  {CATEGORY_LABELS[activeDoc.category] || activeDoc.category || 'Document'}
+                </span>
+                <h3 id="library-doc-title" style={{ margin: '0.35rem 0 0.25rem' }}>
+                  {activeDoc.display_name || activeDoc.name}
+                </h3>
+                <p className="forms-muted" style={{ margin: 0 }}>{libraryUseHint(activeDoc)}</p>
+              </div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={closeDocument} disabled={usingDoc}>
+                Close
+              </button>
+            </div>
+
+            <div className="library-use-layout">
+              <div>
+                <label className="forms-label" style={{ display: 'block' }}>
+                  Participant
+                  <input
+                    type="search"
+                    className="form-input"
+                    placeholder="Search name or email"
+                    value={participantQuery}
+                    onChange={(e) => setParticipantQuery(e.target.value)}
+                    style={{ marginTop: '0.35rem' }}
+                    disabled={usingDoc}
+                  />
+                </label>
+                <select
+                  className="form-input"
+                  size={8}
+                  value={selectedParticipantId}
+                  onChange={(e) => setSelectedParticipantId(e.target.value)}
+                  disabled={usingDoc || participantsLoading}
+                  style={{ width: '100%', marginTop: '0.4rem' }}
+                >
+                  {participantsLoading ? (
+                    <option value="">Loading participants…</option>
+                  ) : participantMatches.length === 0 ? (
+                    <option value="">No participants found</option>
+                  ) : (
+                    participantMatches.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}{p.email ? '' : ' (no email)'}
+                      </option>
+                    ))
+                  )}
+                </select>
+                {selectedParticipant && (
+                  <p className="forms-muted" style={{ margin: '0.4rem 0 0.6rem', fontSize: '0.8rem' }}>
+                    {selectedParticipant.email || 'No email on file — add one before sending.'}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ marginTop: '0.6rem', width: '100%' }}
+                  disabled={usingDoc || !selectedParticipantId || !selectedParticipant?.email}
+                  onClick={handleUseDocument}
+                >
+                  {usingDoc
+                    ? 'Sending…'
+                    : activeKind === 'use'
+                      ? 'Use for participant'
+                      : 'Send'}
+                </button>
+              </div>
+              <iframe
+                className="library-use-preview"
+                title={`Preview of ${activeDoc.display_name || activeDoc.name}`}
+                src={documentLibrary.previewMasterUrl(activeDocId, {
+                  participantId: selectedParticipantId || undefined
+                })}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

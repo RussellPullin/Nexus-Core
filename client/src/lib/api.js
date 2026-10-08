@@ -706,6 +706,10 @@ export const documentLibrary = {
     const q = qs.toString();
     return `${API}/document-library/masters/${encodeURIComponent(masterId)}/preview${q ? `?${q}` : ''}`;
   },
+  useForParticipant: (masterId, participantId) => fetchApi(`/document-library/masters/${masterId}/use`, {
+    method: 'POST',
+    body: JSON.stringify({ participant_id: participantId })
+  }),
   renderMaster: (masterId, body = {}) => fetchApi(`/document-library/masters/${masterId}/render`, {
     method: 'POST',
     body: JSON.stringify(body)

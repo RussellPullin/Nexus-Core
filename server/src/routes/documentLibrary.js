@@ -24,7 +24,7 @@ import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { requireAuth } from '../middleware/auth.js';
-import { requireAdminOrDelegate } from '../middleware/roles.js';
+import { canAccessParticipant, requireAdminOrDelegate } from '../middleware/roles.js';
 import {
   syncDocumentLibraryFromDisk,
   cloneLibraryMasterToOrg,
@@ -47,6 +47,11 @@ import {
   VALID_STAFF_ONBOARDING_ROLES
 } from '../services/onboardingDocumentPacks.service.js';
 import { renderLibraryDocument } from '../services/documentLibraryRender.service.js';
+import {
+  loadActiveLibraryMaster,
+  sendLibraryDocumentToParticipant
+} from '../services/libraryDocumentUse.service.js';
+import { formatSmtpAuthError } from '../services/notification.service.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -250,6 +255,43 @@ router.post('/sync', requireAdminOrDelegate, async (_req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Use one library document for a participant, or email it when it is a policy
+ * (or any other document that is not a signature form).
+ * Body: { participant_id }
+ */
+router.post('/masters/:id/use', requireAdminOrDelegate, async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    const orgId = requesterOrgId(req);
+    if (!orgId) return res.status(404).json({ error: 'No organisation for this user' });
+
+    const participantId = req.body?.participant_id;
+    if (!participantId) return res.status(400).json({ error: 'Choose a participant.' });
+    if (!canAccessParticipant(userId, participantId)) {
+      return res.status(403).json({ error: 'You cannot use documents for this participant.' });
+    }
+
+    const master = loadActiveLibraryMaster(req.params.id);
+    if (!master) return res.status(404).json({ error: 'Document not found' });
+
+    const participant = db.prepare('SELECT * FROM participants WHERE id = ?').get(participantId);
+    if (!participant) return res.status(404).json({ error: 'Participant not found' });
+
+    const org = db.prepare('SELECT name FROM organisations WHERE id = ?').get(orgId);
+    const result = await sendLibraryDocumentToParticipant({
+      orgId,
+      userId,
+      master,
+      participant,
+      orgName: org?.name || 'Nexus Core'
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: formatSmtpAuthError(err), code: err.code || null });
   }
 });
 
