@@ -1,6 +1,6 @@
 /**
- * Location used for support-coordination public holidays.
- * Shift public holidays use shifts.service_location, not the participant's home address.
+ * Public holiday state for a client: the address saved on the participant,
+ * then the intake state, then the provider address when the client address has no state.
  */
 import { db } from '../db/index.js';
 import { normalizeHolidayLocation } from '../../../shared/auPublicHolidays.js';

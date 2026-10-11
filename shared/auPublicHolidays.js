@@ -146,7 +146,7 @@ export function resolveAuStateFromLocation(...parts) {
 }
 
 /**
- * Shift location: participant address first, then intake state, then the provider's address.
+ * Client address first, then intake state, then the provider's address.
  * @param {string|{ state?: string, address?: string, participant_address?: string, intakeState?: string, intake_state?: string, orgAddress?: string, org_address?: string }|null|undefined} location
  * @returns {{ state: string|null, locationText: string }}
  */

@@ -10,6 +10,7 @@ import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { billingParticipantFilterFromRequest, staffTableOrgFilterFromRequest } from '../lib/orgScopeSql.js';
 import { shiftCompletionEvidenceSql } from '../lib/shiftBillingEligibility.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
+import { SHIFT_HOLIDAY_LOCATION_COLUMNS } from '../lib/participantHolidayLocation.js';
 import { comparePaySummaryRows } from '../../../shared/payPeriodOrder.js';
 import { fileToRows, importCaseNotesFromRows } from '../lib/caseNotesCsvImport.js';
 
@@ -304,10 +305,12 @@ router.get('/pay-summary', (req, res) => {
       .prepare(`SELECT st.id, st.name, st.org_id FROM staff st WHERE (${sf.sql}) ORDER BY st.name COLLATE NOCASE`)
       .all(...sf.params);
     const shiftStmt = db.prepare(`
-      SELECT s.id, s.start_time, s.end_time, s.expenses, s.service_location,
+      SELECT s.id, s.start_time, s.end_time, s.expenses,
+        ${SHIFT_HOLIDAY_LOCATION_COLUMNS},
         (SELECT MAX(pn.travel_time_min) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_time_min,
         (SELECT MAX(pn.travel_km) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_km
       FROM shifts s
+      LEFT JOIN participants p ON p.id = s.participant_id
       WHERE s.staff_id = ?
         AND s.status IN ('completed', 'completed_by_admin')
       ORDER BY s.start_time

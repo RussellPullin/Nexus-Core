@@ -61,7 +61,13 @@ function toISODateKey(dateStr) {
 
 function getShiftCategory(dateStr, shift, startMinutes) {
   const isoKey = toISODateKey(dateStr);
-  const place = normalizeHolidayLocation({ address: shift?.service_location || '' });
+  const place = normalizeHolidayLocation({
+    address: shift?.address,
+    participant_address: shift?.participant_address,
+    intake_state: shift?.intake_state ?? shift?.intakeState,
+    org_address: shift?.org_address ?? shift?.orgAddress,
+    state: shift?.state,
+  });
   if (isoKey && isAuPublicHoliday(isoKey, place.state, {
     startMinutes,
     locationText: place.locationText,

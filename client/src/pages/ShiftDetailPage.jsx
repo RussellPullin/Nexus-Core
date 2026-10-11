@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { shifts, ndis, learning } from '../lib/api';
-import { AU_STATE_CODES, joinServiceLocation, splitServiceLocation } from '@nexus-shared/auPublicHolidays.js';
 import { formatDate, formatDateLocal } from '../lib/dateUtils';
 import { getEffectiveNdisRate } from '../lib/ndisRates';
 
@@ -67,8 +66,6 @@ export default function ShiftDetailPage() {
   const [ndisItems, setNdisItems] = useState([]);
   const [tab, setTab] = useState('finance');
   const [notes, setNotes] = useState('');
-  const [servicePlace, setServicePlace] = useState('');
-  const [serviceState, setServiceState] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [notFound, setNotFound] = useState(false);
@@ -132,9 +129,6 @@ export default function ShiftDetailPage() {
       setShift(s);
       setLineItems(items);
       setNotes(s?.notes || '');
-      const place = splitServiceLocation(s?.service_location);
-      setServicePlace(place.place);
-      setServiceState(place.state);
       setShiftReceipts(Array.isArray(receipts) ? receipts : []);
     } catch (e) {
       console.error(e);
@@ -263,9 +257,8 @@ export default function ShiftDetailPage() {
 
   const handleSaveNotes = async () => {
     try {
-      const service_location = joinServiceLocation(servicePlace, serviceState);
-      const updated = await shifts.update(id, { ...shift, notes, service_location });
-      setShift(updated || { ...shift, notes, service_location });
+      const updated = await shifts.update(id, { ...shift, notes });
+      setShift(updated || { ...shift, notes });
     } catch (err) {
       alert(err.message);
     }
@@ -576,30 +569,6 @@ export default function ShiftDetailPage() {
         {tab === 'notes' && (
           <div className="card">
             <h3 style={{ marginTop: 0 }}>Session Notes</h3>
-            <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.35rem' }}>Where this shift takes place</label>
-            <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: 0 }}>
-              Public holiday rates use this place, not the participant&apos;s home address.
-            </p>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-              <input
-                type="text"
-                value={servicePlace}
-                onChange={(e) => setServicePlace(e.target.value)}
-                placeholder="Suburb or address"
-                style={{ flex: '1 1 12rem', padding: '0.5rem', borderRadius: 6, border: '1px solid #e2e8f0' }}
-              />
-              <select
-                value={serviceState}
-                onChange={(e) => setServiceState(e.target.value)}
-                aria-label="State where this shift takes place"
-                style={{ padding: '0.5rem', borderRadius: 6, border: '1px solid #e2e8f0' }}
-              >
-                <option value="">State</option>
-                {AU_STATE_CODES.map((code) => (
-                  <option key={code} value={code}>{code}</option>
-                ))}
-              </select>
-            </div>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}

@@ -4,7 +4,6 @@ import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { formatDate, formatDateInTimeZone, formatDateLocal, formatTimeInTimeZone } from '../lib/dateUtils';
 import { useSearchParams } from 'react-router-dom';
 import { shifts, participants, staff, appShifts, settings, syncFromShifter, learning } from '../lib/api';
-import { AU_STATE_CODES, joinServiceLocation, splitServiceLocation } from '@nexus-shared/auPublicHolidays.js';
 import WeekPlanner from '../components/WeekPlanner';
 import SearchableSelect from '../components/SearchableSelect';
 import SuggestionPanel from '../components/SuggestionPanel';
@@ -15,21 +14,16 @@ const EMPTY_SHIFT_FORM = {
   staff_id: '',
   start_time: '',
   end_time: '',
-  notes: '',
-  service_state: '',
-  service_place: ''
+  notes: ''
 };
 
 function shiftFormFromRecord(shift) {
-  const place = splitServiceLocation(shift?.service_location);
   return {
     participant_id: shift?.participant_id || '',
     staff_id: shift?.staff_id || '',
     start_time: '',
     end_time: '',
-    notes: shift?.notes || '',
-    service_state: place.state,
-    service_place: place.place
+    notes: shift?.notes || ''
   };
 }
 
@@ -446,12 +440,7 @@ export default function ShiftsPage() {
     const sendAfter = sendAfterRef.current;
     sendAfterRef.current = false;
     try {
-      const payload = {
-        ...form,
-        service_location: joinServiceLocation(form.service_place, form.service_state)
-      };
-      delete payload.service_place;
-      delete payload.service_state;
+      const payload = { ...form };
       if (formIsOpenShift) {
         payload.staff_id = null;
         payload.status = 'open';
@@ -535,14 +524,12 @@ export default function ShiftsPage() {
     let created = 0;
     try {
       // Update existing shift: add recurring_group_id only; do NOT change start/end (prevents moving it)
-      const serviceLocation = joinServiceLocation(form.service_place, form.service_state);
       await shifts.update(editingShift.id, {
         participant_id: form.participant_id,
         staff_id: form.staff_id,
         start_time: formatForApi(baseStart),
         end_time: formatForApi(baseEnd),
         notes: form.notes || '',
-        service_location: serviceLocation,
         status: editingShift.status,
         recurring_group_id: recurringGroupId
       });
@@ -557,7 +544,6 @@ export default function ShiftsPage() {
           start_time: formatForApi(shiftStart),
           end_time: formatForApi(shiftEnd),
           notes: form.notes || '',
-          service_location: serviceLocation,
           recurring_group_id: recurringGroupId
         });
         created++;
@@ -1186,31 +1172,6 @@ export default function ShiftsPage() {
               <div className="form-group">
                 <label>End *</label>
                 <input type="datetime-local" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} required step="1800" />
-              </div>
-              <div className="form-group">
-                <label>Where this shift takes place</label>
-                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.35rem' }}>
-                  Public holiday rates use this place, not the participant&apos;s home address.
-                </p>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <input
-                    type="text"
-                    value={form.service_place}
-                    onChange={(e) => setForm({ ...form, service_place: e.target.value })}
-                    placeholder="Suburb or address"
-                    style={{ flex: '1 1 12rem' }}
-                  />
-                  <select
-                    value={form.service_state}
-                    onChange={(e) => setForm({ ...form, service_state: e.target.value })}
-                    aria-label="State where this shift takes place"
-                  >
-                    <option value="">State</option>
-                    {AU_STATE_CODES.map((code) => (
-                      <option key={code} value={code}>{code}</option>
-                    ))}
-                  </select>
-                </div>
               </div>
               <div className="form-group">
                 <label>Notes</label>
