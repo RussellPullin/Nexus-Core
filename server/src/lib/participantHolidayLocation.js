@@ -1,6 +1,6 @@
 /**
- * Where a shift is worked, for state public-holiday rules.
- * Participant address is the shift location. Provider address is only a fallback.
+ * Location used for support-coordination public holidays.
+ * Shift public holidays use shifts.service_location, not the participant's home address.
  */
 import { db } from '../db/index.js';
 import { normalizeHolidayLocation } from '../../../shared/auPublicHolidays.js';

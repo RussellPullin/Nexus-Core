@@ -48,6 +48,7 @@ function ensureScheduleCoreTables() {
         line_items_locked INTEGER NOT NULL DEFAULT 0,
         billing_invoice_id TEXT,
         open_shift_broadcast_at TEXT,
+        service_location TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
@@ -322,6 +323,14 @@ try {
   } catch (e) {
     console.warn('shifts nullable staff_id migration:', e.message);
     try { db.exec('PRAGMA foreign_keys = ON'); } catch (_) {}
+  }
+  const shiftColsLocation = db.prepare('PRAGMA table_info(shifts)').all();
+  if (!shiftColsLocation.some((c) => c.name === 'service_location')) {
+    try {
+      db.exec('ALTER TABLE shifts ADD COLUMN service_location TEXT');
+    } catch (e) {
+      if (!e.message?.includes('duplicate column')) console.warn('shifts.service_location migration:', e.message);
+    }
   }
   try {
     db.exec(`

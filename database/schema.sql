@@ -296,6 +296,7 @@ CREATE TABLE IF NOT EXISTS shifts (
   end_time TEXT NOT NULL,
   status TEXT DEFAULT 'scheduled',
   notes TEXT,
+  service_location TEXT,
   open_shift_broadcast_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),

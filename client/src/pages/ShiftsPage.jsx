@@ -4,10 +4,34 @@ import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { formatDate, formatDateInTimeZone, formatDateLocal, formatTimeInTimeZone } from '../lib/dateUtils';
 import { useSearchParams } from 'react-router-dom';
 import { shifts, participants, staff, appShifts, settings, syncFromShifter, learning } from '../lib/api';
+import { AU_STATE_CODES, joinServiceLocation, splitServiceLocation } from '@nexus-shared/auPublicHolidays.js';
 import WeekPlanner from '../components/WeekPlanner';
 import SearchableSelect from '../components/SearchableSelect';
 import SuggestionPanel from '../components/SuggestionPanel';
 import ResolveShiftModal from '../components/ResolveShiftModal';
+
+const EMPTY_SHIFT_FORM = {
+  participant_id: '',
+  staff_id: '',
+  start_time: '',
+  end_time: '',
+  notes: '',
+  service_state: '',
+  service_place: ''
+};
+
+function shiftFormFromRecord(shift) {
+  const place = splitServiceLocation(shift?.service_location);
+  return {
+    participant_id: shift?.participant_id || '',
+    staff_id: shift?.staff_id || '',
+    start_time: '',
+    end_time: '',
+    notes: shift?.notes || '',
+    service_state: place.state,
+    service_place: place.place
+  };
+}
 
 function getWeekStart(d) {
   const day = d.getDay();
@@ -62,13 +86,7 @@ export default function ShiftsPage() {
   );
   const [showModal, setShowModal] = useState(false);
   const [editingShift, setEditingShift] = useState(null);
-  const [form, setForm] = useState({
-    participant_id: '',
-    staff_id: '',
-    start_time: '',
-    end_time: '',
-    notes: ''
-  });
+  const [form, setForm] = useState(EMPTY_SHIFT_FORM);
   const [recurring, setRecurring] = useState({
     frequency: 'weekly',
     end: 'ongoing',
@@ -396,11 +414,9 @@ export default function ShiftsPage() {
       shifts.get(shiftId).then((s) => {
         setEditingShift(s);
         setForm({
-          participant_id: s.participant_id,
-          staff_id: s.staff_id || '',
+          ...shiftFormFromRecord(s),
           start_time: toDatetimeLocal(s.start_time),
-          end_time: toDatetimeLocal(s.end_time),
-          notes: s.notes || ''
+          end_time: toDatetimeLocal(s.end_time)
         });
         setFormIsOpenShift(isOpenShift(s));
         setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' });
@@ -430,7 +446,12 @@ export default function ShiftsPage() {
     const sendAfter = sendAfterRef.current;
     sendAfterRef.current = false;
     try {
-      const payload = { ...form };
+      const payload = {
+        ...form,
+        service_location: joinServiceLocation(form.service_place, form.service_state)
+      };
+      delete payload.service_place;
+      delete payload.service_state;
       if (formIsOpenShift) {
         payload.staff_id = null;
         payload.status = 'open';
@@ -450,7 +471,7 @@ export default function ShiftsPage() {
       setShowModal(false);
       setEditingShift(null);
       setFormIsOpenShift(false);
-      setForm({ participant_id: '', staff_id: '', start_time: '', end_time: '', notes: '' });
+      setForm(EMPTY_SHIFT_FORM);
       setAvailabilityPreview(null);
       load();
       replaceShiftsListUrl({ removeShift: true });
@@ -514,12 +535,14 @@ export default function ShiftsPage() {
     let created = 0;
     try {
       // Update existing shift: add recurring_group_id only; do NOT change start/end (prevents moving it)
+      const serviceLocation = joinServiceLocation(form.service_place, form.service_state);
       await shifts.update(editingShift.id, {
         participant_id: form.participant_id,
         staff_id: form.staff_id,
         start_time: formatForApi(baseStart),
         end_time: formatForApi(baseEnd),
         notes: form.notes || '',
+        service_location: serviceLocation,
         status: editingShift.status,
         recurring_group_id: recurringGroupId
       });
@@ -534,6 +557,7 @@ export default function ShiftsPage() {
           start_time: formatForApi(shiftStart),
           end_time: formatForApi(shiftEnd),
           notes: form.notes || '',
+          service_location: serviceLocation,
           recurring_group_id: recurringGroupId
         });
         created++;
@@ -620,11 +644,9 @@ export default function ShiftsPage() {
     setEditingShift(shift);
     setFormIsOpenShift(isOpenShift(shift));
     setForm({
-      participant_id: shift.participant_id,
-      staff_id: shift.staff_id || '',
+      ...shiftFormFromRecord(shift),
       start_time: toDatetimeLocal(shift.start_time),
-      end_time: toDatetimeLocal(shift.end_time),
-      notes: shift.notes || ''
+      end_time: toDatetimeLocal(shift.end_time)
     });
     setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' });
     setShowModal(true);
@@ -757,7 +779,7 @@ export default function ShiftsPage() {
             setListWeek(next);
           }}>Next</button>
           <Link to="/shifts/availability" className="btn btn-secondary">Roster availability</Link>
-          <button className="btn btn-primary" onClick={() => { setEditingShift(null); setFormIsOpenShift(false); setForm({ participant_id: '', staff_id: '', start_time: '', end_time: '', notes: '' }); setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' }); setShowModal(true); }}>New Shift</button>
+          <button className="btn btn-primary" onClick={() => { setEditingShift(null); setFormIsOpenShift(false); setForm(EMPTY_SHIFT_FORM); setRecurring({ frequency: 'weekly', end: 'ongoing', untilDate: '' }); setShowModal(true); }}>New Shift</button>
           <button className="btn btn-secondary" onClick={handleSendRoster} disabled={sendingRoster || shiftList.length === 0} title="Email roster (ICS) to staff with unsent shifts this week. Sent shifts are highlighted; move or edit to send again.">
             {sendingRoster ? 'Sending…' : 'Send roster to all staff'}
           </button>
@@ -1164,6 +1186,31 @@ export default function ShiftsPage() {
               <div className="form-group">
                 <label>End *</label>
                 <input type="datetime-local" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} required step="1800" />
+              </div>
+              <div className="form-group">
+                <label>Where this shift takes place</label>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.35rem' }}>
+                  Public holiday rates use this place, not the participant&apos;s home address.
+                </p>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    value={form.service_place}
+                    onChange={(e) => setForm({ ...form, service_place: e.target.value })}
+                    placeholder="Suburb or address"
+                    style={{ flex: '1 1 12rem' }}
+                  />
+                  <select
+                    value={form.service_state}
+                    onChange={(e) => setForm({ ...form, service_state: e.target.value })}
+                    aria-label="State where this shift takes place"
+                  >
+                    <option value="">State</option>
+                    {AU_STATE_CODES.map((code) => (
+                      <option key={code} value={code}>{code}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="form-group">
                 <label>Notes</label>

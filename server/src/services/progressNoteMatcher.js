@@ -5,7 +5,7 @@
 import { db } from '../db/index.js';
 import { tenantParticipantClause } from '../lib/orgScopeSql.js';
 import { getShiftDayType, getShiftTimeBand, getShiftLocalDateString, getShiftWallClockMinutes } from '../lib/ndisDay.js';
-import { loadParticipantHolidayLocation } from '../lib/participantHolidayLocation.js';
+import { normalizeHolidayLocation } from '../../../shared/auPublicHolidays.js';
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 import { normalizeExternalShiftId } from '../lib/externalShiftId.js';
 
@@ -323,9 +323,31 @@ export function findMatchingShift({ participantId, staffId, supportDate, startTi
  * @param {string} [shiftEndTime] - ISO datetime (used to prefer evening when shift ends after 20:00)
  * @returns {{ id: string, rate: number, unit: string } | null}
  */
+function serviceLocationForParticipantShift(participantId, shiftStartTime) {
+  const raw = String(shiftStartTime || '').trim();
+  if (!participantId || !raw) return '';
+  const row = db.prepare(`
+    SELECT service_location FROM shifts
+    WHERE participant_id = ?
+      AND service_location IS NOT NULL
+      AND TRIM(service_location) != ''
+      AND (
+        start_time = ?
+        OR replace(start_time, ' ', 'T') = replace(?, ' ', 'T')
+        OR substr(replace(start_time, ' ', 'T'), 1, 16) = substr(replace(?, ' ', 'T'), 1, 16)
+      )
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(participantId, raw, raw, raw);
+  return String(row?.service_location || '').trim();
+}
+
 export function getDefaultLineItemForParticipant(participantId, shiftStartTime, supportDate, shiftEndTime = null) {
-  const holidayLocation = loadParticipantHolidayLocation(participantId);
-  const dayType = getShiftDayType(shiftStartTime, holidayLocation);
+  const serviceLocation = serviceLocationForParticipantShift(participantId, shiftStartTime);
+  const dayType = getShiftDayType(
+    shiftStartTime,
+    serviceLocation ? normalizeHolidayLocation({ address: serviceLocation }) : null
+  );
   const timeBand = getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime, dayType);
   const dateStr = supportDate || getShiftLocalDateString(shiftStartTime) || new Date().toISOString().slice(0, 10);
 

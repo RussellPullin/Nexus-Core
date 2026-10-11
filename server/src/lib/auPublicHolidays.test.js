@@ -4,8 +4,10 @@ import {
   getAuPublicHoliday,
   isAuPublicHoliday,
   isBrisbaneShowArea,
+  joinServiceLocation,
   resolveAuStateFromLocation,
   resolveShiftLocationState,
+  splitServiceLocation,
 } from '../../../shared/auPublicHolidays.js';
 import { getShiftDayType } from './ndisDay.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
@@ -73,6 +75,8 @@ describe('Australian public holidays by state', () => {
       participant_address: '',
       org_address: 'Po Box 460, Sanctuary cove, 4212',
     }), 'QLD');
+    assert.equal(joinServiceLocation('Capalaba', 'QLD'), 'Capalaba, QLD');
+    assert.deepEqual(splitServiceLocation('Capalaba, QLD'), { place: 'Capalaba', state: 'QLD' });
   });
 
   test('without a state, only holidays observed in every state count', () => {
@@ -87,7 +91,7 @@ describe('completed shift hours use the shift state', () => {
       {
         start_time: '2026-10-05T09:00:00',
         end_time: '2026-10-05T13:00:00',
-        participant_address: QLD_GOLD_COAST,
+        service_location: QLD_GOLD_COAST,
       },
     ], { payPeriodStart: '2026-09-28' });
     assert.equal(rows.length, 1);
@@ -95,12 +99,37 @@ describe('completed shift hours use the shift state', () => {
     assert.equal(rows[0].weekdayHours, 0);
   });
 
+  test('a Queensland home address does not make the shift a Queensland public holiday', () => {
+    const rows = computeHoursFromShifts([
+      {
+        start_time: '2026-10-05T09:00:00',
+        end_time: '2026-10-05T13:00:00',
+        participant_address: QLD_GOLD_COAST,
+        service_location: VIC_ADDRESS,
+      },
+    ], { payPeriodStart: '2026-09-28' });
+    assert.equal(rows[0].holidayHours, 0);
+    assert.equal(rows[0].weekdayHours, 4);
+  });
+
+  test('a shift with no place recorded is not given the client home state', () => {
+    const rows = computeHoursFromShifts([
+      {
+        start_time: '2026-10-05T09:00:00',
+        end_time: '2026-10-05T13:00:00',
+        participant_address: QLD_GOLD_COAST,
+      },
+    ], { payPeriodStart: '2026-09-28' });
+    assert.equal(rows[0].holidayHours, 0);
+    assert.equal(rows[0].weekdayHours, 4);
+  });
+
   test('Victoria completed shift on 5 October 2026 stays weekday time', () => {
     const rows = computeHoursFromShifts([
       {
         start_time: '2026-10-05T09:00:00',
         end_time: '2026-10-05T13:00:00',
-        participant_address: VIC_ADDRESS,
+        service_location: VIC_ADDRESS,
       },
     ], { payPeriodStart: '2026-09-28' });
     assert.equal(rows.length, 1);

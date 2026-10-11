@@ -465,7 +465,7 @@ router.post('/', async (req, res) => {
     if (!orgId) {
       return res.status(403).json({ error: 'No organisation on your account.' });
     }
-    const { participant_id, staff_id, start_time, end_time, notes, recurring_group_id, status: bodyStatus } = req.body;
+    const { participant_id, staff_id, start_time, end_time, notes, recurring_group_id, status: bodyStatus, service_location } = req.body;
     if (!isParticipantInRequesterTenant(participant_id, userId)) {
       return res.status(404).json({ error: 'Participant not found' });
     }
@@ -482,9 +482,9 @@ router.post('/', async (req, res) => {
     }
     const id = uuidv4();
     db.prepare(`
-      INSERT INTO shifts (id, participant_id, staff_id, start_time, end_time, notes, status, recurring_group_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, participant_id, resolvedStaffId, start_time, end_time, notes || null, shiftStatus, recurring_group_id || null);
+      INSERT INTO shifts (id, participant_id, staff_id, start_time, end_time, notes, status, recurring_group_id, service_location)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, participant_id, resolvedStaffId, start_time, end_time, notes || null, shiftStatus, recurring_group_id || null, String(service_location || '').trim() || null);
 
     const shift = getShiftByIdForUser(id, userId);
 
@@ -521,7 +521,7 @@ router.put('/:id', async (req, res) => {
     if (!isShiftInRequesterTenant(req.params.id, userId)) {
       return res.status(404).json({ error: 'Shift not found' });
     }
-    const { participant_id, staff_id, start_time, end_time, status, notes, recurring_group_id } = req.body;
+    const { participant_id, staff_id, start_time, end_time, status, notes, recurring_group_id, service_location } = req.body;
     const existing = db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Shift not found' });
 
@@ -553,7 +553,7 @@ router.put('/:id', async (req, res) => {
     db.prepare(`
       UPDATE shifts SET
         participant_id = ?, staff_id = ?, start_time = ?, end_time = ?, status = ?, notes = ?,
-        recurring_group_id = ?,
+        recurring_group_id = ?, service_location = ?,
         updated_at = datetime('now'),
         roster_sent_at = NULL
       WHERE id = ?
@@ -565,6 +565,7 @@ router.put('/:id', async (req, res) => {
       nextStatus,
       notes ?? existing.notes,
       rgId,
+      service_location !== undefined ? (String(service_location || '').trim() || null) : existing.service_location,
       req.params.id
     );
 

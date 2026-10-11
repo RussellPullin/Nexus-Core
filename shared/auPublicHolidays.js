@@ -175,6 +175,38 @@ export function resolveShiftLocationState(location) {
   return normalizeHolidayLocation(location).state;
 }
 
+const STATE_NAME_PATTERN = STATE_NAMES.map(([name]) => name.replace(/\s+/g, '\\s+')).join('|');
+
+/**
+ * Split a shift place into the suburb/address and the state code.
+ * @param {unknown} value
+ * @returns {{ place: string, state: string }}
+ */
+export function splitServiceLocation(value) {
+  const text = String(value ?? '').trim();
+  const state = resolveAuStateFromLocation(text) || '';
+  if (!state) return { place: text, state: '' };
+  const place = text
+    .replace(new RegExp(STATE_NAME_PATTERN, 'ig'), ' ')
+    .replace(new RegExp(`\\b${state}\\b`, 'ig'), ' ')
+    .replace(/\s*,\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { place, state };
+}
+
+/**
+ * Store the place the shift was worked, including the state when one was chosen.
+ * @param {unknown} place
+ * @param {unknown} state
+ * @returns {string}
+ */
+export function joinServiceLocation(place, state) {
+  const placeText = String(place ?? '').trim();
+  const stateCode = normalizeAuState(state) || '';
+  return [placeText, stateCode].filter(Boolean).join(', ');
+}
+
 export function isBrisbaneShowArea(locationText) {
   const text = String(locationText || '');
   if (/\bbrisbane\b/i.test(text)) return true;

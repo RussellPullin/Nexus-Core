@@ -11,7 +11,6 @@ import { requireAgencyShell } from '../middleware/agencyShell.js';
 import { sendEmailViaRelay, isEmailConfiguredForUser, formatSmtpAuthError } from '../services/notification.service.js';
 import { pullSummaryFromExcel } from '../services/excelPull.service.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
-import { SHIFT_HOLIDAY_LOCATION_COLUMNS } from '../lib/participantHolidayLocation.js';
 import { ensureProviderProfile, assertStaffOnboardingReady } from '../services/onboarding.service.js';
 import { orchestrateStaffOnboarding } from '../services/staffOnboardingOrchestrator.service.js';
 import { generateStaffContractBuffers } from '../services/staffContractFill.service.js';
@@ -899,12 +898,10 @@ router.get('/:id/shift-hours-summary', (req, res) => {
       ? (db.prepare('SELECT pay_period_start FROM business_settings WHERE org_id = ?').get(orgId)?.pay_period_start || null)
       : null;
     const shifts = db.prepare(`
-      SELECT s.id, s.start_time, s.end_time, s.expenses,
+      SELECT s.id, s.start_time, s.end_time, s.expenses, s.service_location,
         (SELECT MAX(pn.travel_time_min) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_time_min,
-        (SELECT MAX(pn.travel_km) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_km,
-        ${SHIFT_HOLIDAY_LOCATION_COLUMNS}
+        (SELECT MAX(pn.travel_km) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_km
       FROM shifts s
-      JOIN participants p ON p.id = s.participant_id
       WHERE s.staff_id = ?
         AND s.status IN ('completed', 'completed_by_admin')
       ORDER BY s.start_time
