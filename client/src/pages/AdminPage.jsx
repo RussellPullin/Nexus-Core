@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { PRODUCT_AGENCY } from '@nexus-shared/tenantProduct.js';
+import { comparePayPeriodOptions, comparePaySummaryRows } from '@nexus-shared/payPeriodOrder.js';
 import { useProductPathPrefix } from '../lib/useProductPathPrefix.js';
 import { useAuth } from '../context/AuthContext';
 import { users, admin, participants, staff, billing, auth } from '../lib/api';
@@ -130,14 +131,18 @@ export default function AdminPage() {
       const k = `${r.periodStart}|||${r.periodEnd}`;
       if (!map.has(k)) map.set(k, { periodStart: r.periodStart, periodEnd: r.periodEnd });
     });
-    return Array.from(map.values()).sort((a, b) => String(b.periodEnd || '').localeCompare(String(a.periodEnd || '')));
+    return Array.from(map.values()).sort(comparePayPeriodOptions);
   }, [paySummary]);
 
   const payFilteredRows = useMemo(() => {
     const rows = paySummary?.summaryRows || [];
-    if (!payPeriodFilter) return rows;
-    const [ps, pe] = payPeriodFilter.split('|||');
-    return rows.filter((r) => r.periodStart === ps && r.periodEnd === pe);
+    const filtered = !payPeriodFilter
+      ? rows
+      : rows.filter((r) => {
+          const [ps, pe] = payPeriodFilter.split('|||');
+          return r.periodStart === ps && r.periodEnd === pe;
+        });
+    return [...filtered].sort(comparePaySummaryRows);
   }, [paySummary, payPeriodFilter]);
 
   const getPayCell = (row, field) => {

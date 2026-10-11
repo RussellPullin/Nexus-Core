@@ -4,12 +4,7 @@
  */
 import { DateTime, FixedOffsetZone } from 'luxon';
 import { normalizeOrgTimezoneRaw } from './shiftTimezone.js';
-
-const PUBLIC_HOLIDAYS = new Set([
-  '2024-01-01', '2024-01-26', '2024-03-29', '2024-04-01', '2024-04-25', '2024-12-25', '2024-12-26',
-  '2025-01-01', '2025-01-27', '2025-04-18', '2025-04-21', '2025-04-25', '2025-12-25', '2025-12-26',
-  '2026-01-01', '2026-01-26', '2026-04-03', '2026-04-06', '2026-04-25', '2026-12-25', '2026-12-28'
-]);
+import { isAuPublicHoliday, normalizeHolidayLocation } from '../../../shared/auPublicHolidays.js';
 
 /**
  * IANA name or FixedOffsetZone for "wall clock" in org reports (NEXUS_SHIFT_TIMEZONE_FALLBACK / Sydney).
@@ -93,14 +88,23 @@ export function getShiftWallClockMinutes(t) {
 }
 
 /**
+ * Public holidays follow the state where the shift is worked.
  * @param {string} startTime
+ * @param {string|{ state?: string, address?: string, participant_address?: string, intake_state?: string, org_address?: string }|null} [location]
+ *   State code ('QLD') or the participant address (and provider address as fallback).
  * @returns {'weekday'|'saturday'|'sunday'|'public_holiday'}
  */
-export function getShiftDayType(startTime) {
+export function getShiftDayType(startTime, location = null) {
   const w = toShiftOrgWallTime(startTime);
   if (!w || !w.isValid) return 'weekday';
   const dateStr = w.toISODate() || w.toFormat('yyyy-LL-dd');
-  if (PUBLIC_HOLIDAYS.has(dateStr)) return 'public_holiday';
+  const place = normalizeHolidayLocation(location);
+  if (isAuPublicHoliday(dateStr, place.state, {
+    startMinutes: w.hour * 60 + w.minute,
+    locationText: place.locationText,
+  })) {
+    return 'public_holiday';
+  }
   const dayOfWeek = luxonToJsDow(w.weekday);
   if (dayOfWeek === 0) return 'sunday';
   if (dayOfWeek === 6) return 'saturday';
@@ -123,10 +127,11 @@ export function getShiftTimeBand(startTime) {
 /**
  * @param {Array} ndisItems
  * @param {string} shiftStartTime
+ * @param {string|object|null} [location]
  */
-export function getLineItemsForShift(ndisItems, shiftStartTime) {
+export function getLineItemsForShift(ndisItems, shiftStartTime, location = null) {
   if (!ndisItems || !Array.isArray(ndisItems)) return [];
-  const dayType = getShiftDayType(shiftStartTime);
+  const dayType = getShiftDayType(shiftStartTime, location);
   return ndisItems.filter((item) => (item.rate_type || 'weekday') === dayType);
 }
 
@@ -134,9 +139,10 @@ export function getLineItemsForShift(ndisItems, shiftStartTime) {
  * @param {Array} lineItems
  * @param {Object} ndisItemsById
  * @param {string} shiftStartTime
+ * @param {string|object|null} [location]
  */
-export function validateLineItemsForShift(lineItems, ndisItemsById, shiftStartTime) {
-  const shiftDay = getShiftDayType(shiftStartTime);
+export function validateLineItemsForShift(lineItems, ndisItemsById, shiftStartTime, location = null) {
+  const shiftDay = getShiftDayType(shiftStartTime, location);
   const mismatches = [];
   for (const li of lineItems || []) {
     const item = ndisItemsById?.[li.ndis_line_item_id];

@@ -3,14 +3,7 @@
  * Ports logic from Shifter StaffDetailScreen for pay period aggregation.
  */
 import { getShiftLocalDateString, getShiftWallClockMinutes } from '../lib/ndisDay.js';
-
-const AU_PUBLIC_HOLIDAYS_2025_2026 = [
-  '2025-01-01', '2025-01-27', '2025-04-18', '2025-04-19',
-  '2025-04-21', '2025-04-25', '2025-06-09', '2025-12-25', '2025-12-26',
-  '2026-01-01', '2026-01-26', '2026-04-03', '2026-04-04',
-  '2026-04-06', '2026-04-25', '2026-06-08', '2026-12-25', '2026-12-26',
-];
-const HOLIDAY_SET = new Set(AU_PUBLIC_HOLIDAYS_2025_2026);
+import { isAuPublicHoliday, normalizeHolidayLocation } from '../../../shared/auPublicHolidays.js';
 
 const DEFAULT_PAY_PERIOD_START = '2025-03-11';
 
@@ -66,9 +59,15 @@ function toISODateKey(dateStr) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function getShiftCategory(dateStr) {
+function getShiftCategory(dateStr, shift, startMinutes) {
   const isoKey = toISODateKey(dateStr);
-  if (HOLIDAY_SET.has(isoKey)) return 'publicHoliday';
+  const place = normalizeHolidayLocation(shift);
+  if (isoKey && isAuPublicHoliday(isoKey, place.state, {
+    startMinutes,
+    locationText: place.locationText,
+  })) {
+    return 'publicHoliday';
+  }
   const d = parseDateISO(dateStr);
   if (!d) return 'weekday';
   const day = d.getDay();
@@ -174,7 +173,7 @@ export function computeHoursFromShifts(shifts, options = {}) {
     const duration = calcDurationMinutes(startTimeStr, finishTimeStr);
     const travelMin = parseInt(s.travel_time_min, 10) || 0;
     const shiftAndTravel = duration + travelMin;
-    const category = getShiftCategory(dateStr);
+    const category = getShiftCategory(dateStr, s, wStart);
 
     row[category] = (row[category] || 0) + shiftAndTravel;
     // Evening hours only on weekdays; Sat/Sun/PH use the premium day bucket instead.

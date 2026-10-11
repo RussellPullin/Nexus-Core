@@ -5,6 +5,7 @@
 import { db } from '../db/index.js';
 import { getDefaultLineItemForParticipant } from './progressNoteMatcher.js';
 import { getShiftDayType } from '../lib/ndisDay.js';
+import { loadParticipantHolidayLocation } from '../lib/participantHolidayLocation.js';
 import { roundMoney } from '../lib/invoiceGst.js';
 import { parseRegistrationGroup } from '../lib/travel.js';
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
@@ -67,7 +68,7 @@ const SC_LEVEL2_ORDER_SQL = `
  */
 export function getSupportCoordLineItem(participantId, activityDate) {
   const dateStr = activityDate?.slice(0, 10) || new Date().toISOString().slice(0, 10);
-  const dayType = getShiftDayType(`${dateStr}T09:00:00`);
+  const dayType = getShiftDayType(`${dateStr}T09:00:00`, loadParticipantHolidayLocation(participantId));
   const participant = db.prepare('SELECT default_ndis_line_item_id, remoteness FROM participants WHERE id = ?').get(participantId);
   const remoteness = participant?.remoteness || 'standard';
 

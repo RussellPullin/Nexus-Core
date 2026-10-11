@@ -5,6 +5,7 @@
 import { db } from '../db/index.js';
 import { tenantParticipantClause } from '../lib/orgScopeSql.js';
 import { getShiftDayType, getShiftTimeBand, getShiftLocalDateString, getShiftWallClockMinutes } from '../lib/ndisDay.js';
+import { loadParticipantHolidayLocation } from '../lib/participantHolidayLocation.js';
 import { getEffectiveNdisRate } from '../lib/ndisRates.js';
 import { normalizeExternalShiftId } from '../lib/externalShiftId.js';
 
@@ -323,7 +324,8 @@ export function findMatchingShift({ participantId, staffId, supportDate, startTi
  * @returns {{ id: string, rate: number, unit: string } | null}
  */
 export function getDefaultLineItemForParticipant(participantId, shiftStartTime, supportDate, shiftEndTime = null) {
-  const dayType = getShiftDayType(shiftStartTime);
+  const holidayLocation = loadParticipantHolidayLocation(participantId);
+  const dayType = getShiftDayType(shiftStartTime, holidayLocation);
   const timeBand = getShiftTimeBandByStartAndEnd(shiftStartTime, shiftEndTime, dayType);
   const dateStr = supportDate || getShiftLocalDateString(shiftStartTime) || new Date().toISOString().slice(0, 10);
 

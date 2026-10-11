@@ -2,14 +2,9 @@
  * NDIS day-of-week utilities for shift line item alignment.
  * Line items and rates are evaluated on org local (Australian) calendar date and clock time, not UTC.
  * Defaults to Australia/Sydney; override with VITE_NEXUS_SHIFT_TIMEZONE to match the server.
+ * Public holidays follow the state where the shift is worked.
  */
-
-// AU national public holidays 2024-2026 (YYYY-MM-DD) - extend as needed
-const PUBLIC_HOLIDAYS = new Set([
-  '2024-01-01', '2024-01-26', '2024-03-29', '2024-04-01', '2024-04-25', '2024-12-25', '2024-12-26',
-  '2025-01-01', '2025-01-27', '2025-04-18', '2025-04-21', '2025-04-25', '2025-12-25', '2025-12-26',
-  '2026-01-01', '2026-01-26', '2026-04-03', '2026-04-06', '2026-04-25', '2026-12-25', '2026-12-28'
-]);
+import { isAuPublicHoliday, normalizeHolidayLocation } from '@nexus-shared/auPublicHolidays.js';
 
 const ORG_TZ = import.meta.env?.VITE_NEXUS_SHIFT_TIMEZONE || 'Australia/Sydney';
 
@@ -68,13 +63,21 @@ function toShiftLocalParts(startTime) {
 }
 
 /**
+ * Public holidays follow the state where the shift is worked.
  * @param {string} startTime
+ * @param {string|object|null} [location] State code or participant address.
  * @returns {'weekday'|'saturday'|'sunday'|'public_holiday'}
  */
-export function getShiftDayType(startTime) {
+export function getShiftDayType(startTime, location = null) {
   const p = toShiftLocalParts(startTime);
   if (!p) return 'weekday';
-  if (PUBLIC_HOLIDAYS.has(p.dateStr)) return 'public_holiday';
+  const place = normalizeHolidayLocation(location);
+  if (isAuPublicHoliday(p.dateStr, place.state, {
+    startMinutes: p.hour * 60 + p.minute,
+    locationText: place.locationText,
+  })) {
+    return 'public_holiday';
+  }
   if (p.dayOfWeek === 0) return 'sunday';
   if (p.dayOfWeek === 6) return 'saturday';
   return 'weekday';
@@ -96,10 +99,11 @@ export function getShiftTimeBand(startTime) {
 /**
  * @param {Array} ndisItems
  * @param {string} shiftStartTime
+ * @param {string|object|null} [location]
  */
-export function getLineItemsForShift(ndisItems, shiftStartTime) {
+export function getLineItemsForShift(ndisItems, shiftStartTime, location = null) {
   if (!ndisItems || !Array.isArray(ndisItems)) return [];
-  const dayType = getShiftDayType(shiftStartTime);
+  const dayType = getShiftDayType(shiftStartTime, location);
   return ndisItems.filter((item) => (item.rate_type || 'weekday') === dayType);
 }
 
@@ -107,9 +111,9 @@ export function getLineItemsForShift(ndisItems, shiftStartTime) {
  * @param {object} item
  * @param {string} shiftStartTime
  */
-export function lineItemMatchesShiftDay(item, shiftStartTime) {
+export function lineItemMatchesShiftDay(item, shiftStartTime, location = null) {
   if (!item) return false;
-  const dayType = getShiftDayType(shiftStartTime);
+  const dayType = getShiftDayType(shiftStartTime, location);
   const itemRateType = item.rate_type || 'weekday';
   return itemRateType === dayType;
 }

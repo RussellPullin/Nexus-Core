@@ -10,6 +10,8 @@ import { requireAdminOrDelegate } from '../middleware/roles.js';
 import { billingParticipantFilterFromRequest, staffTableOrgFilterFromRequest } from '../lib/orgScopeSql.js';
 import { shiftCompletionEvidenceSql } from '../lib/shiftBillingEligibility.js';
 import { computeHoursFromShifts } from '../services/shiftHours.service.js';
+import { SHIFT_HOLIDAY_LOCATION_COLUMNS } from '../lib/participantHolidayLocation.js';
+import { comparePaySummaryRows } from '../../../shared/payPeriodOrder.js';
 import { fileToRows, importCaseNotesFromRows } from '../lib/caseNotesCsvImport.js';
 
 const router = Router();
@@ -305,8 +307,10 @@ router.get('/pay-summary', (req, res) => {
     const shiftStmt = db.prepare(`
       SELECT s.id, s.start_time, s.end_time, s.expenses,
         (SELECT MAX(pn.travel_time_min) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_time_min,
-        (SELECT MAX(pn.travel_km) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_km
+        (SELECT MAX(pn.travel_km) FROM progress_notes pn WHERE pn.shift_id = s.id) as travel_km,
+        ${SHIFT_HOLIDAY_LOCATION_COLUMNS}
       FROM shifts s
+      JOIN participants p ON p.id = s.participant_id
       WHERE s.staff_id = ?
         AND s.status IN ('completed', 'completed_by_admin')
       ORDER BY s.start_time
@@ -329,13 +333,7 @@ router.get('/pay-summary', (req, res) => {
       }
     }
 
-    rows.sort((a, b) => {
-      const pe = String(b.periodEnd || '').localeCompare(String(a.periodEnd || ''));
-      if (pe !== 0) return pe;
-      const ps = String(b.periodStart || '').localeCompare(String(a.periodStart || ''));
-      if (ps !== 0) return ps;
-      return String(a.staffName || '').localeCompare(String(b.staffName || ''));
-    });
+    rows.sort(comparePaySummaryRows);
 
     res.json({ summaryRows: rows, unmatchedStaffNames: [] });
   } catch (err) {
