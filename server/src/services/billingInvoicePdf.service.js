@@ -8,6 +8,12 @@ import { db } from '../db/index.js';
 import { getBusinessSettings, mergeWithEnv, uploadsDir } from '../routes/settings.js';
 import { participantInvoiceIncludesGst, roundMoney, gstBreakdownFromSubtotal } from '../lib/invoiceGst.js';
 import { sanitizePdfText } from '../lib/pdfInvoiceText.js';
+import {
+  INVOICE_FOOTER_FROM_BOTTOM,
+  INVOICE_FOOTER_RESERVE,
+  INVOICE_PAGE_MARGIN,
+  invoiceLineItemColumns,
+} from '../lib/invoicePdfLayout.js';
 import { resolveOrgIdForBillingParticipant } from './orgOnedriveSync.service.js';
 
 /**
@@ -49,24 +55,26 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
     subtotal = roundMoney(subtotal);
     const { gst_amount: totalGst, total_incl_gst: grandTotal } = gstBreakdownFromSubtotal(subtotal, includesGst);
 
-    const doc = new PDFDocument({ margin: 50, bufferPages: true });
+    // A4 + ~19mm margins: US Letter pages printed on AU A4 stock clip the right/bottom edges,
+    // and fixed columns at x=520 overflow A4's printable width.
+    const doc = new PDFDocument({ size: 'A4', margin: INVOICE_PAGE_MARGIN, bufferPages: true });
     doc.font('Helvetica');
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const footerReserve = 44;
-    const pageMaxY = () => doc.page.height - footerReserve;
+    const col = invoiceLineItemColumns(doc.page.width, INVOICE_PAGE_MARGIN);
+    const pageMaxY = () => doc.page.height - INVOICE_FOOTER_RESERVE;
 
     function drawLineItemsTableHeader(y) {
       doc.fontSize(9);
-      doc.text('Item', 50, y);
-      doc.text('Details', 120, y);
-      doc.text('Quantity', 380, y);
-      doc.text('Price', 430, y);
-      doc.text('GST', 480, y);
-      doc.text('Total', 520, y);
+      doc.text('Item', col.itemX, y, { width: col.itemW });
+      doc.text('Details', col.detailsX, y, { width: col.detailsW });
+      doc.text('Quantity', col.qtyX, y, { width: col.qtyW, align: 'right' });
+      doc.text('Price', col.priceX, y, { width: col.priceW, align: 'right' });
+      doc.text('GST', col.gstX, y, { width: col.gstW, align: 'right' });
+      doc.text('Total', col.totalX, y, { width: col.totalW, align: 'right' });
       return y + 16;
     }
 
@@ -91,45 +99,46 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
     const formatDate = (d) => d.toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const participantType = inv.management_type === 'plan' || inv.plan_manager_id ? 'Plan Managed' : 'Self Managed';
 
-    let startY = 50;
+    let startY = INVOICE_PAGE_MARGIN;
     if (logoPath && existsSync(logoPath)) {
       try {
-        doc.image(logoPath, 50, 50, { width: 120 });
-        startY = 50 + 80;
+        doc.image(logoPath, col.left, INVOICE_PAGE_MARGIN, { width: 120 });
+        startY = INVOICE_PAGE_MARGIN + 80;
       } catch (e) {
         console.warn('[billing pdf] logo load failed:', e?.message);
       }
     }
     doc.y = startY;
 
-    doc.fontSize(18).text(includesGst ? 'Tax Invoice' : 'Invoice', { align: 'center' });
+    doc.fontSize(18).text(includesGst ? 'Tax Invoice' : 'Invoice', { align: 'center', width: col.contentWidth });
     doc.moveDown();
     if (inv.status === 'void') {
-      doc.fontSize(12).fillColor('#b91c1c').text('VOID — not payable', { align: 'center' });
+      doc.fontSize(12).fillColor('#b91c1c').text('VOID — not payable', { align: 'center', width: col.contentWidth });
       doc.fillColor('black');
       doc.moveDown(0.5);
     }
 
     const metaY = doc.y;
+    const metaW = col.right - col.metaX;
     doc.fontSize(10);
-    doc.text(`Invoice Number ${sanitizePdfText(inv.invoice_number)}`, 350, metaY);
-    doc.text(`Invoice Date ${formatDate(invDate)}`, 350, metaY + 14);
-    doc.text(`Due Date ${formatDate(dueDate)}`, 350, metaY + 28);
-    doc.text(`Total $${grandTotal.toFixed(2)}`, 350, metaY + 42);
-    doc.text(`Amount Due $${grandTotal.toFixed(2)}`, 350, metaY + 56);
+    doc.text(`Invoice Number ${sanitizePdfText(inv.invoice_number)}`, col.metaX, metaY, { width: metaW });
+    doc.text(`Invoice Date ${formatDate(invDate)}`, col.metaX, metaY + 14, { width: metaW });
+    doc.text(`Due Date ${formatDate(dueDate)}`, col.metaX, metaY + 28, { width: metaW });
+    doc.text(`Total $${grandTotal.toFixed(2)}`, col.metaX, metaY + 42, { width: metaW });
+    doc.text(`Amount Due $${grandTotal.toFixed(2)}`, col.metaX, metaY + 56, { width: metaW });
     doc.y = metaY + 70;
 
-    doc.text('From', { continued: false });
+    doc.text('From', col.left, doc.y, { width: col.contentWidth });
     doc.moveDown(0.3);
-    doc.text(companyName);
-    if (companyEmail) doc.text(companyEmail);
-    if (companyAbn) doc.text(`ABN ${companyAbn}`);
-    if (companyAcn) doc.text(`ACN ${companyAcn}`);
-    if (ndisProviderNumber) doc.text(`NDIS Provider # ${ndisProviderNumber}`);
-    if (companyRegistration) doc.text(`Registration # ${companyRegistration}`);
+    doc.text(companyName, { width: col.contentWidth });
+    if (companyEmail) doc.text(companyEmail, { width: col.contentWidth });
+    if (companyAbn) doc.text(`ABN ${companyAbn}`, { width: col.contentWidth });
+    if (companyAcn) doc.text(`ACN ${companyAcn}`, { width: col.contentWidth });
+    if (ndisProviderNumber) doc.text(`NDIS Provider # ${ndisProviderNumber}`, { width: col.contentWidth });
+    if (companyRegistration) doc.text(`Registration # ${companyRegistration}`, { width: col.contentWidth });
     doc.moveDown();
 
-    doc.text('To');
+    doc.text('To', { width: col.contentWidth });
     doc.moveDown(0.3);
     const pName = sanitizePdfText(inv.participant_name);
     const pNdis = sanitizePdfText(inv.ndis_number || 'N/A');
@@ -137,12 +146,12 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
     const pmName = inv.plan_manager_name ? sanitizePdfText(inv.plan_manager_name) : '';
     const emailsJoined = sanitizePdfText(invoiceEmails.map((e) => sanitizePdfText(e)).join(', '));
 
-    doc.text(pName);
-    doc.text(`NDIS Number ${pNdis}`);
-    doc.text(`Type ${participantType}`);
-    if (pAddr) doc.text(`Address ${pAddr}`);
-    if (pmName) doc.text(`Plan Manager ${pmName}`);
-    if (invoiceEmails.length > 0) doc.text(`Invoice To ${emailsJoined}`);
+    doc.text(pName, { width: col.contentWidth });
+    doc.text(`NDIS Number ${pNdis}`, { width: col.contentWidth });
+    doc.text(`Type ${participantType}`, { width: col.contentWidth });
+    if (pAddr) doc.text(`Address ${pAddr}`, { width: col.contentWidth });
+    if (pmName) doc.text(`Plan Manager ${pmName}`, { width: col.contentWidth });
+    if (invoiceEmails.length > 0) doc.text(`Invoice To ${emailsJoined}`, { width: col.contentWidth });
     doc.moveDown();
 
     const tableTop = doc.y;
@@ -159,21 +168,21 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
       const descBlock = `${sanitizePdfText(li.description || 'Support')}\nClaim Type: ${claimType}`;
 
       doc.fontSize(9);
-      const hLeft = doc.heightOfString(itemCell, { width: 65 });
-      const hDetail = doc.heightOfString(descBlock, { width: 250 });
+      const hLeft = doc.heightOfString(itemCell, { width: col.itemW });
+      const hDetail = doc.heightOfString(descBlock, { width: col.detailsW });
       const rowH = Math.max(hLeft, hDetail, 14);
 
       if (rowY + rowH > pageMaxY()) {
         doc.addPage();
-        rowY = drawLineItemsTableHeader(50) + 6;
+        rowY = drawLineItemsTableHeader(INVOICE_PAGE_MARGIN) + 6;
       }
 
-      doc.text(itemCell, 50, rowY, { width: 65 });
-      doc.text(descBlock, 120, rowY, { width: 250 });
-      doc.text(String(li.quantity ?? ''), 380, rowY, { width: 45, align: 'right' });
-      doc.text((li.unit_price ?? 0).toFixed(2), 430, rowY, { width: 45, align: 'right' });
-      doc.text(includesGst ? lineGst.toFixed(2) : '0.00', 480, rowY, { width: 35, align: 'right' });
-      doc.text(lineTotal.toFixed(2), 520, rowY, { width: 45, align: 'right' });
+      doc.text(itemCell, col.itemX, rowY, { width: col.itemW });
+      doc.text(descBlock, col.detailsX, rowY, { width: col.detailsW });
+      doc.text(String(li.quantity ?? ''), col.qtyX, rowY, { width: col.qtyW, align: 'right' });
+      doc.text((li.unit_price ?? 0).toFixed(2), col.priceX, rowY, { width: col.priceW, align: 'right' });
+      doc.text(includesGst ? lineGst.toFixed(2) : '0.00', col.gstX, rowY, { width: col.gstW, align: 'right' });
+      doc.text(lineTotal.toFixed(2), col.totalX, rowY, { width: col.totalW, align: 'right' });
 
       rowY += rowH + 6;
     });
@@ -181,22 +190,22 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
     const tailBlockMin = 210;
     if (rowY + tailBlockMin > pageMaxY()) {
       doc.addPage();
-      rowY = 50;
+      rowY = INVOICE_PAGE_MARGIN;
     } else {
       rowY += 8;
     }
 
     const summaryY = rowY;
     if (includesGst) {
-      doc.text(`Subtotal (ex GST) ${subtotal.toFixed(2)}`, 380, summaryY, { width: 170, align: 'right' });
-      doc.text(`GST (10%) ${totalGst.toFixed(2)}`, 380, summaryY + 14, { width: 170, align: 'right' });
-      doc.text(`Total ${grandTotal.toFixed(2)}`, 380, summaryY + 28, { width: 170, align: 'right' });
-      doc.text(`Amount Due $${grandTotal.toFixed(2)}`, 380, summaryY + 42, { width: 170, align: 'right' });
+      doc.text(`Subtotal (ex GST) ${subtotal.toFixed(2)}`, col.summaryX, summaryY, { width: col.summaryW, align: 'right' });
+      doc.text(`GST (10%) ${totalGst.toFixed(2)}`, col.summaryX, summaryY + 14, { width: col.summaryW, align: 'right' });
+      doc.text(`Total ${grandTotal.toFixed(2)}`, col.summaryX, summaryY + 28, { width: col.summaryW, align: 'right' });
+      doc.text(`Amount Due $${grandTotal.toFixed(2)}`, col.summaryX, summaryY + 42, { width: col.summaryW, align: 'right' });
       doc.y = summaryY + 58;
     } else {
-      doc.text('GST 0.00', 380, summaryY, { width: 170, align: 'right' });
-      doc.text(`Total ${grandTotal.toFixed(2)}`, 380, summaryY + 14, { width: 170, align: 'right' });
-      doc.text(`Amount Due $${grandTotal.toFixed(2)}`, 380, summaryY + 28, { width: 170, align: 'right' });
+      doc.text('GST 0.00', col.summaryX, summaryY, { width: col.summaryW, align: 'right' });
+      doc.text(`Total ${grandTotal.toFixed(2)}`, col.summaryX, summaryY + 14, { width: col.summaryW, align: 'right' });
+      doc.text(`Amount Due $${grandTotal.toFixed(2)}`, col.summaryX, summaryY + 28, { width: col.summaryW, align: 'right' });
       doc.y = summaryY + 50;
     }
 
@@ -205,27 +214,27 @@ export function generateBillingInvoicePdfBuffer(invoiceId) {
       includesGst
         ? `Amounts are ex GST unless noted. Total includes GST of $${totalGst.toFixed(2)}.`
         : 'GST does not apply to these supports (GST-free).',
-      50,
+      col.left,
       doc.y,
-      { width: 500 }
+      { width: col.contentWidth }
     );
     doc.moveDown(1.2);
 
     doc.fontSize(9);
     const payY = doc.y;
-    doc.text('Payment Details', 50, payY);
-    doc.text(`Payment Terms: ${paymentTermsDays} days`, 50, payY + 18);
-    doc.text(`Account Name: ${accountName}`, 50, payY + 32);
-    doc.text(`BSB ${companyBsb || '-'}`, 50, payY + 46);
-    doc.text(`Account ${companyAccount || '-'}`, 50, payY + 60);
-    doc.text(`Reference ${sanitizePdfText(inv.invoice_number)}`, 50, payY + 74);
+    doc.text('Payment Details', col.left, payY, { width: col.contentWidth });
+    doc.text(`Payment Terms: ${paymentTermsDays} days`, col.left, payY + 18, { width: col.contentWidth });
+    doc.text(`Account Name: ${accountName}`, col.left, payY + 32, { width: col.contentWidth });
+    doc.text(`BSB ${companyBsb || '-'}`, col.left, payY + 46, { width: col.contentWidth });
+    doc.text(`Account ${companyAccount || '-'}`, col.left, payY + 60, { width: col.contentWidth });
+    doc.text(`Reference ${sanitizePdfText(inv.invoice_number)}`, col.left, payY + 74, { width: col.contentWidth });
     doc.y = payY + 90;
 
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i += 1) {
       doc.switchToPage(range.start + i);
-      doc.fontSize(8).text(`Page ${i + 1} of ${range.count}`, 50, doc.page.height - 32, {
-        width: doc.page.width - 100,
+      doc.fontSize(8).text(`Page ${i + 1} of ${range.count}`, col.left, doc.page.height - INVOICE_FOOTER_FROM_BOTTOM, {
+        width: col.contentWidth,
         align: 'center'
       });
     }

@@ -16,7 +16,8 @@ async function htmlToPdf(html) {
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' } });
+    // 15mm keeps content clear of typical printer non-printable zones (~12–15mm).
+    const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' } });
     return pdf;
   } finally {
     await browser.close();
