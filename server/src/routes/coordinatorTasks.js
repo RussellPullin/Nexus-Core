@@ -3,7 +3,18 @@ import { participantInvoiceIncludesGst, gstBreakdownFromSubtotal } from '../lib/
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../db/index.js';
 import { getAssignedParticipantIds, canAccessParticipant } from '../middleware/roles.js';
-import { tenantParticipantAndStaffClause } from '../lib/orgScopeSql.js';
+import { tenantParticipantClause } from '../lib/orgScopeSql.js';
+
+/** Tenant filter for coordinator_tasks / task_invoices joins (participants p + staff st). */
+function tenantCoordinatorTaskClause(userId) {
+  const base = tenantParticipantClause(userId, 'p');
+  if (!base.orgId) return { sql: '1=0', params: [], orgId: null };
+  return {
+    sql: `${base.sql} AND st.org_id = ?`,
+    params: [...base.params, base.orgId],
+    orgId: base.orgId
+  };
+}
 import {
   getSupportCoordLineItem,
   roundToBillableUnits,
@@ -26,7 +37,7 @@ router.get('/', (req, res) => {
     const { participant_id, staff_id, from_date, to_date } = req.query;
     const userId = req.session?.user?.id;
     const assignedIds = userId ? getAssignedParticipantIds(userId) : null;
-    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    const c = tenantCoordinatorTaskClause(userId);
     if (!c.orgId) {
       return res.json([]);
     }
@@ -166,7 +177,7 @@ router.post('/', (req, res) => {
 router.get('/task-invoices', (req, res) => {
   try {
     const userId = req.session?.user?.id;
-    const c = tenantParticipantAndStaffClause(userId, 'p', 'st');
+    const c = tenantCoordinatorTaskClause(userId);
     if (!c.orgId) {
       return res.json([]);
     }
