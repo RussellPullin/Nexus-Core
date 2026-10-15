@@ -1,0 +1,15 @@
+{
+  "name": "Nexus Core",
+  "install": "PUPPETEER_SKIP_DOWNLOAD=true npm install && PUPPETEER_SKIP_DOWNLOAD=true npm install --prefix client",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "PUPPETEER_SKIP_DOWNLOAD=true npm run dev",
+      "description": "Runs the Express API (http://localhost:3080) and the Vite dev server (http://localhost:5174) concurrently. Open the Vite URL in the browser."
+    }
+  ],
+  "ports": [
+    { "name": "api", "port": 3080 },
+    { "name": "web", "port": 5174 }
+  ]
+}
